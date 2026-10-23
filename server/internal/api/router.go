@@ -24,8 +24,8 @@ type apiServer struct {
 // NewRouter wires the /api routes with their middleware. Middleware order:
 // SecurityHeaders, then the login rate limit (only on POST /api/session),
 // then the CSRF header check, then session auth on the non-public routes.
-// webFS serves the SPA fallback and is wired in a later task; it is
-// accepted and ignored for now.
+// webFS is the embedded web content rooted at its index.html; every
+// non-/api path is served by the SPA fallback (see SPAHandler).
 func NewRouter(cfg config.Config, sessions *session.Store, drivers *driver.Registry, webFS fs.FS) http.Handler {
 	s := &apiServer{
 		cfg:      cfg,
@@ -33,7 +33,6 @@ func NewRouter(cfg config.Config, sessions *session.Store, drivers *driver.Regis
 		drivers:  drivers,
 		limiter:  ratelimit.NewLimiter(cfg.LoginRateLimit.Count, cfg.LoginRateLimit.Per, time.Now),
 	}
-	_ = webFS
 
 	r := chi.NewRouter()
 	// SecurityHeaders is the outermost middleware: it covers /api and
@@ -60,13 +59,17 @@ func NewRouter(cfg config.Config, sessions *session.Store, drivers *driver.Regis
 		api.NotFound(notFound)
 		api.MethodNotAllowed(methodNotAllowed)
 	})
-	r.NotFound(notFound)
+
+	// Everything outside /api is the SPA: existing assets, with the index
+	// as fallback for / and deep links. With a nil webFS the SPA is
+	// disabled and unknown paths answer with the JSON envelope.
+	r.NotFound(SPAHandler(webFS).ServeHTTP)
 
 	return r
 }
 
 // notFound answers with the JSON not_found envelope; it covers unknown
-// /api paths (until the SPA fallback takes over the rest in a later task).
+// /api paths and non-/api paths when no web FS is mounted.
 func notFound(w http.ResponseWriter, _ *http.Request) {
 	WriteErr(w, http.StatusNotFound, ErrNotFound())
 }
