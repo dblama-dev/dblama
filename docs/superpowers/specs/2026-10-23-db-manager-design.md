@@ -248,6 +248,7 @@ PG: структурные правки (SaveTable + SaveIndexes + FK) выпо�
 
 | Метод и путь | Назначение |
 |---|---|
+| `GET /api/drivers` | публичный: список поддерживаемых СУБД `[{id, name, defaultPort}]` для экрана логина |
 | `POST /api/session` | вход `{driver, host, port, user, password, database?}` |
 | `GET /api/session` | инфо сервера + caps + текущая БД |
 | `DELETE /api/session` | logout |
