@@ -61,6 +61,12 @@ func ErrNotFound() *Error {
 	return &Error{Code: "not_found", Message: "not found"}
 }
 
+// ErrDriver returns a driver_error error with the given message, used
+// when a driver operation fails on an authenticated connection.
+func ErrDriver(msg string) *Error {
+	return &Error{Code: "driver_error", Message: msg}
+}
+
 // ErrInternal returns an internal error; err, when non-nil, is exposed as detail.
 func ErrInternal(err error) *Error {
 	e := &Error{Code: "internal", Message: "internal error"}
