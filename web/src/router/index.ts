@@ -20,15 +20,19 @@ const router = createRouter({
 
 // Guard: without a session every navigation lands on /login; with a
 // session /login bounces to /server. When the store has no session yet
-// (e.g. a page reload with a live cookie) it is probed once per
-// navigation via GET /api/session.
+// (e.g. a page reload with a live cookie) it is probed via GET
+// /api/session, but only once: after a failed probe the store's
+// authChecked flag makes further probes pointless (the cookie is gone or
+// the server is unreachable) and they are skipped until login or logout
+// resets the flag.
 router.beforeEach(async (to) => {
   const store = useSessionStore()
-  if (store.sessionInfo === null) {
+  if (store.sessionInfo === null && !store.authChecked) {
     try {
       await store.fetchSession()
     } catch {
       // No or expired session cookie, or the server is unreachable.
+      store.authChecked = true
     }
   }
   if (store.sessionInfo === null) {

@@ -57,6 +57,21 @@ describe('router guard', () => {
     expect(router.currentRoute.value.path).toBe('/login')
   })
 
+  it('probes the session only once across unauthenticated navigations', async () => {
+    // After one failed probe the guard must remember the failure (the
+    // authChecked flag) and not re-probe on every navigation.
+    const fetchMock = vi.fn().mockResolvedValue(
+      res(401, { error: { code: 'auth_required', message: 'authentication required' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await router.push('/server')
+    await router.push('/server')
+
+    expect(router.currentRoute.value.path).toBe('/login')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('admits /server with a session and redirects /login to /server', async () => {
     const store = useSessionStore()
     store.sessionInfo = sessionInfo

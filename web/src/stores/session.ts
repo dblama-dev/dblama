@@ -7,12 +7,17 @@ export const useSessionStore = defineStore('session', {
   state: () => ({
     sessionInfo: null as SessionInfo | null,
     drivers: [] as DriverMeta[],
+    /** True once a GET /api/session probe has failed and no session
+     * cookie can exist; the router guard skips further probes until the
+     * next login or logout resets it. */
+    authChecked: false,
   }),
   actions: {
     /** Login creates the session cookie (204, no body), then loads the
      * session info with a follow-up GET. */
     async login(form: LoginForm): Promise<void> {
       await api('POST', '/api/session', form)
+      this.authChecked = false
       await this.fetchSession()
     },
     /** Logout deletes the server session; local state is cleared even
@@ -22,6 +27,7 @@ export const useSessionStore = defineStore('session', {
         await api('DELETE', '/api/session')
       } finally {
         this.sessionInfo = null
+        this.authChecked = false
       }
     },
     async loadDrivers(): Promise<void> {
