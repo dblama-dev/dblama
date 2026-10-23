@@ -127,14 +127,14 @@ CREATE TABLE child_t3 (
 			want := driver.TableDef{
 				NewName: "child_t3",
 				Columns: []driver.ColumnDef{
-					{Name: "id", Type: "int", Length: exp.intLength, Unsigned: true, AutoIncrement: true},
-					{Name: "name", Type: "varchar", Length: "64", Default: &driver.DefaultValue{Value: "x"}, Collation: exp.stringCollation},
-					{Name: "kind", Type: "enum", Nullable: true, Collation: exp.stringCollation, EnumValues: []string{"a", "b", "c"}},
-					{Name: "price", Type: "decimal", Length: "10,2", Nullable: true},
-					{Name: "size_code", Type: "char", Length: "2", Nullable: true, Collation: "utf8mb4_bin"},
-					{Name: "created_at", Type: "timestamp", Default: &driver.DefaultValue{Value: exp.tsExpr, IsSQLExpression: true}, OnUpdate: exp.tsExpr},
-					{Name: "full_name", Type: "varchar", Length: "128", Nullable: true, Generated: "STORED", Collation: exp.stringCollation},
-					{Name: "parent_id", Type: "int", Length: exp.intLength, Unsigned: true, Nullable: true},
+					{Name: "id", OldName: "id", Type: "int", Length: exp.intLength, Unsigned: true, AutoIncrement: true},
+					{Name: "name", OldName: "name", Type: "varchar", Length: "64", Default: &driver.DefaultValue{Value: "x"}, Collation: exp.stringCollation},
+					{Name: "kind", OldName: "kind", Type: "enum", Nullable: true, Collation: exp.stringCollation, EnumValues: []string{"a", "b", "c"}},
+					{Name: "price", OldName: "price", Type: "decimal", Length: "10,2", Nullable: true},
+					{Name: "size_code", OldName: "size_code", Type: "char", Length: "2", Nullable: true, Collation: "utf8mb4_bin"},
+					{Name: "created_at", OldName: "created_at", Type: "timestamp", Default: &driver.DefaultValue{Value: exp.tsExpr, IsSQLExpression: true}, OnUpdate: exp.tsExpr},
+					{Name: "full_name", OldName: "full_name", Type: "varchar", Length: "128", Nullable: true, Generated: "STORED", Collation: exp.stringCollation},
+					{Name: "parent_id", OldName: "parent_id", Type: "int", Length: exp.intLength, Unsigned: true, Nullable: true},
 				},
 				Indexes: []driver.Index{
 					// The FK needs its own index; both servers create it.

@@ -136,6 +136,7 @@ func (d *MysqlDriver) tableColumns(ctx context.Context, db, table string) ([]dri
 		base, length, unsigned, enumVals := parseColumnType(colType)
 		columns = append(columns, driver.ColumnDef{
 			Name:          name,
+			OldName:       name, // чтение = Name; SaveTable различает ADD (OldName == "") и MODIFY/CHANGE
 			Type:          base,
 			Length:        length,
 			Unsigned:      unsigned,
