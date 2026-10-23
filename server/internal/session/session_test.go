@@ -18,8 +18,8 @@ type fakeDriver struct {
 
 var _ driver.Driver = (*fakeDriver)(nil)
 
-func (f *fakeDriver) Info() driver.DriverInfo   { return driver.DriverInfo{} }
-func (f *fakeDriver) Caps() driver.Caps         { return driver.Caps{} }
+func (f *fakeDriver) Info() driver.DriverInfo { return driver.DriverInfo{} }
+func (f *fakeDriver) Caps() driver.Caps       { return driver.Caps{} }
 func (f *fakeDriver) ListDatabases(context.Context) ([]driver.DatabaseInfo, error) {
 	return nil, nil
 }
@@ -207,4 +207,21 @@ func TestJanitor_Evicts(t *testing.T) {
 	}
 
 	stop() // second call must be safe (no panic, no double-sweep issues)
+}
+
+func TestSessionContext_RoundTrip(t *testing.T) {
+	if _, ok := FromContext(context.Background()); ok {
+		t.Error("FromContext(empty ctx) ok = true, want false")
+	}
+
+	sess := &Session{ID: "abc", Database: "appdb"}
+	ctx := NewContext(context.Background(), sess)
+
+	got, ok := FromContext(ctx)
+	if !ok {
+		t.Fatal("FromContext(ctx with session) ok = false, want true")
+	}
+	if got != sess {
+		t.Error("FromContext returned a different session pointer")
+	}
 }

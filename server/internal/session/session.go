@@ -3,6 +3,7 @@
 package session
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"sync"
@@ -16,6 +17,23 @@ type Session struct {
 	ID       string
 	Driver   driver.Driver
 	Database string
+}
+
+// sessionCtxKey is the context key type for a Session value; a distinct
+// unexported type prevents collisions with keys from other packages.
+type sessionCtxKey struct{}
+
+// NewContext returns a copy of ctx carrying s. The auth middleware stores
+// the authenticated session this way; handlers read it with FromContext.
+func NewContext(ctx context.Context, s *Session) context.Context {
+	return context.WithValue(ctx, sessionCtxKey{}, s)
+}
+
+// FromContext returns the Session stored in ctx, reporting whether one is
+// present.
+func FromContext(ctx context.Context) (*Session, bool) {
+	s, ok := ctx.Value(sessionCtxKey{}).(*Session)
+	return s, ok
 }
 
 // entry is a session in the store together with its last-use timestamp.
