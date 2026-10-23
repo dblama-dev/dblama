@@ -28,6 +28,10 @@ func (f *fakeDriver) ListTables(context.Context, string) ([]driver.TableInfo, er
 	return nil, nil
 }
 
+func (f *fakeDriver) TableDef(context.Context, string, string) (driver.TableDef, error) {
+	return driver.TableDef{}, nil
+}
+
 func (f *fakeDriver) Close() error {
 	f.closes.Add(1)
 	return nil

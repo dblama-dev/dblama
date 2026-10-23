@@ -43,6 +43,10 @@ func (d *stubDriver) ListTables(context.Context, string) ([]driver.TableInfo, er
 	return nil, nil
 }
 
+func (d *stubDriver) TableDef(context.Context, string, string) (driver.TableDef, error) {
+	return driver.TableDef{}, nil
+}
+
 func (d *stubDriver) Close() error {
 	d.closed++
 	return nil

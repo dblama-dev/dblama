@@ -24,6 +24,10 @@ func (f *fakeDriver) ListTables(context.Context, string) ([]TableInfo, error) {
 	return nil, nil
 }
 
+func (f *fakeDriver) TableDef(context.Context, string, string) (TableDef, error) {
+	return TableDef{}, nil
+}
+
 func (f *fakeDriver) Close() error { return nil }
 
 func TestRegistry_List(t *testing.T) {

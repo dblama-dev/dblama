@@ -60,12 +60,84 @@ type TableInfo struct {
 	IsView    bool   `json:"isView"`
 }
 
+// DefaultValue is the default value of a column. IsSQLExpression marks
+// defaults that are SQL expressions (CURRENT_TIMESTAMP and similar)
+// rather than literals; the web layer renders them unquoted.
+type DefaultValue struct {
+	Value           string `json:"value"`
+	IsSQLExpression bool   `json:"isSqlExpression,omitempty"` // CURRENT_TIMESTAMP, NULL-литерал в MySQL-смысле и т.п.
+}
+
+// ColumnDef describes one column of a table.
+type ColumnDef struct {
+	Name          string        `json:"name"`
+	OldName       string        `json:"oldName,omitempty"` // чтение = Name
+	Type          string        `json:"type"`              // базовый: "int", "varchar", ...
+	Length        string        `json:"length,omitempty"`  // из COLUMN_TYPE: "(11)" без скобок → "11"; enum/set — ""
+	Unsigned      bool          `json:"unsigned,omitempty"`
+	Nullable      bool          `json:"nullable"`
+	Default       *DefaultValue `json:"default,omitempty"` // nil = нет DEFAULT
+	AutoIncrement bool          `json:"autoIncrement,omitempty"`
+	OnUpdate      string        `json:"onUpdate,omitempty"`
+	Generated     string        `json:"generated,omitempty"` // "" | "VIRTUAL" | "STORED"
+	Collation     string        `json:"collation,omitempty"`
+	Comment       string        `json:"comment,omitempty"`
+	EnumValues    []string      `json:"enumValues,omitempty"` // парсинг COLUMN_TYPE enum('a','b') с экранированием ''
+	Position      string        `json:"position,omitempty"`   // чтение = "" (позиция в ORDINAL_ORDER)
+}
+
+// IndexColumn is one column of an index. SubPart is the prefixed length
+// in characters, 0 when the full column is indexed.
+type IndexColumn struct {
+	Name    string `json:"name"`
+	SubPart int    `json:"subPart,omitempty"`
+}
+
+// Index describes one index of a table. Type is one of PRIMARY, UNIQUE,
+// INDEX, FULLTEXT, SPATIAL.
+type Index struct {
+	Name    string        `json:"name"`
+	Type    string        `json:"type"`
+	Columns []IndexColumn `json:"columns"`
+}
+
+// ForeignKey describes one foreign key of a table. OnDelete and OnUpdate
+// hold the referential actions (CASCADE, SET NULL, NO ACTION, RESTRICT).
+type ForeignKey struct {
+	Name       string   `json:"name"`
+	Columns    []string `json:"columns"`
+	RefTable   string   `json:"refTable"`
+	RefColumns []string `json:"refColumns"`
+	OnDelete   string   `json:"onDelete,omitempty"` // CASCADE|SET NULL|NO ACTION|RESTRICT
+	OnUpdate   string   `json:"onUpdate,omitempty"`
+}
+
+// TableOptions holds the storage attributes of a table.
+type TableOptions struct {
+	Engine        string `json:"engine,omitempty"`
+	Collation     string `json:"collation,omitempty"`
+	Comment       string `json:"comment,omitempty"`
+	AutoIncrement int64  `json:"autoIncrement,omitempty"`
+}
+
+// TableDef is the full structure of one table: its columns, indexes,
+// foreign keys and options. NewName carries the table's current name on
+// read so SaveTable can detect renames.
+type TableDef struct {
+	NewName     string       `json:"newName,omitempty"` // чтение = имя таблицы; SaveTable сравнивает
+	Columns     []ColumnDef  `json:"columns"`
+	Indexes     []Index      `json:"indexes"`
+	ForeignKeys []ForeignKey `json:"foreignKeys"`
+	Options     TableOptions `json:"options"`
+}
+
 // Driver is a connection-bound database driver instance.
 type Driver interface {
 	Info() DriverInfo
 	Caps() Caps
 	ListDatabases(ctx context.Context) ([]DatabaseInfo, error)
 	ListTables(ctx context.Context, db string) ([]TableInfo, error)
+	TableDef(ctx context.Context, db, table string) (TableDef, error)
 	Close() error
 }
 
