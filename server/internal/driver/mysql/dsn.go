@@ -30,6 +30,11 @@ func DSN(cfg driver.ConnConfig, pass string) string {
 		Timeout:      5 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		ReadTimeout:  30 * time.Second,
+		// The zero value disables native-password auth and FormatDSN
+		// pins allowNativePasswords=false, which breaks mysql_native_
+		// password servers (e.g. MariaDB root). Keep it enabled, as the
+		// go-sql-driver default does.
+		AllowNativePasswords: true,
 	}
 	return c.FormatDSN()
 }

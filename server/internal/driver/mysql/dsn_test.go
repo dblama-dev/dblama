@@ -61,6 +61,16 @@ func TestDSNRoundTripsSpecialCharacters(t *testing.T) {
 	if parsed.WriteTimeout != 30*time.Second {
 		t.Errorf("parsed WriteTimeout = %v, want %v", parsed.WriteTimeout, 30*time.Second)
 	}
+	// Anti-regression: FormatDSN pins allowNativePasswords=false on the
+	// zero-value Config, which breaks mysql_native_password servers
+	// (e.g. MariaDB root). The DSN must keep native-password auth
+	// available.
+	if parsed.AllowNativePasswords != true {
+		t.Errorf("parsed AllowNativePasswords = %v, want true", parsed.AllowNativePasswords)
+	}
+	if strings.Contains(dsn, "allowNativePasswords=false") {
+		t.Errorf("DSN %q disables native password auth", dsn)
+	}
 }
 
 // TestDSNRedactable keeps the contract that the password travels as a
