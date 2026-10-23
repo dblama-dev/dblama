@@ -80,7 +80,7 @@ func AllowedOperators() []string {
 
 // QuoteIdent wraps name in MySQL backticks, doubling any inner backtick so
 // it cannot break out of the quoted identifier. It does not validate
-// emptiness: QuoteIdent("") returns "“" and callers must reject empty
+// emptiness: QuoteIdent("") returns "``" and callers must reject empty
 // identifiers with ErrEmptyIdentifier.
 func QuoteIdent(name string) string {
 	return "`" + strings.ReplaceAll(name, "`", "``") + "`"

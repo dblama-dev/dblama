@@ -50,11 +50,22 @@ type DatabaseInfo struct {
 	Collation string `json:"collation"`
 }
 
+// TableInfo describes one table or view in a database.
+type TableInfo struct {
+	Name      string `json:"name"`
+	Rows      int64  `json:"rows"`
+	SizeBytes int64  `json:"sizeBytes"`
+	Engine    string `json:"engine"`
+	Comment   string `json:"comment"`
+	IsView    bool   `json:"isView"`
+}
+
 // Driver is a connection-bound database driver instance.
 type Driver interface {
 	Info() DriverInfo
 	Caps() Caps
 	ListDatabases(ctx context.Context) ([]DatabaseInfo, error)
+	ListTables(ctx context.Context, db string) ([]TableInfo, error)
 	Close() error
 }
 

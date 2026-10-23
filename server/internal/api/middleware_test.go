@@ -24,6 +24,10 @@ func (f *fakeDriver) ListDatabases(context.Context) ([]driver.DatabaseInfo, erro
 	return nil, nil
 }
 
+func (f *fakeDriver) ListTables(context.Context, string) ([]driver.TableInfo, error) {
+	return nil, nil
+}
+
 func (f *fakeDriver) Close() error { return nil }
 
 // errCode extracts the error code from an api error envelope body.

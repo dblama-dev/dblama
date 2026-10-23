@@ -39,6 +39,10 @@ func (d *stubDriver) ListDatabases(context.Context) ([]driver.DatabaseInfo, erro
 	return d.databases, nil
 }
 
+func (d *stubDriver) ListTables(context.Context, string) ([]driver.TableInfo, error) {
+	return nil, nil
+}
+
 func (d *stubDriver) Close() error {
 	d.closed++
 	return nil
