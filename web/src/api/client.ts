@@ -62,8 +62,11 @@ export async function api<T>(
   if (!res.ok) {
     const envelope = (payload ?? {}) as ErrorEnvelope
     const err = envelope.error
+    // A bare 401 without a JSON envelope (e.g. an expired session hitting
+    // the auth guard) must surface as auth_required, not internal, so the
+    // UI routes back to the login screen.
     throw new ApiError(
-      err?.code ?? 'internal',
+      err?.code ?? (res.status === 401 ? 'auth_required' : 'internal'),
       err?.message ?? `HTTP ${res.status}`,
       res.status,
       err?.detail,

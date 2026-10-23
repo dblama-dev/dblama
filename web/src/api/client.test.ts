@@ -54,6 +54,24 @@ describe('api client', () => {
     expect(err.status).toBe(401)
   })
 
+  it('maps a bare 401 with a non-JSON body to auth_required', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: () => Promise.reject(new SyntaxError('Unexpected token')),
+      } as Response),
+    )
+
+    const err: ApiError = await api('GET', '/api/session').catch((e: ApiError) => e)
+
+    expect(err).toBeInstanceOf(ApiError)
+    expect(err.code).toBe('auth_required')
+    expect(err.message).toBe('HTTP 401')
+    expect(err.status).toBe(401)
+  })
+
   it('carries detail from the error envelope', async () => {
     vi.stubGlobal(
       'fetch',
