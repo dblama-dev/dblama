@@ -1,19 +1,35 @@
 package mysql
 
 import (
-	"fmt"
+	"time"
+
+	"github.com/go-sql-driver/mysql"
 
 	"github.com/hitslab/db-manager/server/internal/driver"
 )
 
-// dsnParams are the mandatory connection parameters for every connection
-// opened by this driver.
-const dsnParams = "parseTime=true&charset=utf8mb4&interpolateParams=true&timeout=5s&writeTimeout=30s&readTimeout=30s"
-
 // DSN builds a go-sql-driver connection string for cfg. The password is
 // a separate argument so the DSN can be logged with a redacted password:
 // DSN(cfg, "****").
+//
+// The DSN is assembled through mysql.Config rather than fmt.Sprintf so
+// that special characters in the user, password or database (/, @, ?,
+// parentheses, ...) are escaped instead of breaking the DSN grammar.
 func DSN(cfg driver.ConnConfig, pass string) string {
-	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?%s",
-		cfg.User, pass, cfg.Host, cfg.Port, cfg.Database, dsnParams)
+	c := mysql.Config{
+		User:   cfg.User,
+		Passwd: pass,
+		Net:    "tcp",
+		Addr:   cfg.Host + ":" + cfg.Port,
+		DBName: cfg.Database,
+		Params: map[string]string{
+			"parseTime":         "true",
+			"charset":           "utf8mb4",
+			"interpolateParams": "true",
+		},
+		Timeout:      5 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		ReadTimeout:  30 * time.Second,
+	}
+	return c.FormatDSN()
 }
