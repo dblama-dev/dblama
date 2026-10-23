@@ -5,6 +5,7 @@ package mysql
 import (
 	"context"
 	"net"
+	"strings"
 	"testing"
 
 	sqldriver "github.com/go-sql-driver/mysql"
@@ -105,6 +106,15 @@ func TestConnect_WrongPassword(t *testing.T) {
 			if err == nil {
 				_ = drv.Close()
 				t.Fatal("Connect() with wrong password: expected error, got nil")
+			}
+			// Anti-regression: error text (which may embed the DSN) must
+			// not leak the passwords — neither the wrong one passed to
+			// Connect nor the container's real root password.
+			if strings.Contains(err.Error(), "definitely-wrong") {
+				t.Errorf("Connect() error %q leaks the wrong password", err)
+			}
+			if strings.Contains(err.Error(), testRootPassword) {
+				t.Errorf("Connect() error %q leaks the root password", err)
 			}
 		})
 	}

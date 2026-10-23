@@ -124,6 +124,11 @@ func sessionCookie(t *testing.T, resp *http.Response) *http.Cookie {
 	return nil
 }
 
+// testLoginPassword is the password every loginBody sends. The
+// wrong-password handler test asserts it never leaks into an error
+// response.
+const testLoginPassword = "secret"
+
 // loginBody marshals a login request body; the database key is omitted
 // when database is empty (an omitted key and an empty string are
 // equivalent on the server side).
@@ -133,7 +138,7 @@ func loginBody(host, port, database string) string {
 		"host":     host,
 		"port":     port,
 		"user":     "root",
-		"password": "secret",
+		"password": testLoginPassword,
 	}
 	if database != "" {
 		m["database"] = database
@@ -315,6 +320,11 @@ func TestLoginHandler_WrongPassword(t *testing.T) {
 	}
 	if !strings.Contains(e.Error.Message, "invalid credentials") {
 		t.Errorf("error message = %q, want it to contain the driver error text", e.Error.Message)
+	}
+	// Anti-regression: the submitted password (loginBody uses "secret")
+	// must never appear in the error response, even wrapped in detail.
+	if strings.Contains(string(body), testLoginPassword) {
+		t.Errorf("error body %q leaks the submitted password", body)
 	}
 }
 
