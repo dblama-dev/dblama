@@ -1,2 +1,9 @@
 .worktrees/
 .superpowers/
+node_modules/
+server/web/*
+!server/web/index.html
+dist/
+*.log
+.env
+server/dbmanager
