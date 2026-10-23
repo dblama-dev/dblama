@@ -483,6 +483,54 @@ func TestDatabasesHandler_DriverError(t *testing.T) {
 	}
 }
 
+func TestRouter_SecurityHeaders(t *testing.T) {
+	h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, &stubDriver{}))
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
+	// The headers must be present on /api responses and on the root
+	// fallback (404), since SecurityHeaders is the outermost middleware.
+	for url, wantStatus := range map[string]int{
+		srv.URL + "/api/drivers":  http.StatusOK,
+		srv.URL + "/api/no/such":  http.StatusNotFound,
+		srv.URL + "/outside/api":  http.StatusNotFound,
+	} {
+		resp := apiRequest(t, srv.Client(), http.MethodGet, url, "", "")
+		if resp.StatusCode != wantStatus {
+			t.Fatalf("GET %s status = %d, want %d", url, resp.StatusCode, wantStatus)
+		}
+		for header, want := range map[string]string{
+			"X-Content-Type-Options": "nosniff",
+			"X-Frame-Options":        "DENY",
+			"Referrer-Policy":        "no-referrer",
+		} {
+			if got := resp.Header.Get(header); got != want {
+				t.Errorf("GET %s: header %q = %q, want %q", url, header, got, want)
+			}
+		}
+	}
+}
+
+func TestRouter_MethodNotAllowed(t *testing.T) {
+	h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, &stubDriver{}))
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
+	// PUT on a known /api path must answer with the JSON envelope, not
+	// chi's default plain-text 405.
+	resp := apiRequest(t, srv.Client(), http.MethodPut, srv.URL+"/api/session", "{}", "")
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("PUT /api/session status = %d, want %d", resp.StatusCode, http.StatusMethodNotAllowed)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if code := errCode(t, body); code != "bad_request" {
+		t.Errorf("error code = %q, want %q", code, "bad_request")
+	}
+}
+
 func TestRouter_UnknownAPIPath(t *testing.T) {
 	h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, &stubDriver{}))
 	srv := httptest.NewServer(h)

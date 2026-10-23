@@ -36,6 +36,12 @@ func NewRouter(cfg config.Config, sessions *session.Store, drivers *driver.Regis
 	_ = webFS
 
 	r := chi.NewRouter()
+	// SecurityHeaders is the outermost middleware: it covers /api and
+	// the root-level handlers (fallback, NotFound, MethodNotAllowed), so
+	// every response carries the baseline security headers.
+	r.Use(SecurityHeaders)
+	r.MethodNotAllowed(methodNotAllowed)
+
 	r.Route("/api", func(api chi.Router) {
 		// Public routes: driver list for the login screen, and login
 		// itself. Login is the only rate-limited route; its limiter
@@ -52,6 +58,7 @@ func NewRouter(cfg config.Config, sessions *session.Store, drivers *driver.Regis
 		})
 
 		api.NotFound(notFound)
+		api.MethodNotAllowed(methodNotAllowed)
 	})
 	r.NotFound(notFound)
 
@@ -62,6 +69,12 @@ func NewRouter(cfg config.Config, sessions *session.Store, drivers *driver.Regis
 // /api paths (until the SPA fallback takes over the rest in a later task).
 func notFound(w http.ResponseWriter, _ *http.Request) {
 	WriteErr(w, http.StatusNotFound, ErrNotFound())
+}
+
+// methodNotAllowed answers 405 with the JSON envelope so every API error
+// response keeps the unified shape (chi's default is plain text).
+func methodNotAllowed(w http.ResponseWriter, _ *http.Request) {
+	WriteErr(w, http.StatusMethodNotAllowed, ErrBadRequest("method not allowed"))
 }
 
 // loginRateLimit rejects the request when its client IP has exhausted its
