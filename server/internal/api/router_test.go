@@ -47,6 +47,10 @@ func (d *stubDriver) TableDef(context.Context, string, string) (driver.TableDef,
 	return driver.TableDef{}, nil
 }
 
+func (d *stubDriver) SaveTable(context.Context, string, string, driver.TableDef) error {
+	return nil
+}
+
 func (d *stubDriver) Close() error {
 	d.closed++
 	return nil

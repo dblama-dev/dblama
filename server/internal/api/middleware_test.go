@@ -32,6 +32,10 @@ func (f *fakeDriver) TableDef(context.Context, string, string) (driver.TableDef,
 	return driver.TableDef{}, nil
 }
 
+func (f *fakeDriver) SaveTable(context.Context, string, string, driver.TableDef) error {
+	return nil
+}
+
 func (f *fakeDriver) Close() error { return nil }
 
 // errCode extracts the error code from an api error envelope body.

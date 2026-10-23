@@ -138,6 +138,10 @@ type Driver interface {
 	ListDatabases(ctx context.Context) ([]DatabaseInfo, error)
 	ListTables(ctx context.Context, db string) ([]TableInfo, error)
 	TableDef(ctx context.Context, db, table string) (TableDef, error)
+	// SaveTable applies the desired table state. An empty table name
+	// creates the table (desired.NewName); a non-empty one alters it
+	// (rename, columns, options — indexes via SaveIndexes).
+	SaveTable(ctx context.Context, db, table string, desired TableDef) error
 	Close() error
 }
 

@@ -28,6 +28,10 @@ func (f *fakeDriver) TableDef(context.Context, string, string) (TableDef, error)
 	return TableDef{}, nil
 }
 
+func (f *fakeDriver) SaveTable(context.Context, string, string, TableDef) error {
+	return nil
+}
+
 func (f *fakeDriver) Close() error { return nil }
 
 func TestRegistry_List(t *testing.T) {
