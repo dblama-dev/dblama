@@ -1,6 +1,10 @@
-import { ref, type Ref } from 'vue'
+import { ref, type InjectionKey, type Ref } from 'vue'
 
 const STORAGE_KEY = 'dbm-theme'
+
+/** Injection key for the app-wide theme toggle provided by App.vue and
+ * consumed by the topbar. */
+export const themeToggleKey: InjectionKey<() => void> = Symbol('dbm-theme-toggle')
 
 /**
  * setupTheme returns the app-wide dark mode flag persisted in localStorage
