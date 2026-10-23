@@ -32,6 +32,10 @@ type sessionInfo struct {
 // handleLogin connects to the requested server and creates a session.
 func (s *apiServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
+	// Cap the body at 1 MiB: login requests are tiny, and an unbounded
+	// decode lets a client exhaust server memory. An oversized body fails
+	// the decode with *http.MaxBytesError and is answered as bad_request.
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		WriteErr(w, http.StatusBadRequest, ErrBadRequest("malformed JSON body"))
 		return

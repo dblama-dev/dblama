@@ -294,6 +294,28 @@ func TestLoginHandler_MalformedBody(t *testing.T) {
 	}
 }
 
+func TestLoginHandler_OversizedBody(t *testing.T) {
+	h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, &stubDriver{}))
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
+	// A valid JSON login body larger than the 1 MiB cap must be rejected
+	// as bad_request, not decoded (the padding below inflates the
+	// password to well over the limit).
+	const padding = 2 << 20
+	body := `{"driver":"fakedb","host":"dbhost","port":"3307","user":"root","password":"` +
+		strings.Repeat("a", padding) + `"}`
+
+	resp := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/session", body, "")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("oversized login status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	if code := errCode(t, raw); code != "bad_request" {
+		t.Errorf("error code = %q, want %q", code, "bad_request")
+	}
+}
+
 func TestLoginHandler_WrongPassword(t *testing.T) {
 	connectErr := errors.New("connect to dbhost:3307 as root: invalid credentials")
 	h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectFail(nil, connectErr))
@@ -359,7 +381,7 @@ func TestLoginHandler_TrustedServers(t *testing.T) {
 	// Entries arrive untrimmed and may be empty (e.g. a trailing comma in
 	// TRUSTED_SERVERS); the allowlist comparison must tolerate both.
 	cfg := config.Config{
-		LoginRateLimit:  testRate,
+		LoginRateLimit: testRate,
 		TrustedServers: []string{"db1:3307", " db2:3307 ", ""},
 	}
 
@@ -501,9 +523,9 @@ func TestRouter_SecurityHeaders(t *testing.T) {
 	// The headers must be present on /api responses and on the root
 	// fallback (404), since SecurityHeaders is the outermost middleware.
 	for url, wantStatus := range map[string]int{
-		srv.URL + "/api/drivers":  http.StatusOK,
-		srv.URL + "/api/no/such":  http.StatusNotFound,
-		srv.URL + "/outside/api":  http.StatusNotFound,
+		srv.URL + "/api/drivers": http.StatusOK,
+		srv.URL + "/api/no/such": http.StatusNotFound,
+		srv.URL + "/outside/api": http.StatusNotFound,
 	} {
 		resp := apiRequest(t, srv.Client(), http.MethodGet, url, "", "")
 		if resp.StatusCode != wantStatus {

@@ -131,8 +131,13 @@ func (s *Store) Delete(id string) {
 // StartJanitor launches a background goroutine that closes sessions idle
 // longer than the store's TTL, checking every interval using the
 // store's time source. The returned stop function terminates the janitor
-// and is safe to call more than once.
+// and is safe to call more than once. A non-positive interval disables
+// the janitor: time.NewTicker would panic, so no goroutine is started and
+// the returned stop function is a no-op.
 func (s *Store) StartJanitor(interval time.Duration) (stop func()) {
+	if interval <= 0 {
+		return func() {}
+	}
 	stopCh := make(chan struct{})
 	var once sync.Once
 	go func() {

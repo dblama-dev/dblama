@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -58,5 +59,30 @@ func TestRateLimiter_SuccessDoesNotHit(t *testing.T) {
 		if !l.Allow("k") {
 			t.Fatalf("Allow #%d = false, want true", i+1)
 		}
+	}
+}
+
+func TestRateLimiter_PrunesExpiredBuckets(t *testing.T) {
+	clk := &fakeClock{cur: time.Unix(0, 0)}
+	l := NewLimiter(3, time.Minute, clk.Now)
+
+	// Fill well past the prune threshold with one window of failures.
+	const keys = 2000
+	for i := 0; i < keys; i++ {
+		l.Hit(strconv.Itoa(i))
+	}
+	if got := l.Len(); got != keys {
+		t.Fatalf("Len after %d hits = %d, want %d", keys, got, keys)
+	}
+
+	// After the window elapses the next Hit sweeps the expired buckets
+	// away; only the fresh one remains.
+	clk.Advance(2 * time.Minute)
+	l.Hit("fresh")
+	if got := l.Len(); got != 1 {
+		t.Fatalf("Len after prune = %d, want 1", got)
+	}
+	if !l.Allow("0") {
+		t.Error("Allow on pruned key = false, want true (bucket was expired)")
 	}
 }

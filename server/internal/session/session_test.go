@@ -209,6 +209,28 @@ func TestJanitor_Evicts(t *testing.T) {
 	stop() // second call must be safe (no panic, no double-sweep issues)
 }
 
+func TestJanitor_NonPositiveIntervalDoesNotPanic(t *testing.T) {
+	// interval <= 0 must not reach time.NewTicker (which panics); the
+	// janitor is skipped and stop stays safe to call.
+	s := NewStore(time.Minute, 100, time.Now)
+
+	stop := s.StartJanitor(0)
+	stop()
+	stop() // still safe
+
+	// A broken implementation would spawn the janitor goroutine and panic
+	// there, killing the process; this pause gives such a goroutine time
+	// to be scheduled so the panic surfaces instead of racing test exit.
+	time.Sleep(50 * time.Millisecond)
+
+	// With the janitor skipped the store must remain fully usable.
+	d := &fakeDriver{}
+	sess := s.Create(d, "appdb")
+	if got, ok := s.Get(sess.ID); !ok || got != sess {
+		t.Errorf("Get after Create ok = %v, want true with the same session", ok)
+	}
+}
+
 func TestSessionContext_RoundTrip(t *testing.T) {
 	if _, ok := FromContext(context.Background()); ok {
 		t.Error("FromContext(empty ctx) ok = true, want false")
