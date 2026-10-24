@@ -263,6 +263,77 @@ describe('RowModal', () => {
     expect(modal.emitted('saved')).toBeUndefined()
   })
 
+  it('does not send an untouched decimal that arrived as a string', async () => {
+    mockedApi.mockResolvedValue(undefined)
+    const cols: ColumnDef[] = [
+      { name: 'amount', type: 'decimal', nullable: true },
+      { name: 'email', type: 'varchar', nullable: false },
+    ]
+    const wrapper = mountModal({
+      mode: 'edit',
+      columns: cols,
+      // The backend serializes DECIMAL as a string.
+      row: { amount: '123.45', email: 'old@x' },
+      rowPk: { id: 1 },
+    })
+
+    setString(wrapper, 'email', 'new@x')
+    await flushPromises()
+
+    await saveButton(wrapper)?.trigger('click')
+    await flushPromises()
+
+    // Only the truly changed field is patched; the coerced decimal is not
+    // flagged as changed (and its precision-lost Number is never written).
+    expect(mockedApi).toHaveBeenCalledWith('PATCH', rowsPath, {
+      where: { id: 1 },
+      values: { email: 'new@x' },
+    })
+  })
+
+  it('sends a decimal the user actually changed, as a number', async () => {
+    mockedApi.mockResolvedValue(undefined)
+    const cols: ColumnDef[] = [
+      { name: 'amount', type: 'decimal', nullable: true },
+      { name: 'email', type: 'varchar', nullable: false },
+    ]
+    const wrapper = mountModal({
+      mode: 'edit',
+      columns: cols,
+      row: { amount: '123.45', email: 'old@x' },
+      rowPk: { id: 1 },
+    })
+
+    setNumber(wrapper, 'amount', 9.99)
+    await flushPromises()
+
+    await saveButton(wrapper)?.trigger('click')
+    await flushPromises()
+
+    expect(mockedApi).toHaveBeenCalledWith('PATCH', rowsPath, {
+      where: { id: 1 },
+      values: { amount: 9.99 },
+    })
+  })
+
+  it('keeps in-progress input when the columns prop is enriched after the modal opened', async () => {
+    const wrapper = mountModal()
+
+    setString(wrapper, 'name', 'typed-before-def-arrived')
+    setString(wrapper, 'email', 'x@y.z')
+    setNumber(wrapper, 'id', 7)
+    await flushPromises()
+
+    // TableDef fetch lands: new columns array (same names, richer metadata).
+    wrapper.setProps({ columns: [{ ...columns[0], comment: 'enriched' }, ...columns.slice(1)] })
+    await flushPromises()
+
+    await saveButton(wrapper)?.trigger('click')
+    await flushPromises()
+
+    expect(mockedApi).toHaveBeenCalledWith('POST', rowsPath, expect.objectContaining({ name: 'typed-before-def-arrived' }))
+  })
+
   it('prefills from a literal column default but not from an SQL expression', () => {
     const cols: ColumnDef[] = [
       {

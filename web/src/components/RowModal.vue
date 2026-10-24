@@ -159,23 +159,39 @@ function setNulled(col: ColumnDef, checked: boolean): void {
   nulls[col.name] = checked
 }
 
-// The reactive state is rebuilt every time the modal opens, the mode
-// changes or the column set arrives (the TableDef fetch is async).
+// Snapshot of the values the form was prefilled with (post coercion, with
+// a checked NULL toggle recorded as null). The edit diff runs against this
+// snapshot, NOT against props.row: the backend serializes DECIMAL (and
+// other string-serialized numerics) as strings while the form coerces them
+// to numbers, and comparing coerced-vs-raw would flag every untouched
+// decimal as changed — writing a precision-lost Number back on a plain save.
+const prefill: Record<string, string | number | null> = {}
+
+// PINNED: the form is initialized exactly once per modal OPEN (plus
+// immediate init for an initially-open mount). The TableDef fetch lands
+// AFTER the modal opens and only enriches the columns prop — re-running
+// initForm on that arrival would wipe whatever the user already typed, so
+// a columns change mid-open deliberately does NOT reset the form (fields
+// are keyed by column name, which the enrichment preserves).
 watch(
-  () => [props.show, props.mode, props.columns, props.row],
-  () => initForm(),
+  () => [props.show, props.mode, props.row] as const,
+  ([show]) => {
+    if (show) initForm()
+  },
   { immediate: true },
 )
 
 function initForm(): void {
   for (const key of Object.keys(values)) delete values[key]
   for (const key of Object.keys(nulls)) delete nulls[key]
+  for (const key of Object.keys(prefill)) delete prefill[key]
   for (const col of props.columns) {
     if (props.mode === 'edit' && props.row !== null) {
       initFromRow(col)
     } else {
       initFromDefault(col)
     }
+    prefill[col.name] = nulls[col.name] === true ? null : (values[col.name] ?? null)
   }
 }
 
@@ -234,12 +250,14 @@ function buildValues(): Record<string, unknown> {
 }
 
 // PINNED RULE (edit): only the fields whose built value differs from the
-// original row value are sent; the comparison normalizes undefined to null.
+// prefilled snapshot are sent. Comparing coerced-vs-coerced keeps untouched
+// string-serialized numerics (DECIMAL, BIGINT UNSIGNED > 2^63, ...) out of
+// the payload; a NULL toggle state counts as part of the snapshot.
 function buildChangedValues(): Record<string, unknown> {
   const built = buildValues()
   const changed: Record<string, unknown> = {}
   for (const [name, value] of Object.entries(built)) {
-    const orig = props.row?.[name] ?? null
+    const orig = nulls[name] === true ? null : (prefill[name] ?? null)
     if (value !== orig) {
       changed[name] = value
     }
