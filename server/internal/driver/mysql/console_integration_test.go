@@ -110,6 +110,96 @@ func TestExecSQL_MidError(t *testing.T) {
 			if got := rowStrings(results[0]); len(got) != 1 || got[0] != "1" {
 				t.Errorf("first result rows = %v, want [1]", got)
 			}
+
+			// Review note (Task 1): a batch that aborts mid-error must
+			// have unregistered itself too.
+			if n := registryLen(drv.(*MysqlDriver)); n != 0 {
+				t.Errorf("registry holds %d entries after a mid-error batch, want 0", n)
+			}
+		})
+	}
+}
+
+// registryLen reads the whitebox size of the driver's running-query
+// registry (the test lives in the same package).
+func registryLen(d *MysqlDriver) int {
+	d.queries.mu.Lock()
+	defer d.queries.mu.Unlock()
+	return len(d.queries.conns)
+}
+
+func TestExecSQL_Cancel(t *testing.T) {
+	for _, tc := range testImages {
+		t.Run(tc.image, func(t *testing.T) {
+			cfg := startDB(t, tc.image)
+			drv := connectOK(t, cfg)
+			md := drv.(*MysqlDriver)
+
+			// A long-running statement (≈1e9 row combinations, far more
+			// than the <5s the test allows). Pinned deviation from the
+			// brief's SELECT SLEEP(30): MySQL's SLEEP returns 1 without an
+			// error when interrupted by KILL QUERY, so it cannot pin the
+			// "ExecSQL comes back with an interruption error" contract; a
+			// heavy join errors with 1317 ("Query execution was
+			// interrupted") on both servers.
+			execDDL(t, cfg, "CREATE TABLE cancel_probe (id INT PRIMARY KEY)")
+			t.Cleanup(func() { execDDL(t, cfg, "DROP TABLE cancel_probe") })
+			execDDL(t, cfg, "INSERT INTO cancel_probe WITH RECURSIVE seq AS (SELECT 1 AS id UNION ALL SELECT id+1 FROM seq WHERE id < 1000) SELECT id FROM seq")
+
+			longQuery := "SELECT SUM(a.id + b.id + c.id) FROM cancel_probe a JOIN cancel_probe b JOIN cancel_probe c"
+
+			start := time.Now()
+			errCh := make(chan error, 1)
+			go func() {
+				_, err := drv.ExecSQL(context.Background(), cfg.Database, longQuery, "q-cancel-test", driver.ExecOpts{})
+				errCh <- err
+			}()
+
+			// Give the goroutine time to acquire its dedicated connection
+			// and start the long query, then cancel it.
+			time.Sleep(time.Second)
+			if err := md.CancelQuery(context.Background(), "q-cancel-test"); err != nil {
+				t.Errorf("CancelQuery(running) error: %v, want nil", err)
+			}
+
+			// The running ExecSQL must come back quickly with an
+			// interruption error (MySQL: "Query execution was interrupted";
+			// MariaDB wording differs slightly — match loosely).
+			select {
+			case err := <-errCh:
+				if err == nil {
+					t.Fatal("ExecSQL() error: expected cancellation error, got nil")
+				}
+				lower := strings.ToLower(err.Error())
+				if !strings.Contains(lower, "interrupted") && !strings.Contains(lower, "killed") {
+					t.Errorf("ExecSQL() error %q mentions neither interrupted nor killed", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("ExecSQL() did not return within 5s of CancelQuery")
+			}
+			if elapsed := time.Since(start); elapsed > 6*time.Second {
+				t.Errorf("cancelled ExecSQL() returned after %v total, want < 6s", elapsed)
+			}
+
+			// The cancelled batch must have unregistered itself.
+			if n := registryLen(md); n != 0 {
+				t.Errorf("registry holds %d entries after cancellation, want 0", n)
+			}
+
+			// Cancelling the now-finished query again is not an error
+			// (unknown id = already finished, brief ruling).
+			if err := md.CancelQuery(context.Background(), "q-cancel-test"); err != nil {
+				t.Errorf("CancelQuery(finished) error: %v, want nil", err)
+			}
+
+			// The KILL must leave the pool healthy: a follow-up query works.
+			results, err := drv.ExecSQL(context.Background(), cfg.Database, "SELECT 1", "q-after-cancel", driver.ExecOpts{})
+			if err != nil {
+				t.Fatalf("ExecSQL() after cancellation: %v", err)
+			}
+			if got := rowStrings(results[0]); len(got) != 1 || got[0] != "1" {
+				t.Errorf("rows after cancellation = %v, want [1]", got)
+			}
 		})
 	}
 }

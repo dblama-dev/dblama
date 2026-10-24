@@ -3,10 +3,14 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	mysqldriver "github.com/go-sql-driver/mysql"
 
 	"github.com/hitslab/db-manager/server/internal/driver"
 	"github.com/hitslab/db-manager/server/internal/sqlgen"
@@ -27,27 +31,54 @@ const (
 // rows and without affected counts.
 var rowStatementKeywords = []string{"select", "show", "desc", "describe", "explain", "with"}
 
+// errNoSuchThread is the MySQL error number for "Unknown thread id"
+// (ER_NO_SUCH_THREAD): the KILL target already disconnected.
+const errNoSuchThread = 1094
+
+// queryEntry is one registered running console query: its dedicated
+// connection plus that connection's server-side id, which CancelQuery
+// needs for KILL QUERY.
+type queryEntry struct {
+	conn   *sql.Conn
+	connID uint32
+}
+
 // queryRegistry maps running console query ids to their dedicated
 // connections. A driver instance is shared across requests, so the map
 // is mutex-guarded; the map itself lazily initializes so a zero-value
 // driver stays safe (unit tests).
 type queryRegistry struct {
 	mu    sync.Mutex
-	conns map[string]*sql.Conn
+	conns map[string]*queryEntry
 }
 
-// add registers queryID → conn. An empty queryID (a caller that does
-// not intend to cancel) is ignored.
-func (r *queryRegistry) add(queryID string, conn *sql.Conn) {
+// add registers queryID → (conn, connID). An empty queryID (a caller
+// that does not intend to cancel) is ignored.
+func (r *queryRegistry) add(queryID string, conn *sql.Conn, connID uint32) {
 	if queryID == "" {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.conns == nil {
-		r.conns = make(map[string]*sql.Conn)
+		r.conns = make(map[string]*queryEntry)
 	}
-	r.conns[queryID] = conn
+	r.conns[queryID] = &queryEntry{conn: conn, connID: connID}
+}
+
+// connID returns the server-side connection id registered under queryID
+// and whether that id is currently registered.
+func (r *queryRegistry) connID(queryID string) (uint32, bool) {
+	if queryID == "" {
+		return 0, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.conns[queryID]
+	if !ok {
+		return 0, false
+	}
+	return entry.connID, true
 }
 
 // remove drops queryID from the registry; removing an absent id is a
@@ -93,7 +124,17 @@ func (d *MysqlDriver) ExecSQL(ctx context.Context, db, query string, queryID str
 	if err != nil {
 		return nil, fmt.Errorf("exec sql: acquire connection: %w", err)
 	}
-	d.queries.add(queryID, conn)
+
+	// Capture the dedicated connection's server-side id before
+	// registering: CancelQuery issues KILL QUERY against it. KILL QUERY
+	// is connection-level, so the id stays valid across a later USE
+	// switch to another database.
+	var connID uint32
+	if err := conn.QueryRowContext(ctx, "SELECT CONNECTION_ID()").Scan(&connID); err != nil {
+		_ = conn.Close() // best-effort; the scan error is the real failure
+		return nil, fmt.Errorf("exec sql: read connection id: %w", err)
+	}
+	d.queries.add(queryID, conn, connID)
 	defer func() {
 		d.queries.remove(queryID)
 		_ = conn.Close()
@@ -234,11 +275,25 @@ func resultColumns(rows *sql.Rows) ([]driver.ColumnMeta, error) {
 	return columns, nil
 }
 
-// CancelQuery cancels the console query registered under queryID. The
-// KILL QUERY wiring lands in Task 2; until then every call returns nil
-// — including for unknown ids, which per the brief ruling mean "the
-// query already finished" and are not an error.
-func (d *MysqlDriver) CancelQuery(_ context.Context, _ string) error {
+// CancelQuery cancels the console query registered under queryID by
+// issuing KILL QUERY against the dedicated connection's server-side id
+// through the shared pool (KILL QUERY aborts only the running query,
+// leaving the connection usable). An unknown queryID means the query
+// already finished — not an error (brief ruling); the same holds when
+// the query finishes between the registry lookup and the KILL and the
+// server reports an unknown thread id.
+func (d *MysqlDriver) CancelQuery(ctx context.Context, queryID string) error {
+	connID, ok := d.queries.connID(queryID)
+	if !ok {
+		return nil
+	}
+	if _, err := d.db.ExecContext(ctx, "KILL QUERY "+strconv.FormatUint(uint64(connID), 10)); err != nil {
+		var myErr *mysqldriver.MySQLError
+		if errors.As(err, &myErr) && myErr.Number == errNoSuchThread {
+			return nil
+		}
+		return fmt.Errorf("cancel query %s: kill %d: %w", queryID, connID, err)
+	}
 	return nil
 }
 
