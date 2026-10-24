@@ -55,4 +55,12 @@ export default {
     actions: 'Действия',
     edit: 'Изменить',
   },
+  row: {
+    insert: 'Добавить строку',
+    edit: 'Изменить строку',
+    save: 'Сохранить',
+    cancel: 'Отмена',
+    nullToggle: 'NULL',
+    required: 'обязательно',
+  },
 }

@@ -55,4 +55,12 @@ export default {
     actions: 'Actions',
     edit: 'Edit',
   },
+  row: {
+    insert: 'Insert row',
+    edit: 'Edit row',
+    save: 'Save',
+    cancel: 'Cancel',
+    nullToggle: 'NULL',
+    required: 'required',
+  },
 }

@@ -31,6 +31,16 @@
     <p v-else class="table-view__stub">
       {{ view }}: {{ db }}.{{ table }}
     </p>
+    <RowModal
+      :show="rowModal.show"
+      :mode="rowModal.mode"
+      :rows-path="rowsPath"
+      :columns="modalColumns"
+      :row="rowModal.row"
+      :row-pk="rowModal.pk"
+      @update:show="rowModal.show = $event"
+      @saved="onRowSaved"
+    />
   </section>
 </template>
 
@@ -42,8 +52,9 @@ import { useNotification } from 'naive-ui'
 import { NBreadcrumb, NBreadcrumbItem, NTab, NTabs } from 'naive-ui'
 
 import { api, ApiError } from '../api/client'
-import type { Page } from '../api/types'
+import type { ColumnDef, Page, TableDef } from '../api/types'
 import DataGrid from '../components/DataGrid.vue'
+import RowModal from '../components/RowModal.vue'
 import { buildRowsQuery, type RowsFilter, type RowsSort } from '../lib/tableQuery'
 
 const { t } = useI18n()
@@ -90,23 +101,39 @@ function notifyError(err: unknown): void {
   notification.error({ content: message, duration: 5000 })
 }
 
+// Stale-response guard: every fetch captures the counter value taken at its
+// start; a response that arrives after a newer request has started (seq has
+// moved on) is discarded — both its data and its error. The counter is
+// shared by the pk and rows fetches, so a slow pk response can never
+// overwrite a fresher one either. `loading` also follows the latest request.
+let fetchSeq = 0
+
 async function loadPk(): Promise<void> {
+  const seq = ++fetchSeq
   try {
     const pk = await api<{ columns: string[] }>('GET', pkPath.value)
+    if (seq !== fetchSeq) return
     pkColumns.value = pk.columns
   } catch (err) {
+    if (seq !== fetchSeq) return
     notifyError(err)
   }
 }
 
 async function refetch(): Promise<void> {
+  const seq = ++fetchSeq
   loading.value = true
   try {
-    page.value = await api<Page>('GET', `${rowsPath.value}/rows?${buildRowsQuery(queryState())}`)
+    const next = await api<Page>('GET', `${rowsPath.value}/rows?${buildRowsQuery(queryState())}`)
+    if (seq !== fetchSeq) return
+    page.value = next
   } catch (err) {
+    if (seq !== fetchSeq) return
     notifyError(err)
   } finally {
-    loading.value = false
+    if (seq === fetchSeq) {
+      loading.value = false
+    }
   }
 }
 
@@ -165,11 +192,55 @@ async function deleteRows(pks: Record<string, unknown>[]): Promise<void> {
   }
 }
 
-// RowModal lands in Task 13; the grid already reports the intents.
-function onAddRow(): void {}
+// --- Row insert/edit modal ----------------------------------------------
 
-function onEditRow(row: unknown): void {
-  void row
+interface EditableRow extends Record<string, unknown> {
+  __pk: Record<string, unknown> | null
+}
+
+interface RowModalState {
+  show: boolean
+  mode: 'insert' | 'edit'
+  row: Record<string, unknown> | null
+  pk: Record<string, unknown> | null
+}
+
+const rowModal = ref<RowModalState>({ show: false, mode: 'insert', row: null, pk: null })
+
+// Richer column definitions (enum values, defaults) come from the TableDef
+// endpoint; on failure the modal falls back to the page's ColumnMeta list.
+const defColumns = ref<ColumnDef[] | null>(null)
+const modalColumns = computed<ColumnDef[]>(() => defColumns.value ?? page.value?.columns ?? [])
+
+async function fetchDef(): Promise<void> {
+  try {
+    const def = await api<TableDef>('GET', rowsPath.value)
+    defColumns.value = def.columns
+  } catch {
+    // Definition unavailable: ColumnMeta-only rendering is good enough.
+    defColumns.value = null
+  }
+}
+
+function onAddRow(): void {
+  defColumns.value = null
+  void fetchDef()
+  rowModal.value = { show: true, mode: 'insert', row: null, pk: null }
+}
+
+function onEditRow(row: EditableRow): void {
+  const values: Record<string, unknown> = {}
+  for (const meta of page.value?.columns ?? []) {
+    values[meta.name] = row[meta.name]
+  }
+  defColumns.value = null
+  void fetchDef()
+  rowModal.value = { show: true, mode: 'edit', row: values, pk: row.__pk }
+}
+
+function onRowSaved(): void {
+  rowModal.value = { ...rowModal.value, show: false }
+  void refetch()
 }
 </script>
 
