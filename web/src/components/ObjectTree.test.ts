@@ -122,6 +122,16 @@ describe('ObjectTree', () => {
     expect(pushSpy).toHaveBeenCalledWith('/db/mydb/table/users')
   })
 
+  it('pushes /db/{db}/console when the console leaf is clicked', async () => {
+    const wrapper = await mountTree()
+
+    const tree = wrapper.findComponent(NTree)
+    tree.vm.$emit('update:selected-keys', ['console'])
+    await flushPromises()
+
+    expect(pushSpy).toHaveBeenCalledWith('/db/mydb/console')
+  })
+
   it('pushes the _new structure route when the tables group "+" button is clicked', async () => {
     const wrapper = await mountTree()
 

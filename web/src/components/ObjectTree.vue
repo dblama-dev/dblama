@@ -106,6 +106,12 @@ const treeData = computed<TreeOption[]>(() => {
     .map((table) => ({ key: `table:${table.name}`, label: table.name, isLeaf: true }))
   const children: TreeOption[] = [
     {
+      // The SQL console of this database; a plain leaf, no search filter.
+      key: 'console',
+      label: t('tree.console'),
+      isLeaf: true,
+    },
+    {
       key: 'group:tables',
       label: t('tree.tables'),
       children: tables,
@@ -137,10 +143,15 @@ const treeData = computed<TreeOption[]>(() => {
 
 function onSelect(keys: string[]): void {
   const key = keys[keys.length - 1]
-  if (key === undefined || !key.startsWith('table:') || db.value === null) return
-  const table = key.slice('table:'.length)
+  if (key === undefined || db.value === null) return
   selectedKeys.value = [key]
   // Identifiers may contain %, ? or #; vue-router decodes params on read.
+  if (key === 'console') {
+    void router.push(`/db/${encodeURIComponent(db.value)}/console`)
+    return
+  }
+  if (!key.startsWith('table:')) return
+  const table = key.slice('table:'.length)
   void router.push(`/db/${encodeURIComponent(db.value)}/table/${encodeURIComponent(table)}`)
 }
 

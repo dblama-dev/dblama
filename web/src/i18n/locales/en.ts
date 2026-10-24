@@ -35,6 +35,7 @@ export default {
     views: 'Views',
     selectTable: 'Select a table',
     newTable: 'New table',
+    console: 'Console',
     loadFailed: 'Failed to load the table list',
   },
   table: {
@@ -108,5 +109,19 @@ export default {
     indexType: 'Type',
     indexColumns: 'Columns',
     subPartHint: '0 = full column',
+  },
+  console: {
+    executeAll: 'Execute all',
+    executeSelection: 'Execute selection',
+    explain: 'EXPLAIN',
+    cancel: 'Cancel',
+    // Key reserved: the SQL formatter is planned for П5 (no external
+    // library in П3), the button is not added yet.
+    format: 'Format',
+    history: 'History',
+    results: 'Results',
+    rowsAffected: '{n} rows affected',
+    truncated: 'Truncated',
+    seconds: '{n} s',
   },
 }

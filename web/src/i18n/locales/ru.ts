@@ -35,6 +35,7 @@ export default {
     views: 'Представления',
     selectTable: 'Выберите таблицу',
     newTable: 'Новая таблица',
+    console: 'Консоль',
     loadFailed: 'Не удалось загрузить список таблиц',
   },
   table: {
@@ -108,5 +109,19 @@ export default {
     indexType: 'Тип',
     indexColumns: 'Колонки',
     subPartHint: '0 — вся колонка',
+  },
+  console: {
+    executeAll: 'Выполнить всё',
+    executeSelection: 'Выполнить выделение',
+    explain: 'EXPLAIN',
+    cancel: 'Отменить',
+    // Ключ зарезервирован: форматтер SQL запланирован на П5 (без внешней
+    // библиотеки в П3), кнопка пока не добавлена.
+    format: 'Форматировать',
+    history: 'История',
+    results: 'Результаты',
+    rowsAffected: 'Затронуто строк: {n}',
+    truncated: 'Обрезано',
+    seconds: '{n} с',
   },
 }

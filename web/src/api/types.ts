@@ -128,6 +128,18 @@ export interface ColumnMeta {
   nullable: boolean
 }
 
+// One statement's outcome inside a console batch; mirrors the Go
+// driver.Result json tags. A row-returning statement fills columns/rows,
+// a non-row statement fills affectedRows/lastInsertId.
+export interface QueryResult {
+  columns: ColumnMeta[]
+  rows: unknown[][]
+  affectedRows?: number
+  lastInsertId?: number
+  truncated?: boolean
+  seconds: number
+}
+
 export interface Page {
   columns: ColumnMeta[]
   rows: unknown[][]
