@@ -211,6 +211,10 @@ func (d *stubDriver) Export(context.Context, driver.ExportRequest, io.Writer) er
 	return nil
 }
 
+func (d *stubDriver) ImportSQL(context.Context, string, io.Reader, func(done, total int64)) error {
+	return nil
+}
+
 func (d *stubDriver) CancelQuery(context.Context, string) error {
 	return nil
 }

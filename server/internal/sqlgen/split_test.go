@@ -119,6 +119,25 @@ func TestSplitStatementsDelimiter(t *testing.T) {
 			want:  []string{"SELECT 1", "SELECT 2"},
 		},
 		{
+			name: "slash token // terminator",
+			// Pinned: a '/'-leading terminator splits. Before the fix the
+			// '/' byte was consumed by the block-comment scanner's fall-
+			// through and "//" could never match, so such a dump hung the
+			// block into one statement.
+			query: "DELIMITER //\n" +
+				"CREATE PROCEDURE p() BEGIN SELECT 1; SELECT 2; END//\n" +
+				"DELIMITER ;\n" +
+				"SELECT 3;",
+			want: []string{"CREATE PROCEDURE p() BEGIN SELECT 1; SELECT 2; END", "SELECT 3"},
+		},
+		{
+			name: "slash token with spaced terminator and division intact",
+			// "5 / 2" division must still not split, and a terminator
+			// with surrounding whitespace still matches.
+			query: "DELIMITER //\nSELECT 5 / 2//\nDELIMITER ;\nSELECT 1;",
+			want:  []string{"SELECT 5 / 2", "SELECT 1"},
+		},
+		{
 			name:  "directive only input",
 			query: "DELIMITER ;;",
 			want:  nil,

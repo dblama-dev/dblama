@@ -20,9 +20,12 @@ import (
 //     strings (backslash and doubled-quote escapes), backtick
 //     identifiers, '--' line comments (which require trailing
 //     whitespace or end of line, so "1--2" is subtraction), '#' line
-//     comments and '/* */' block comments. Terminators whose first
-//     byte is a quote or '/' would be shadowed by those regions and
-//     are therefore not reliable;
+//     comments and '/* */' block comments. A terminator starting with
+//     '/' (the mysql client's customary "//") splits anyway: the '/'
+//     byte checks the terminator before the block-comment rule, so
+//     only a terminator that literally starts "/*" would be shadowed
+//     by comment regions. Terminators whose first byte is a quote stay
+//     shadowed by string regions and are not reliable;
 //   - pinned: '/*! ... */' executable comments are treated exactly
 //     like '/* ... */' block comments — unlike the mysql client, their
 //     content never toggles splitting (the statement text, marker
@@ -96,6 +99,19 @@ func SplitStatements(sqlText string) []string {
 				i++
 			}
 		case '/':
+			// A '/'-leading terminator (the mysql client's customary
+			// "//") must win over the block-comment rule, so the
+			// terminator check comes first; "/*" still opens a block
+			// comment unless the terminator itself starts with "/*".
+			if strings.HasPrefix(sqlText[i:], delim) {
+				if stmt := strings.TrimSpace(sqlText[start:i]); stmt != "" {
+					statements = append(statements, stmt)
+				}
+				i += len(delim)
+				start = i
+				lineStart = false
+				continue
+			}
 			// '/*! ... */' executable comments are pinned to split
 			// exactly like plain '/* ... */' block comments.
 			if i+1 < len(sqlText) && sqlText[i+1] == '*' {

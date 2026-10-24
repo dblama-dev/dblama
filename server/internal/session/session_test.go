@@ -90,6 +90,10 @@ func (f *fakeDriver) Export(context.Context, driver.ExportRequest, io.Writer) er
 	return nil
 }
 
+func (f *fakeDriver) ImportSQL(context.Context, string, io.Reader, func(done, total int64)) error {
+	return nil
+}
+
 func (f *fakeDriver) CancelQuery(context.Context, string) error {
 	return nil
 }

@@ -320,6 +320,26 @@ type Driver interface {
 	// gzip footer is flushed when Export returns. Nothing but the
 	// current row and statement is ever buffered.
 	Export(ctx context.Context, req ExportRequest, w io.Writer) error
+	// ImportSQL executes an SQL script read from r against database db
+	// on a dedicated connection (db other than the login database is
+	// selected via USE, mirroring ExecSQL). Statements are split by
+	// sqlgen.SplitStatements — mysql-client semantics with DELIMITER
+	// support, so DELIMITER-wrapped trigger/routine blocks are executed
+	// each as a single statement — and run in order through ExecContext;
+	// result rows, if any, are discarded. A gzip stream (magic 1f 8b) is
+	// decompressed transparently, so .gz dumps import directly.
+	//
+	// progress reports bytes consumed. PIN: the input is a stream of
+	// unknown total size, so it is consumed before execution and done
+	// tracks executed bytes only: progress(done, total) is called at
+	// every statement boundary (done = byte span consumed by the
+	// statements executed so far, total = full script size) and the
+	// final call reports done == total. A nil progress is allowed. The
+	// first failing statement aborts the import: the error carries the
+	// statement's 1-based index and its first 100 characters as context,
+	// and the progress reported at that point reflects the position —
+	// statements before it have been applied and are not rolled back.
+	ImportSQL(ctx context.Context, db string, r io.Reader, progress func(done, total int64)) error
 	Close() error
 }
 
