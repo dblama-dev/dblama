@@ -145,6 +145,21 @@ type Driver interface {
 	// creates the table (desired.NewName); a non-empty one alters it
 	// (rename, columns, options — indexes via SaveIndexes).
 	SaveTable(ctx context.Context, db, table string, desired TableDef) error
+	// SaveIndexes applies the full desired index state of one table:
+	// existing indexes not in desired are dropped (the PRIMARY via
+	// DROP PRIMARY KEY, the rest via DROP INDEX), missing or changed
+	// ones are added. Changed means same name with different type or
+	// columns.
+	SaveIndexes(ctx context.Context, db, table string, desired []Index) error
+	// TruncateTables empties the named tables in order; the first
+	// error aborts the rest. An empty name fails before any statement.
+	TruncateTables(ctx context.Context, db string, tables []string) error
+	// DropTables drops the named tables (no IF EXISTS — the caller
+	// validates existence); the first error aborts the rest.
+	DropTables(ctx context.Context, db string, tables []string) error
+	// DropViews drops the named views (no IF EXISTS); the first error
+	// aborts the rest.
+	DropViews(ctx context.Context, db string, views []string) error
 	Close() error
 }
 

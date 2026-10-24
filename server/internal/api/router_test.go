@@ -51,6 +51,22 @@ func (d *stubDriver) SaveTable(context.Context, string, string, driver.TableDef)
 	return nil
 }
 
+func (d *stubDriver) SaveIndexes(context.Context, string, string, []driver.Index) error {
+	return nil
+}
+
+func (d *stubDriver) TruncateTables(context.Context, string, []string) error {
+	return nil
+}
+
+func (d *stubDriver) DropTables(context.Context, string, []string) error {
+	return nil
+}
+
+func (d *stubDriver) DropViews(context.Context, string, []string) error {
+	return nil
+}
+
 func (d *stubDriver) Close() error {
 	d.closed++
 	return nil

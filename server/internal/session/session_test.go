@@ -36,6 +36,22 @@ func (f *fakeDriver) SaveTable(context.Context, string, string, driver.TableDef)
 	return nil
 }
 
+func (f *fakeDriver) SaveIndexes(context.Context, string, string, []driver.Index) error {
+	return nil
+}
+
+func (f *fakeDriver) TruncateTables(context.Context, string, []string) error {
+	return nil
+}
+
+func (f *fakeDriver) DropTables(context.Context, string, []string) error {
+	return nil
+}
+
+func (f *fakeDriver) DropViews(context.Context, string, []string) error {
+	return nil
+}
+
 func (f *fakeDriver) Close() error {
 	f.closes.Add(1)
 	return nil

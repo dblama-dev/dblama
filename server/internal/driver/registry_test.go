@@ -32,6 +32,22 @@ func (f *fakeDriver) SaveTable(context.Context, string, string, TableDef) error 
 	return nil
 }
 
+func (f *fakeDriver) SaveIndexes(context.Context, string, string, []Index) error {
+	return nil
+}
+
+func (f *fakeDriver) TruncateTables(context.Context, string, []string) error {
+	return nil
+}
+
+func (f *fakeDriver) DropTables(context.Context, string, []string) error {
+	return nil
+}
+
+func (f *fakeDriver) DropViews(context.Context, string, []string) error {
+	return nil
+}
+
 func (f *fakeDriver) Close() error { return nil }
 
 func TestRegistry_List(t *testing.T) {

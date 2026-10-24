@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/hitslab/db-manager/server/internal/driver"
+	"github.com/hitslab/db-manager/server/internal/sqlgen"
 )
 
 // listTablesQuery returns the tables and views of one schema ordered by
@@ -61,4 +62,70 @@ func (d *MysqlDriver) ListTables(ctx context.Context, db string) ([]driver.Table
 		return nil, fmt.Errorf("iterate tables of %s: %w", db, err)
 	}
 	return tables, nil
+}
+
+// The object-destructive operations run against the connection's
+// default schema: the DSN binds each driver instance to one database,
+// so the names carry no schema prefix and db is validated and used in
+// error messages only.
+
+// TruncateTables empties the named tables in order. Every name is
+// validated before the first statement runs; the first error aborts
+// the remaining tables.
+func (d *MysqlDriver) TruncateTables(ctx context.Context, db string, tables []string) error {
+	if db == "" {
+		return fmt.Errorf("truncate tables: %w: database name", sqlgen.ErrEmptyIdentifier)
+	}
+	for _, table := range tables {
+		if table == "" {
+			return fmt.Errorf("truncate tables: %w: table name", sqlgen.ErrEmptyIdentifier)
+		}
+	}
+	for _, table := range tables {
+		if _, err := d.db.ExecContext(ctx, "TRUNCATE TABLE "+sqlgen.QuoteIdent(table)); err != nil {
+			return fmt.Errorf("truncate %s.%s: %w", db, table, err)
+		}
+	}
+	return nil
+}
+
+// DropTables drops the named tables without IF EXISTS: the caller is
+// expected to have validated existence, so a missing table is an
+// error. Every name is validated before the first statement runs; the
+// first error aborts the remaining tables.
+func (d *MysqlDriver) DropTables(ctx context.Context, db string, tables []string) error {
+	if db == "" {
+		return fmt.Errorf("drop tables: %w: database name", sqlgen.ErrEmptyIdentifier)
+	}
+	for _, table := range tables {
+		if table == "" {
+			return fmt.Errorf("drop tables: %w: table name", sqlgen.ErrEmptyIdentifier)
+		}
+	}
+	for _, table := range tables {
+		if _, err := d.db.ExecContext(ctx, "DROP TABLE "+sqlgen.QuoteIdent(table)); err != nil {
+			return fmt.Errorf("drop table %s.%s: %w", db, table, err)
+		}
+	}
+	return nil
+}
+
+// DropViews drops the named views without IF EXISTS. Every name is
+// validated before the first statement runs; the first error aborts
+// the remaining views.
+func (d *MysqlDriver) DropViews(ctx context.Context, db string, views []string) error {
+	if db == "" {
+		return fmt.Errorf("drop views: %w: database name", sqlgen.ErrEmptyIdentifier)
+	}
+	for _, view := range views {
+		if view == "" {
+			return fmt.Errorf("drop views: %w: view name", sqlgen.ErrEmptyIdentifier)
+		}
+	}
+	for _, view := range views {
+		if _, err := d.db.ExecContext(ctx, "DROP VIEW "+sqlgen.QuoteIdent(view)); err != nil {
+			return fmt.Errorf("drop view %s.%s: %w", db, view, err)
+		}
+	}
+	return nil
 }

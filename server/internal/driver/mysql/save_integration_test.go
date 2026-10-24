@@ -4,10 +4,14 @@ package mysql
 
 import (
 	"context"
+	"database/sql"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/hitslab/db-manager/server/internal/driver"
+	"github.com/hitslab/db-manager/server/internal/sqlgen"
 )
 
 // saveImageExpectations holds the per-image read-back expectations of the
@@ -343,6 +347,269 @@ func TestSaveTable_RoundTripPreservesColumns(t *testing.T) {
 				t.Fatalf("TableDef(after round trip) error: %v", err)
 			}
 			assertTableDef(t, second, first)
+		})
+	}
+}
+
+// queryCount returns COUNT(*) of one table read over a raw connection
+// (TableInfo.Rows is only an estimate for InnoDB).
+func queryCount(t *testing.T, cfg driver.ConnConfig, table string) int64 {
+	t.Helper()
+	db, err := sql.Open("mysql", DSN(cfg, cfg.Password))
+	if err != nil {
+		t.Fatalf("open count connection: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	var n int64
+	if err := db.QueryRow("SELECT COUNT(*) FROM " + sqlgen.QuoteIdent(table)).Scan(&n); err != nil {
+		t.Fatalf("count %s: %v", table, err)
+	}
+	return n
+}
+
+// assertIndexes compares got with want as name-keyed sets (STATISTICS
+// ordering differs between servers), so index order is irrelevant.
+func assertIndexes(t *testing.T, got, want []driver.Index) {
+	t.Helper()
+	sortByName := func(idx []driver.Index) []driver.Index {
+		out := slices.Clone(idx)
+		slices.SortFunc(out, func(a, b driver.Index) int { return strings.Compare(a.Name, b.Name) })
+		return out
+	}
+	gotSorted, wantSorted := sortByName(got), sortByName(want)
+	if !reflect.DeepEqual(gotSorted, wantSorted) {
+		t.Errorf("indexes = %+v, want %+v", gotSorted, wantSorted)
+	}
+}
+
+// TestSaveIndexes_RoundTrip adds PRIMARY and UNIQUE indexes to a bare
+// table, verifies the read-back definition, then changes the UNIQUE
+// (same name, different columns and a sub-part) and finally removes it.
+func TestSaveIndexes_RoundTrip(t *testing.T) {
+	for _, img := range testImages {
+		t.Run(img.image, func(t *testing.T) {
+			cfg := startDB(t, img.image)
+			drv := connectOK(t, cfg)
+			ctx := context.Background()
+
+			execDDL(t, cfg, "CREATE TABLE t5_idx (id INT NOT NULL, name VARCHAR(64) NOT NULL, kind VARCHAR(32) NOT NULL)")
+			t.Cleanup(func() { execDDL(t, cfg, "DROP TABLE IF EXISTS t5_idx") })
+
+			desired := []driver.Index{
+				{Name: "PRIMARY", Type: "PRIMARY", Columns: []driver.IndexColumn{{Name: "id"}}},
+				{Name: "name", Type: "UNIQUE", Columns: []driver.IndexColumn{{Name: "name"}}},
+			}
+			if err := drv.SaveIndexes(ctx, cfg.Database, "t5_idx", desired); err != nil {
+				t.Fatalf("SaveIndexes(add) error: %v", err)
+			}
+
+			def, err := drv.TableDef(ctx, cfg.Database, "t5_idx")
+			if err != nil {
+				t.Fatalf("TableDef(after add) error: %v", err)
+			}
+			assertIndexes(t, def.Indexes, desired)
+
+			// Same UNIQUE name with different columns and a sub-part:
+			// SaveIndexes must DROP the old definition and ADD the new.
+			changed := []driver.Index{
+				{Name: "PRIMARY", Type: "PRIMARY", Columns: []driver.IndexColumn{{Name: "id"}}},
+				{Name: "name", Type: "UNIQUE", Columns: []driver.IndexColumn{{Name: "kind"}, {Name: "name", SubPart: 10}}},
+			}
+			if err := drv.SaveIndexes(ctx, cfg.Database, "t5_idx", changed); err != nil {
+				t.Fatalf("SaveIndexes(change) error: %v", err)
+			}
+			def2, err := drv.TableDef(ctx, cfg.Database, "t5_idx")
+			if err != nil {
+				t.Fatalf("TableDef(after change) error: %v", err)
+			}
+			assertIndexes(t, def2.Indexes, changed)
+
+			// Desired without the UNIQUE index: it must disappear.
+			if err := drv.SaveIndexes(ctx, cfg.Database, "t5_idx", desired[:1]); err != nil {
+				t.Fatalf("SaveIndexes(drop unique) error: %v", err)
+			}
+			def3, err := drv.TableDef(ctx, cfg.Database, "t5_idx")
+			if err != nil {
+				t.Fatalf("TableDef(after drop) error: %v", err)
+			}
+			assertIndexes(t, def3.Indexes, desired[:1])
+		})
+	}
+}
+
+// TestSaveIndexes_PrimaryDrop removes the PRIMARY KEY of a table without
+// AUTO_INCREMENT columns (desired state without PRIMARY) and verifies
+// empty identifiers fail before any statement is issued.
+func TestSaveIndexes_PrimaryDrop(t *testing.T) {
+	for _, img := range testImages {
+		t.Run(img.image, func(t *testing.T) {
+			cfg := startDB(t, img.image)
+			drv := connectOK(t, cfg)
+			ctx := context.Background()
+
+			execDDL(t, cfg, "CREATE TABLE t5_prim (id INT NOT NULL, x INT NOT NULL, PRIMARY KEY (id))")
+			t.Cleanup(func() { execDDL(t, cfg, "DROP TABLE IF EXISTS t5_prim") })
+
+			if err := drv.SaveIndexes(ctx, cfg.Database, "t5_prim", nil); err != nil {
+				t.Fatalf("SaveIndexes(drop primary) error: %v", err)
+			}
+			def, err := drv.TableDef(ctx, cfg.Database, "t5_prim")
+			if err != nil {
+				t.Fatalf("TableDef(after drop) error: %v", err)
+			}
+			if len(def.Indexes) != 0 {
+				t.Errorf("indexes after dropping all = %+v, want none", def.Indexes)
+			}
+
+			// Empty identifiers fail before any statement.
+			if err := drv.SaveIndexes(ctx, "", "t5_prim", nil); err == nil {
+				t.Error("SaveIndexes(empty db) error: expected error, got nil")
+			}
+			if err := drv.SaveIndexes(ctx, cfg.Database, "", nil); err == nil {
+				t.Error("SaveIndexes(empty table) error: expected error, got nil")
+			}
+			unnamed := []driver.Index{{Name: "", Type: "UNIQUE", Columns: []driver.IndexColumn{{Name: "x"}}}}
+			if err := drv.SaveIndexes(ctx, cfg.Database, "t5_prim", unnamed); err == nil {
+				t.Error("SaveIndexes(unnamed unique) error: expected error, got nil")
+			}
+		})
+	}
+}
+
+// TestTruncateTables empties two tables, verifies the first error
+// aborts the remaining tables untouched and that empty names fail
+// before any statement.
+func TestTruncateTables(t *testing.T) {
+	for _, img := range testImages {
+		t.Run(img.image, func(t *testing.T) {
+			cfg := startDB(t, img.image)
+			drv := connectOK(t, cfg)
+			ctx := context.Background()
+
+			execDDL(t, cfg, "CREATE TABLE t5_trunc_a (id INT NOT NULL)")
+			execDDL(t, cfg, "CREATE TABLE t5_trunc_b (id INT NOT NULL)")
+			t.Cleanup(func() {
+				execDDL(t, cfg, "DROP TABLE IF EXISTS t5_trunc_a")
+				execDDL(t, cfg, "DROP TABLE IF EXISTS t5_trunc_b")
+			})
+			for i := 0; i < 3; i++ {
+				execDDL(t, cfg, "INSERT INTO t5_trunc_a VALUES (1)")
+				execDDL(t, cfg, "INSERT INTO t5_trunc_b VALUES (1)")
+			}
+
+			if err := drv.TruncateTables(ctx, cfg.Database, []string{"t5_trunc_a", "t5_trunc_b"}); err != nil {
+				t.Fatalf("TruncateTables() error: %v", err)
+			}
+			for _, table := range []string{"t5_trunc_a", "t5_trunc_b"} {
+				if n := queryCount(t, cfg, table); n != 0 {
+					t.Errorf("count of %s after truncate = %d, want 0", table, n)
+				}
+			}
+
+			// The first error aborts: the table after the missing one
+			// keeps its rows.
+			execDDL(t, cfg, "INSERT INTO t5_trunc_a VALUES (2)")
+			err := drv.TruncateTables(ctx, cfg.Database, []string{"t5_missing", "t5_trunc_a"})
+			if err == nil {
+				t.Fatal("TruncateTables(missing first) error: expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), "t5_missing") {
+				t.Errorf("TruncateTables() error %q, want it to mention %q", err, "t5_missing")
+			}
+			if n := queryCount(t, cfg, "t5_trunc_a"); n != 1 {
+				t.Errorf("count of t5_trunc_a after aborted truncate = %d, want 1", n)
+			}
+
+			// An empty name fails before any statement.
+			err = drv.TruncateTables(ctx, cfg.Database, []string{"t5_trunc_a", ""})
+			if err == nil {
+				t.Fatal("TruncateTables(empty name) error: expected error, got nil")
+			}
+			if n := queryCount(t, cfg, "t5_trunc_a"); n != 1 {
+				t.Errorf("count of t5_trunc_a after rejected call = %d, want 1", n)
+			}
+		})
+	}
+}
+
+// TestDropTables removes two tables and verifies they disappear from
+// ListTables, that dropping a missing table errors and empty names are
+// rejected.
+func TestDropTables(t *testing.T) {
+	for _, img := range testImages {
+		t.Run(img.image, func(t *testing.T) {
+			cfg := startDB(t, img.image)
+			drv := connectOK(t, cfg)
+			ctx := context.Background()
+
+			execDDL(t, cfg, "CREATE TABLE t5_drop_a (id INT NOT NULL)")
+			execDDL(t, cfg, "CREATE TABLE t5_drop_b (id INT NOT NULL)")
+			t.Cleanup(func() {
+				execDDL(t, cfg, "DROP TABLE IF EXISTS t5_drop_a")
+				execDDL(t, cfg, "DROP TABLE IF EXISTS t5_drop_b")
+			})
+
+			if err := drv.DropTables(ctx, cfg.Database, []string{"t5_drop_a", "t5_drop_b"}); err != nil {
+				t.Fatalf("DropTables() error: %v", err)
+			}
+			tables, err := drv.ListTables(ctx, cfg.Database)
+			if err != nil {
+				t.Fatalf("ListTables() error: %v", err)
+			}
+			for _, tbl := range tables {
+				if tbl.Name == "t5_drop_a" || tbl.Name == "t5_drop_b" {
+					t.Errorf("table %q still exists after DropTables", tbl.Name)
+				}
+			}
+
+			// No IF EXISTS: a missing table is an error.
+			if err := drv.DropTables(ctx, cfg.Database, []string{"t5_drop_a"}); err == nil {
+				t.Error("DropTables(missing) error: expected error, got nil")
+			}
+			if err := drv.DropTables(ctx, cfg.Database, []string{""}); err == nil {
+				t.Error("DropTables(empty name) error: expected error, got nil")
+			}
+		})
+	}
+}
+
+// TestDropViews removes a view and verifies it disappears from
+// ListTables, that dropping a missing view errors and empty names are
+// rejected.
+func TestDropViews(t *testing.T) {
+	for _, img := range testImages {
+		t.Run(img.image, func(t *testing.T) {
+			cfg := startDB(t, img.image)
+			drv := connectOK(t, cfg)
+			ctx := context.Background()
+
+			execDDL(t, cfg, "CREATE TABLE t5_view_src (id INT NOT NULL)")
+			execDDL(t, cfg, "CREATE VIEW v5_drop AS SELECT id FROM t5_view_src")
+			t.Cleanup(func() {
+				execDDL(t, cfg, "DROP VIEW IF EXISTS v5_drop")
+				execDDL(t, cfg, "DROP TABLE IF EXISTS t5_view_src")
+			})
+
+			if err := drv.DropViews(ctx, cfg.Database, []string{"v5_drop"}); err != nil {
+				t.Fatalf("DropViews() error: %v", err)
+			}
+			tables, err := drv.ListTables(ctx, cfg.Database)
+			if err != nil {
+				t.Fatalf("ListTables() error: %v", err)
+			}
+			for _, tbl := range tables {
+				if tbl.Name == "v5_drop" {
+					t.Error("view v5_drop still exists after DropViews")
+				}
+			}
+
+			// No IF EXISTS: a missing view is an error.
+			if err := drv.DropViews(ctx, cfg.Database, []string{"v5_drop"}); err == nil {
+				t.Error("DropViews(missing) error: expected error, got nil")
+			}
+			if err := drv.DropViews(ctx, cfg.Database, []string{""}); err == nil {
+				t.Error("DropViews(empty name) error: expected error, got nil")
+			}
 		})
 	}
 }

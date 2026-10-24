@@ -278,6 +278,116 @@ func columnTypeFragment(c driver.ColumnDef) (string, error) {
 	return c.Type, nil
 }
 
+// SaveIndexes applies the full desired index state of one table (the
+// Adminer alter_indexes model): current indexes missing from desired
+// are dropped — the PRIMARY via DROP PRIMARY KEY, never via DROP
+// INDEX — and desired indexes missing from the current state are
+// added. An index with the same name but a different type or column
+// list counts as changed and is re-created. Pinned choice: drops and
+// adds run as separate ALTER TABLE statements in that order, not
+// merged into one ALTER. Statements are numbered "step %d" on error.
+// Index names are matched case-insensitively, as MySQL does.
+func (d *MysqlDriver) SaveIndexes(ctx context.Context, db, table string, desired []driver.Index) error {
+	if db == "" {
+		return fmt.Errorf("save indexes: %w: database name", sqlgen.ErrEmptyIdentifier)
+	}
+	if table == "" {
+		return fmt.Errorf("save indexes: %w: table name", sqlgen.ErrEmptyIdentifier)
+	}
+	for i, idx := range desired {
+		if idx.Type != "PRIMARY" && idx.Name == "" {
+			return fmt.Errorf("save indexes %s.%s: index %d: %w: index name", db, table, i+1, sqlgen.ErrEmptyIdentifier)
+		}
+		if len(idx.Columns) == 0 {
+			return fmt.Errorf("save indexes %s.%s: index %d (%s) has no columns", db, table, i+1, idx.Name)
+		}
+	}
+
+	current, err := d.tableIndexes(ctx, db, table)
+	if err != nil {
+		return fmt.Errorf("save indexes %s.%s: %w", db, table, err)
+	}
+
+	desiredByName := make(map[string]driver.Index, len(desired))
+	for _, idx := range desired {
+		desiredByName[strings.ToLower(idx.Name)] = idx
+	}
+	currentByName := make(map[string]driver.Index, len(current))
+	for _, idx := range current {
+		currentByName[strings.ToLower(idx.Name)] = idx
+	}
+
+	var stmts []string
+	// Drops first: current indexes that are absent from desired or
+	// changed (same name, different type or columns).
+	for _, cur := range current {
+		want, ok := desiredByName[strings.ToLower(cur.Name)]
+		if ok && indexEqual(cur, want) {
+			continue
+		}
+		if cur.Type == "PRIMARY" {
+			stmts = append(stmts, "ALTER TABLE "+sqlgen.QuoteIdent(table)+" DROP PRIMARY KEY")
+		} else {
+			stmts = append(stmts, "ALTER TABLE "+sqlgen.QuoteIdent(table)+" DROP INDEX "+sqlgen.QuoteIdent(cur.Name))
+		}
+	}
+	// Then adds: desired indexes that are absent or changed.
+	for _, want := range desired {
+		cur, ok := currentByName[strings.ToLower(want.Name)]
+		if ok && indexEqual(cur, want) {
+			continue
+		}
+		frag, err := buildAlterAddIndex(want)
+		if err != nil {
+			return fmt.Errorf("save indexes %s.%s: %w", db, table, err)
+		}
+		stmts = append(stmts, "ALTER TABLE "+sqlgen.QuoteIdent(table)+" "+frag)
+	}
+
+	for i, stmt := range stmts {
+		if _, err := d.db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("save indexes %s.%s: step %d: %w", db, table, i+1, err)
+		}
+	}
+	return nil
+}
+
+// indexEqual reports whether two index definitions are the same index:
+// same type (case-insensitively) and the same column list, order and
+// sub-parts included.
+func indexEqual(a, b driver.Index) bool {
+	if !strings.EqualFold(a.Type, b.Type) || len(a.Columns) != len(b.Columns) {
+		return false
+	}
+	for i := range a.Columns {
+		if a.Columns[i] != b.Columns[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// buildAlterAddIndex renders the ADD clause of one ALTER TABLE index
+// operation; the default type renders as a plain INDEX, matching
+// indexFragment.
+func buildAlterAddIndex(idx driver.Index) (string, error) {
+	cols, err := indexColumnsFragment(idx.Columns)
+	if err != nil {
+		return "", err
+	}
+	switch idx.Type {
+	case "PRIMARY":
+		return "ADD PRIMARY KEY (" + cols + ")", nil
+	case "UNIQUE", "FULLTEXT", "SPATIAL":
+		if idx.Name == "" {
+			return "", fmt.Errorf("%s index without a name", strings.ToLower(idx.Type))
+		}
+		return "ADD " + idx.Type + " " + sqlgen.QuoteIdent(idx.Name) + " (" + cols + ")", nil
+	default: // INDEX
+		return "ADD INDEX " + sqlgen.QuoteIdent(idx.Name) + " (" + cols + ")", nil
+	}
+}
+
 // indexFragment renders one inline index of a CREATE TABLE.
 func indexFragment(idx driver.Index) (string, error) {
 	cols, err := indexColumnsFragment(idx.Columns)
