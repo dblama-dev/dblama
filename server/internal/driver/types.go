@@ -2,7 +2,11 @@
 // that maps driver IDs to connect functions.
 package driver
 
-import "context"
+import (
+	"context"
+
+	"github.com/hitslab/db-manager/server/internal/sqlgen"
+)
 
 // ConnConfig holds the parameters for establishing a database connection.
 type ConnConfig struct {
@@ -134,6 +138,30 @@ type TableDef struct {
 	Options     TableOptions `json:"options"`
 }
 
+// SelectQuery is the structured browsing query; the alias keeps the
+// driver contract in one package while the SQL generation stays in
+// sqlgen.
+type SelectQuery = sqlgen.SelectQuery
+
+// ColumnMeta describes one column of a browsed result: its name, its
+// base type as the driver labels it (e.g. "int", "varchar") and its
+// nullability.
+type ColumnMeta struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Nullable bool   `json:"nullable"`
+}
+
+// Page is one page of browsed rows. Rows holds JSON-compatible values:
+// NULL → nil, binary values → hex string with the "0x" prefix
+// (spec §4.5), timestamps → RFC3339 string, the rest as
+// database/sql delivers them (int64, float64, string).
+type Page struct {
+	Columns   []ColumnMeta `json:"columns"`
+	Rows      [][]any      `json:"rows"`
+	TotalRows int64        `json:"totalRows"`
+}
+
 // Driver is a connection-bound database driver instance.
 type Driver interface {
 	Info() DriverInfo
@@ -160,6 +188,14 @@ type Driver interface {
 	// DropViews drops the named views (no IF EXISTS); the first error
 	// aborts the rest.
 	DropViews(ctx context.Context, db string, views []string) error
+	// SelectRows returns one page of browsed rows of table in database
+	// db. TotalRows counts the rows matching the filters, independent
+	// of the page's limit and offset. An empty db or table name fails
+	// before any query is issued.
+	SelectRows(ctx context.Context, db, table string, q sqlgen.SelectQuery) (Page, error)
+	// PrimaryKey returns the primary key column names in key order; a
+	// table without a primary key yields an empty slice.
+	PrimaryKey(ctx context.Context, db, table string) ([]string, error)
 	Close() error
 }
 

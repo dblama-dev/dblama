@@ -90,11 +90,62 @@ func QuoteIdent(name string) string {
 // with AND, values are bound as ? placeholders (IS NULL / IS NOT NULL emit
 // no placeholder), IN / NOT IN expand into one placeholder per comma-
 // separated item, and LIMIT / OFFSET are always parameterized. The output
-// is deterministic for a given query.
+// is deterministic for a given query. The table is backtick-quoted as a
+// single identifier; to address a table in another schema use
+// BuildSelectQualified.
 func BuildSelect(table string, q SelectQuery) (query string, args []any, err error) {
 	if table == "" {
 		return "", nil, fmt.Errorf("%w: table", ErrEmptyIdentifier)
 	}
+	return buildSelect(QuoteIdent(table), q)
+}
+
+// BuildSelectQualified builds the same statement as BuildSelect but
+// addresses the table through a schema-qualified identifier: each of db
+// and table is backtick-quoted independently, so the db argument selects
+// the schema regardless of the connection's default database.
+func BuildSelectQualified(db, table string, q SelectQuery) (query string, args []any, err error) {
+	if db == "" {
+		return "", nil, fmt.Errorf("%w: database", ErrEmptyIdentifier)
+	}
+	if table == "" {
+		return "", nil, fmt.Errorf("%w: table", ErrEmptyIdentifier)
+	}
+	return buildSelect(QuoteIdent(db)+"."+QuoteIdent(table), q)
+}
+
+// BuildCountQualified builds a parameterized SELECT COUNT(*) over the
+// filters of q against the schema-qualified table — no columns, sorts,
+// limit or offset, so the count covers every matching row. Used for the
+// TotalRows of a browsed page.
+func BuildCountQualified(db, table string, q SelectQuery) (query string, args []any, err error) {
+	if db == "" {
+		return "", nil, fmt.Errorf("%w: database", ErrEmptyIdentifier)
+	}
+	if table == "" {
+		return "", nil, fmt.Errorf("%w: table", ErrEmptyIdentifier)
+	}
+
+	args = make([]any, 0, len(q.Filters))
+	sb := strings.Builder{}
+	sb.WriteString("SELECT COUNT(*) FROM ")
+	sb.WriteString(QuoteIdent(db))
+	sb.WriteString(".")
+	sb.WriteString(QuoteIdent(table))
+	where, whereArgs, err := buildWhere(q.Filters)
+	if err != nil {
+		return "", nil, err
+	}
+	if where != "" {
+		sb.WriteString(" WHERE ")
+		sb.WriteString(where)
+		args = append(args, whereArgs...)
+	}
+	return sb.String(), args, nil
+}
+
+// buildSelect renders the statement over an already-quoted FROM target.
+func buildSelect(from string, q SelectQuery) (query string, args []any, err error) {
 	for _, c := range q.Columns {
 		if c == "" {
 			return "", nil, fmt.Errorf("%w: select column", ErrEmptyIdentifier)
@@ -113,22 +164,17 @@ func BuildSelect(table string, q SelectQuery) (query string, args []any, err err
 		sb.WriteString(strings.Join(quoted, ","))
 	}
 	sb.WriteString(" FROM ")
-	sb.WriteString(QuoteIdent(table))
+	sb.WriteString(from)
 
 	args = make([]any, 0, len(q.Filters)+2)
-	if len(q.Filters) > 0 {
+	where, whereArgs, ferr := buildWhere(q.Filters)
+	if ferr != nil {
+		return "", nil, ferr
+	}
+	if where != "" {
 		sb.WriteString(" WHERE ")
-		for i, f := range q.Filters {
-			if i > 0 {
-				sb.WriteString(" AND ")
-			}
-			part, partArgs, ferr := buildFilter(f)
-			if ferr != nil {
-				return "", nil, ferr
-			}
-			sb.WriteString(part)
-			args = append(args, partArgs...)
-		}
+		sb.WriteString(where)
+		args = append(args, whereArgs...)
 	}
 
 	if len(q.Sorts) > 0 {
@@ -155,6 +201,26 @@ func BuildSelect(table string, q SelectQuery) (query string, args []any, err err
 	args = append(args, limit, q.Offset)
 
 	return sb.String(), args, nil
+}
+
+// buildWhere renders the WHERE body of the filters — the conditions
+// joined with AND, without the "WHERE" keyword itself — and returns its
+// bound arguments. Zero filters yield an empty string.
+func buildWhere(filters []Filter) (string, []any, error) {
+	if len(filters) == 0 {
+		return "", nil, nil
+	}
+	parts := make([]string, len(filters))
+	args := make([]any, 0, len(filters))
+	for i, f := range filters {
+		part, partArgs, ferr := buildFilter(f)
+		if ferr != nil {
+			return "", nil, ferr
+		}
+		parts[i] = part
+		args = append(args, partArgs...)
+	}
+	return strings.Join(parts, " AND "), args, nil
 }
 
 // buildFilter renders one WHERE term and returns its bound arguments.

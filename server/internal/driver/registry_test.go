@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/hitslab/db-manager/server/internal/sqlgen"
 )
 
 type fakeDriver struct {
@@ -46,6 +48,14 @@ func (f *fakeDriver) DropTables(context.Context, string, []string) error {
 
 func (f *fakeDriver) DropViews(context.Context, string, []string) error {
 	return nil
+}
+
+func (f *fakeDriver) SelectRows(context.Context, string, string, sqlgen.SelectQuery) (Page, error) {
+	return Page{}, nil
+}
+
+func (f *fakeDriver) PrimaryKey(context.Context, string, string) ([]string, error) {
+	return nil, nil
 }
 
 func (f *fakeDriver) Close() error { return nil }

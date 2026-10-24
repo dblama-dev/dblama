@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/hitslab/db-manager/server/internal/driver"
+	"github.com/hitslab/db-manager/server/internal/sqlgen"
 )
 
 // fakeDriver is a driver.Driver that records Close calls.
@@ -50,6 +51,14 @@ func (f *fakeDriver) DropTables(context.Context, string, []string) error {
 
 func (f *fakeDriver) DropViews(context.Context, string, []string) error {
 	return nil
+}
+
+func (f *fakeDriver) SelectRows(context.Context, string, string, sqlgen.SelectQuery) (driver.Page, error) {
+	return driver.Page{}, nil
+}
+
+func (f *fakeDriver) PrimaryKey(context.Context, string, string) ([]string, error) {
+	return nil, nil
 }
 
 func (f *fakeDriver) Close() error {

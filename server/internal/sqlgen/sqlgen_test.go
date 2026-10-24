@@ -168,6 +168,54 @@ func TestBuildSelect_EmptyValueNonNullableOperator(t *testing.T) {
 	}
 }
 
+func TestBuildSelectQualified(t *testing.T) {
+	q := SelectQuery{
+		Filters: []Filter{{Column: "id", Operator: "IN", Value: "1,2"}},
+		Sorts:   []Sort{{Column: "id", Desc: true}},
+		Limit:   5,
+		Offset:  10,
+	}
+	want := "SELECT * FROM `mydb`.`users` WHERE `id` IN (?,?) ORDER BY `id` DESC LIMIT ? OFFSET ?"
+	wantArgs := []any{"1", "2", 5, 10}
+
+	got, args, err := BuildSelectQualified("mydb", "users", q)
+	if err != nil {
+		t.Fatalf("BuildSelectQualified() error = %v", err)
+	}
+	if got != want {
+		t.Errorf("BuildSelectQualified() query = %q, want %q", got, want)
+	}
+	if !reflect.DeepEqual(args, wantArgs) {
+		t.Errorf("BuildSelectQualified() args = %v, want %v", args, wantArgs)
+	}
+}
+
+func TestBuildCountQualified(t *testing.T) {
+	q := SelectQuery{
+		Columns: []string{"id"}, // ignored: COUNT(*) has no column list
+		Filters: []Filter{
+			{Column: "a", Operator: "LIKE", Value: "%x%"},
+			{Column: "b", Operator: "IS NULL"},
+		},
+		Sorts:  []Sort{{Column: "id"}}, // ignored: no ORDER BY in a count
+		Limit:  3,
+		Offset: 2,
+	}
+	want := "SELECT COUNT(*) FROM `mydb`.`users` WHERE `a` LIKE ? AND `b` IS NULL"
+	wantArgs := []any{"%x%"}
+
+	got, args, err := BuildCountQualified("mydb", "users", q)
+	if err != nil {
+		t.Fatalf("BuildCountQualified() error = %v", err)
+	}
+	if got != want {
+		t.Errorf("BuildCountQualified() query = %q, want %q", got, want)
+	}
+	if !reflect.DeepEqual(args, wantArgs) {
+		t.Errorf("BuildCountQualified() args = %v, want %v", args, wantArgs)
+	}
+}
+
 func TestQuoteIdent_Empty(t *testing.T) {
 	// Build* functions must reject empty table and column names with ErrEmptyIdentifier.
 	tests := []struct {
@@ -176,6 +224,22 @@ func TestQuoteIdent_Empty(t *testing.T) {
 	}{
 		{"BuildSelect empty table", func() error {
 			_, _, err := BuildSelect("", SelectQuery{})
+			return err
+		}},
+		{"BuildSelectQualified empty db", func() error {
+			_, _, err := BuildSelectQualified("", "t", SelectQuery{})
+			return err
+		}},
+		{"BuildSelectQualified empty table", func() error {
+			_, _, err := BuildSelectQualified("db", "", SelectQuery{})
+			return err
+		}},
+		{"BuildCountQualified empty db", func() error {
+			_, _, err := BuildCountQualified("", "t", SelectQuery{})
+			return err
+		}},
+		{"BuildCountQualified empty table", func() error {
+			_, _, err := BuildCountQualified("db", "", SelectQuery{})
 			return err
 		}},
 		{"BuildSelect empty column", func() error {

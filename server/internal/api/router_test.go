@@ -14,6 +14,7 @@ import (
 	"github.com/hitslab/db-manager/server/internal/config"
 	"github.com/hitslab/db-manager/server/internal/driver"
 	"github.com/hitslab/db-manager/server/internal/session"
+	"github.com/hitslab/db-manager/server/internal/sqlgen"
 )
 
 // stubDriver is a configurable driver.Driver for router tests. Unlike the
@@ -65,6 +66,14 @@ func (d *stubDriver) DropTables(context.Context, string, []string) error {
 
 func (d *stubDriver) DropViews(context.Context, string, []string) error {
 	return nil
+}
+
+func (d *stubDriver) SelectRows(context.Context, string, string, sqlgen.SelectQuery) (driver.Page, error) {
+	return driver.Page{}, nil
+}
+
+func (d *stubDriver) PrimaryKey(context.Context, string, string) ([]string, error) {
+	return nil, nil
 }
 
 func (d *stubDriver) Close() error {
