@@ -105,7 +105,10 @@ func buildCreateTable(db string, d driver.TableDef) (string, error) {
 // buildAlterTable renders the ALTER TABLE statements of the desired
 // state, qualified with the target schema db, in execution order:
 // rename (step 1, if NewName differs), the column operations in the
-// order the columns are listed, and finally the table options update.
+// order the columns are listed (each ADD/MODIFY/CHANGE carrying its
+// FIRST/AFTER placement from ColumnDef.Position, so moved columns must
+// be listed after any rename of their anchor), and finally the table
+// options update.
 // Later statements address the renamed table.
 func buildAlterTable(db, table string, d driver.TableDef) ([]string, error) {
 	if table == "" {
@@ -126,14 +129,7 @@ func buildAlterTable(db, table string, d driver.TableDef) ([]string, error) {
 			if err != nil {
 				return nil, fmt.Errorf("alter table %s: column %d: %w", table, i+1, err)
 			}
-			placement := ""
-			switch {
-			case strings.EqualFold(c.Position, "FIRST"):
-				placement = " FIRST"
-			case c.Position != "":
-				placement = " AFTER " + sqlgen.QuoteIdent(c.Position)
-			}
-			stmts = append(stmts, "ALTER TABLE "+qualifiedIdent(db, current)+" ADD COLUMN "+frag+placement)
+			stmts = append(stmts, "ALTER TABLE "+qualifiedIdent(db, current)+" ADD COLUMN "+frag+placementClause(c))
 		case c.OldName != "" && c.Type == "": // DROP
 			if c.Name == "" {
 				return nil, fmt.Errorf("alter table %s: column %d is marked for drop but has no name", table, i+1)
@@ -145,13 +141,13 @@ func buildAlterTable(db, table string, d driver.TableDef) ([]string, error) {
 				return nil, fmt.Errorf("alter table %s: column %d: %w", table, i+1, err)
 			}
 			stmts = append(stmts, "ALTER TABLE "+qualifiedIdent(db, current)+
-				" CHANGE COLUMN "+sqlgen.QuoteIdent(c.OldName)+" "+frag)
+				" CHANGE COLUMN "+sqlgen.QuoteIdent(c.OldName)+" "+frag+placementClause(c))
 		case c.OldName != "": // MODIFY (OldName == Name)
 			frag, err := columnFragment(c)
 			if err != nil {
 				return nil, fmt.Errorf("alter table %s: column %d: %w", table, i+1, err)
 			}
-			stmts = append(stmts, "ALTER TABLE "+qualifiedIdent(db, current)+" MODIFY COLUMN "+frag)
+			stmts = append(stmts, "ALTER TABLE "+qualifiedIdent(db, current)+" MODIFY COLUMN "+frag+placementClause(c))
 		default:
 			return nil, fmt.Errorf("alter table %s: column %d (%q) has neither an old name nor a type", table, i+1, c.Name)
 		}
@@ -167,9 +163,27 @@ func buildAlterTable(db, table string, d driver.TableDef) ([]string, error) {
 	return stmts, nil
 }
 
-// columnFragment renders one column definition. ADD placement
-// (FIRST/AFTER) is handled by buildAlterTable; for MODIFY/CHANGE MySQL
-// re-creates the column in place.
+// placementClause renders the FIRST/AFTER placement suffix of one column
+// operation ("", " FIRST" or " AFTER `anchor`"). MySQL accepts it on ADD
+// and on MODIFY/CHANGE of existing columns, so a moved existing column
+// re-orders instead of being a silent no-op. Statement ORDER matters for
+// AFTER anchors: the columns are processed in the desired-array order, so
+// a mover must be listed after any rename of the column it anchors on.
+func placementClause(c driver.ColumnDef) string {
+	switch {
+	case strings.EqualFold(c.Position, "FIRST"):
+		return " FIRST"
+	case c.Position != "":
+		return " AFTER " + sqlgen.QuoteIdent(c.Position)
+	default:
+		return ""
+	}
+}
+
+// columnFragment renders one column definition. The FIRST/AFTER
+// placement is handled by buildAlterTable via placementClause; MySQL
+// re-creates the column at the requested position for ADD, MODIFY and
+// CHANGE alike.
 func columnFragment(c driver.ColumnDef) (string, error) {
 	if c.Name == "" {
 		return "", fmt.Errorf("column definition has no name")

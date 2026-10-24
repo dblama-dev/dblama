@@ -350,6 +350,65 @@ func TestSaveTable_RoundTripPreservesColumns(t *testing.T) {
 	}
 }
 
+// TestSaveTable_ReorderColumns proves that reordering existing columns
+// is a real server-side effect now: [a,b,c] reordered to [c,a,b] (the
+// frontend sends every column with a Position from the desired display
+// order) reads back in the new ordinal order on both images.
+func TestSaveTable_ReorderColumns(t *testing.T) {
+	for _, img := range testImages {
+		t.Run(img.image, func(t *testing.T) {
+			cfg := startDB(t, img.image)
+			drv := connectOK(t, cfg)
+			ctx := context.Background()
+
+			execDDL(t, cfg, "CREATE TABLE t4_reorder (a INT NOT NULL, b INT NOT NULL, c INT NOT NULL)")
+			t.Cleanup(func() { execDDL(t, cfg, "DROP TABLE IF EXISTS t4_reorder") })
+
+			def, err := drv.TableDef(ctx, cfg.Database, "t4_reorder")
+			if err != nil {
+				t.Fatalf("TableDef(t4_reorder) error: %v", err)
+			}
+
+			// Desired order c, a, b with positions from the display
+			// order, exactly as the structure editor sends them.
+			byName := map[string]driver.ColumnDef{}
+			for _, c := range def.Columns {
+				byName[c.Name] = c
+			}
+			moved := func(name, position string) driver.ColumnDef {
+				c, ok := byName[name]
+				if !ok {
+					t.Fatalf("column %q missing from read-back definition", name)
+				}
+				c.Position = position
+				return c
+			}
+			def.Columns = []driver.ColumnDef{
+				moved("c", "FIRST"),
+				moved("a", "c"),
+				moved("b", "a"),
+			}
+
+			if err := drv.SaveTable(ctx, cfg.Database, "t4_reorder", def); err != nil {
+				t.Fatalf("SaveTable(reorder) error: %v", err)
+			}
+
+			got, err := drv.TableDef(ctx, cfg.Database, "t4_reorder")
+			if err != nil {
+				t.Fatalf("TableDef(t4_reorder) after reorder: %v", err)
+			}
+			names := make([]string, len(got.Columns))
+			for i, c := range got.Columns {
+				names[i] = c.Name
+			}
+			want := []string{"c", "a", "b"}
+			if !slices.Equal(names, want) {
+				t.Errorf("column order after reorder = %v, want %v", names, want)
+			}
+		})
+	}
+}
+
 // queryCount returns COUNT(*) of db.table read over a raw connection
 // (TableInfo.Rows is only an estimate for InnoDB).
 func queryCount(t *testing.T, cfg driver.ConnConfig, db, table string) int64 {

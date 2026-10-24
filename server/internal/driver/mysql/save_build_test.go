@@ -128,6 +128,39 @@ func TestBuildAlterTable_NoRenameWhenSameName(t *testing.T) {
 	}
 }
 
+// TestBuildAlterTable_ReorderExistingColumns pins the placement clauses
+// of MODIFY for a pure reorder [a,b,c] → [c,a,b]: the first desired
+// column is FIRST, the rest AFTER the previous desired column. The
+// statements run in desired-array order, so each anchor already exists
+// in its new position when its dependent MODIFY runs.
+func TestBuildAlterTable_ReorderExistingColumns(t *testing.T) {
+	desired := driver.TableDef{
+		NewName: "t4order",
+		Columns: []driver.ColumnDef{
+			{Name: "c", OldName: "c", Type: "int", Position: "FIRST"},
+			{Name: "a", OldName: "a", Type: "int", Position: "c"},
+			{Name: "b", OldName: "b", Type: "int", Position: "a"},
+		},
+	}
+	got, err := buildAlterTable("appdb", "t4order", desired)
+	if err != nil {
+		t.Fatalf("buildAlterTable() error: %v", err)
+	}
+	want := []string{
+		"ALTER TABLE `appdb`.`t4order` MODIFY COLUMN `c` int NOT NULL FIRST",
+		"ALTER TABLE `appdb`.`t4order` MODIFY COLUMN `a` int NOT NULL AFTER `c`",
+		"ALTER TABLE `appdb`.`t4order` MODIFY COLUMN `b` int NOT NULL AFTER `a`",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("buildAlterTable() produced %d statements, want %d:\n%v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("step %d:\ngot:  %s\nwant: %s", i+1, got[i], want[i])
+		}
+	}
+}
+
 func TestBuildCreateTable_EnumEscape(t *testing.T) {
 	desired := driver.TableDef{
 		NewName: "odd`names",
