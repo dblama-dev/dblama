@@ -139,6 +139,10 @@ func (d *stubDriver) TableDef(_ context.Context, db, table string) (driver.Table
 	return d.tableDef, nil
 }
 
+func (d *stubDriver) ShowCreateTable(context.Context, string, string) (string, error) {
+	return "", nil
+}
+
 func (d *stubDriver) SaveTable(_ context.Context, db, table string, desired driver.TableDef) error {
 	d.saveTableCalls = append(d.saveTableCalls, saveTableCall{db, table, desired})
 	return d.saveTableErr

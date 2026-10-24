@@ -30,6 +30,10 @@ func (f *fakeDriver) TableDef(context.Context, string, string) (TableDef, error)
 	return TableDef{}, nil
 }
 
+func (f *fakeDriver) ShowCreateTable(context.Context, string, string) (string, error) {
+	return "", nil
+}
+
 func (f *fakeDriver) SaveTable(context.Context, string, string, TableDef) error {
 	return nil
 }

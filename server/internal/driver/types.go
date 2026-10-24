@@ -208,6 +208,10 @@ type Driver interface {
 	ListDatabases(ctx context.Context) ([]DatabaseInfo, error)
 	ListTables(ctx context.Context, db string) ([]TableInfo, error)
 	TableDef(ctx context.Context, db, table string) (TableDef, error)
+	// ShowCreateTable returns the server's own CREATE TABLE statement of
+	// one table. A missing table yields an error containing "not found";
+	// an empty db or table name fails before any query is issued.
+	ShowCreateTable(ctx context.Context, db, table string) (string, error)
 	// SaveTable applies the desired table state. An empty table name
 	// creates the table (desired.NewName); a non-empty one alters it
 	// (rename, columns, options — indexes via SaveIndexes).
