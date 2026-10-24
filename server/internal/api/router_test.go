@@ -1,11 +1,14 @@
 package api
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -61,6 +64,54 @@ type stubDriver struct {
 	updateErr    error
 	deleteCalls  []deleteRowsCall
 	deleteErr    error
+	// Console: raw SQL execution and cancel.
+	execCalls   []execCall
+	execResults []driver.Result
+	execErr     error
+	cancelCalls []string
+	cancelErr   error
+	// Transfer: dump export and data import.
+	exportCalls    []exportCall
+	exportErr      error
+	exportOutput   string
+	importSQLCalls []importSQLCall
+	importSQLErr   error
+	importCSVCalls []importCSVCall
+	importCSVErr   error
+	// progSteps are the progress callbacks the fake import methods emit
+	// (in order) before returning.
+	progSteps []progStep
+}
+
+// execCall records one ExecSQL invocation with its parsed options.
+type execCall struct {
+	db, query, queryID string
+	opts               driver.ExecOpts
+}
+
+// exportCall records one Export invocation: the request and the bytes the
+// fake wrote (or would have written).
+type exportCall struct {
+	req    driver.ExportRequest
+	output string
+}
+
+// importSQLCall records one ImportSQL invocation: the target database and
+// the raw bytes read from the input stream.
+type importSQLCall struct {
+	db    string
+	input string
+}
+
+// importCSVCall records one ImportCSV invocation.
+type importCSVCall struct {
+	db, table, input string
+	opts             driver.CSVImportOpts
+}
+
+// progStep is one progress(done, total) callback the fake emits.
+type progStep struct {
+	done, total int64
 }
 
 // identCall records a driver call addressed by (db, table).
@@ -203,24 +254,53 @@ func (d *stubDriver) UpsertRows(context.Context, string, string, []driver.RowVal
 	return nil
 }
 
-func (d *stubDriver) ExecSQL(context.Context, string, string, string, driver.ExecOpts) ([]driver.Result, error) {
-	return nil, nil
+// emitProg replays the configured progress steps.
+func (d *stubDriver) emitProg(progress func(done, total int64)) {
+	for _, s := range d.progSteps {
+		progress(s.done, s.total)
+	}
 }
 
-func (d *stubDriver) Export(context.Context, driver.ExportRequest, io.Writer) error {
-	return nil
+func (d *stubDriver) ExecSQL(_ context.Context, db, query, queryID string, opts driver.ExecOpts) ([]driver.Result, error) {
+	d.execCalls = append(d.execCalls, execCall{db, query, queryID, opts})
+	if d.execErr != nil {
+		return nil, d.execErr
+	}
+	return d.execResults, nil
 }
 
-func (d *stubDriver) ImportSQL(context.Context, string, io.Reader, func(done, total int64)) error {
-	return nil
+func (d *stubDriver) Export(_ context.Context, req driver.ExportRequest, w io.Writer) error {
+	d.exportCalls = append(d.exportCalls, exportCall{req: req, output: d.exportOutput})
+	if d.exportErr != nil {
+		return d.exportErr
+	}
+	_, err := io.WriteString(w, d.exportOutput)
+	return err
 }
 
-func (d *stubDriver) ImportCSV(context.Context, string, string, io.Reader, driver.CSVImportOpts, func(done, total int64)) error {
-	return nil
+func (d *stubDriver) ImportSQL(_ context.Context, db string, r io.Reader, progress func(done, total int64)) error {
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	d.importSQLCalls = append(d.importSQLCalls, importSQLCall{db: db, input: string(b)})
+	d.emitProg(progress)
+	return d.importSQLErr
 }
 
-func (d *stubDriver) CancelQuery(context.Context, string) error {
-	return nil
+func (d *stubDriver) ImportCSV(_ context.Context, db, table string, r io.Reader, opts driver.CSVImportOpts, progress func(done, total int64)) error {
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	d.importCSVCalls = append(d.importCSVCalls, importCSVCall{db: db, table: table, input: string(b), opts: opts})
+	d.emitProg(progress)
+	return d.importCSVErr
+}
+
+func (d *stubDriver) CancelQuery(_ context.Context, queryID string) error {
+	d.cancelCalls = append(d.cancelCalls, queryID)
+	return d.cancelErr
 }
 
 func (d *stubDriver) LastInsertID(context.Context) (int64, error) {
@@ -1382,5 +1462,547 @@ func TestRowsHandler_DriverValidationErrMapsTo400(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if code := errCode(t, body); code != "bad_request" {
 		t.Errorf("error code = %q, want %q", code, "bad_request")
+	}
+}
+
+// --- Console endpoints: query / cancel / explain ---
+
+func TestQueryHandler(t *testing.T) {
+	fake := &stubDriver{
+		info: driver.DriverInfo{Name: "FakeDB"},
+		execResults: []driver.Result{
+			{
+				Columns: []driver.ColumnMeta{{Name: "1", Type: "int", Nullable: false}},
+				Rows:    [][]any{{int64(1)}},
+				Seconds: 0.01,
+			},
+			{AffectedRows: 2, Seconds: 0.02},
+		},
+	}
+	h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, fake))
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	cookie := loginSession(t, srv)
+
+	body := `{"sql":"SELECT 1; SELECT 2","maxRows":500,"timeoutSec":30,"queryID":"q-1"}`
+	resp := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/databases/appdb/query", body, cookie)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST query status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	var got struct {
+		Results []driver.Result `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode query body: %v", err)
+	}
+	if len(got.Results) != 2 {
+		t.Fatalf("results = %+v, want 2 entries", got.Results)
+	}
+	if got.Results[0].Columns[0].Name != "1" || len(got.Results[0].Rows) != 1 || got.Results[0].Rows[0][0] != float64(1) {
+		t.Errorf("result[0] = %+v, want the driver's row result", got.Results[0])
+	}
+	if got.Results[1].AffectedRows != 2 {
+		t.Errorf("result[1].affectedRows = %d, want 2", got.Results[1].AffectedRows)
+	}
+
+	if len(fake.execCalls) != 1 {
+		t.Fatalf("ExecSQL called %d times, want 1", len(fake.execCalls))
+	}
+	call := fake.execCalls[0]
+	if call.db != "appdb" || call.query != "SELECT 1; SELECT 2" || call.queryID != "q-1" {
+		t.Errorf("ExecSQL args = %s/%s/%s, want appdb / raw sql / q-1", call.db, call.query, call.queryID)
+	}
+	if call.opts.MaxRows != 500 || call.opts.TimeoutSec != 30 {
+		t.Errorf("ExecSQL opts = %+v, want MaxRows 500 TimeoutSec 30", call.opts)
+	}
+
+	t.Run("empty results marshal as empty array", func(t *testing.T) {
+		fake.execResults = nil
+		resp := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/databases/appdb/query",
+			`{"sql":"SET @x=1","queryID":"q-2"}`, cookie)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("POST query status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		if !strings.Contains(string(raw), `"results":[]`) {
+			t.Errorf("body = %s, want it to contain %q", raw, `"results":[]`)
+		}
+	})
+}
+
+func TestQueryHandler_Validation(t *testing.T) {
+	fake := &stubDriver{info: driver.DriverInfo{Name: "FakeDB"}}
+	h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, fake))
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	cookie := loginSession(t, srv)
+
+	tests := []struct {
+		name, body string
+	}{
+		{"empty sql", `{"sql":"","queryID":"q-1"}`},
+		{"whitespace sql", `{"sql":"   ","queryID":"q-1"}`},
+		{"missing queryID", `{"sql":"SELECT 1"}`},
+		{"maxRows over the cap", `{"sql":"SELECT 1","queryID":"q-1","maxRows":100001}`},
+		{"timeoutSec over the cap", `{"sql":"SELECT 1","queryID":"q-1","timeoutSec":3601}`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/databases/appdb/query", tc.body, cookie)
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("POST query %s status = %d, want %d", tc.body, resp.StatusCode, http.StatusBadRequest)
+			}
+			b, _ := io.ReadAll(resp.Body)
+			if code := errCode(t, b); code != "bad_request" {
+				t.Errorf("error code = %q, want %q", code, "bad_request")
+			}
+		})
+	}
+	if len(fake.execCalls) != 0 {
+		t.Errorf("ExecSQL called %d times on invalid bodies, want 0", len(fake.execCalls))
+	}
+
+	// The caps themselves are accepted and passed through.
+	resp := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/databases/appdb/query",
+		`{"sql":"SELECT 1","queryID":"q-1","maxRows":100000,"timeoutSec":3600}`, cookie)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST query at the caps status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if call := fake.execCalls[0]; call.opts.MaxRows != 100000 || call.opts.TimeoutSec != 3600 {
+		t.Errorf("ExecSQL opts = %+v, want MaxRows 100000 TimeoutSec 3600", call.opts)
+	}
+}
+
+func TestCancelHandler(t *testing.T) {
+	fake := &stubDriver{info: driver.DriverInfo{Name: "FakeDB"}}
+	h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, fake))
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	cookie := loginSession(t, srv)
+
+	resp := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/query/q-9/cancel", "", cookie)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("POST cancel status = %d, want %d", resp.StatusCode, http.StatusNoContent)
+	}
+	if len(fake.cancelCalls) != 1 || fake.cancelCalls[0] != "q-9" {
+		t.Errorf("CancelQuery ids = %v, want [q-9]", fake.cancelCalls)
+	}
+
+	// Cancel is idempotent: even a driver-level failure (a query that
+	// already finished) still answers 204.
+	fake.cancelErr = errors.New("query not found")
+	resp = apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/query/q-9/cancel", "", cookie)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("POST cancel with driver error status = %d, want %d", resp.StatusCode, http.StatusNoContent)
+	}
+}
+
+func TestExplainHandler(t *testing.T) {
+	fake := &stubDriver{
+		info: driver.DriverInfo{Name: "FakeDB"},
+		execResults: []driver.Result{
+			{Columns: []driver.ColumnMeta{{Name: "id", Type: "select_type"}}, Rows: [][]any{{int64(1), "SIMPLE"}}},
+		},
+	}
+	h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, fake))
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	cookie := loginSession(t, srv)
+
+	resp := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/query",
+		`{"db":"appdb","sql":"SELECT * FROM users"}`, cookie)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST explain status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if len(fake.execCalls) != 1 {
+		t.Fatalf("ExecSQL called %d times, want 1", len(fake.execCalls))
+	}
+	call := fake.execCalls[0]
+	if call.query != "EXPLAIN SELECT * FROM users" {
+		t.Errorf("ExecSQL query = %q, want the EXPLAIN-prefixed statement", call.query)
+	}
+	if call.db != "appdb" {
+		t.Errorf("ExecSQL db = %q, want %q", call.db, "appdb")
+	}
+	if call.opts.TimeoutSec != 60 {
+		t.Errorf("ExecSQL timeoutSec = %d, want 60", call.opts.TimeoutSec)
+	}
+	if call.queryID == "" {
+		t.Error("ExecSQL queryID is empty, want a generated id")
+	}
+	var got struct {
+		Result *driver.Result `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode explain body: %v", err)
+	}
+	if got.Result == nil || len(got.Result.Rows) != 1 {
+		t.Errorf("explain result = %+v, want the driver's plan row", got.Result)
+	}
+
+	t.Run("empty sql", func(t *testing.T) {
+		resp := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/query",
+			`{"db":"appdb","sql":""}`, cookie)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("POST explain empty sql status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+		}
+	})
+}
+
+// --- Transfer endpoints: export / import ---
+
+func TestExportHandler_Validation(t *testing.T) {
+	fake := &stubDriver{info: driver.DriverInfo{Name: "FakeDB"}}
+	h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, fake))
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	cookie := loginSession(t, srv)
+
+	tests := []struct {
+		name, body string
+	}{
+		{"unknown format", `{"format":"xlsx"}`},
+		{"missing format", `{}`},
+		{"csv without table", `{"format":"csv","tables":[]}`},
+		{"csv with two tables", `{"format":"csv","tables":["a","b"]}`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/databases/appdb/export", tc.body, cookie)
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("POST export %s status = %d, want %d", tc.body, resp.StatusCode, http.StatusBadRequest)
+			}
+			b, _ := io.ReadAll(resp.Body)
+			if code := errCode(t, b); code != "bad_request" {
+				t.Errorf("error code = %q, want %q", code, "bad_request")
+			}
+			// Validation happens before any byte is streamed: the error
+			// response is the JSON envelope, not an attachment.
+			if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+				t.Errorf("error Content-Type = %q, want application/json", ct)
+			}
+		})
+	}
+	// The driver is never called for an invalid export body.
+	if len(fake.exportCalls) != 0 {
+		t.Errorf("Export called %d times on invalid bodies, want 0", len(fake.exportCalls))
+	}
+}
+
+func TestExportHandler_StreamHeaders(t *testing.T) {
+	tests := []struct {
+		name     string
+		format   string
+		gzip     bool
+		wantCT   string
+		wantName string
+	}{
+		{"sql dump", "sql", false, "application/sql", "dump.sql"},
+		{"csv dump", "csv", false, "text/csv", "dump.csv"},
+		{"semicolon csv dump", "csv_semicolon", false, "text/csv", "dump.csv"},
+		{"tsv dump", "tsv", false, "text/tab-separated-values", "dump.tsv"},
+		{"gzipped sql dump", "sql", true, "application/sql", "dump.sql.gz"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &stubDriver{info: driver.DriverInfo{Name: "FakeDB"}, exportOutput: "DUMP-DATA"}
+			h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, fake))
+			srv := httptest.NewServer(h)
+			t.Cleanup(srv.Close)
+			cookie := loginSession(t, srv)
+
+			body := fmt.Sprintf(`{"format":%q,"gzip":%t,"tables":%s}`, tc.format, tc.gzip, tablesFor(tc.format))
+			resp := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/databases/appdb/export", body, cookie)
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("POST export status = %d, want %d", resp.StatusCode, http.StatusOK)
+			}
+			if ct := resp.Header.Get("Content-Type"); ct != tc.wantCT {
+				t.Errorf("Content-Type = %q, want %q", ct, tc.wantCT)
+			}
+			wantCD := `attachment; filename="` + tc.wantName + `"`
+			if cd := resp.Header.Get("Content-Disposition"); cd != wantCD {
+				t.Errorf("Content-Disposition = %q, want %q", cd, wantCD)
+			}
+			raw, _ := io.ReadAll(resp.Body)
+			if !strings.Contains(string(raw), "DUMP-DATA") {
+				t.Errorf("streamed body = %q, want the fake driver's output", raw)
+			}
+			if len(fake.exportCalls) != 1 {
+				t.Fatalf("Export called %d times, want 1", len(fake.exportCalls))
+			}
+			if fake.exportCalls[0].req.Format != tc.format || fake.exportCalls[0].req.Gzip != tc.gzip {
+				t.Errorf("Export request = %+v, want the decoded body", fake.exportCalls[0].req)
+			}
+		})
+	}
+}
+
+// tablesFor returns the Tables JSON for an export body: csv/tsv dumps name
+// exactly one table, sql dumps the whole database.
+func tablesFor(format string) string {
+	if format == "sql" {
+		return "[]"
+	}
+	return `["users"]`
+}
+
+func TestExportHandler_DriverErrorTruncates(t *testing.T) {
+	// Documented ruling 3: once the attachment headers are sent, a driver
+	// error mid-stream cannot become a JSON envelope — the connection is
+	// simply cut, so the status stays 200 with a truncated body.
+	fake := &stubDriver{info: driver.DriverInfo{Name: "FakeDB"}, exportErr: errors.New("dump: boom")}
+	h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, fake))
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	cookie := loginSession(t, srv)
+
+	resp := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/databases/appdb/export",
+		`{"format":"sql","tables":[]}`, cookie)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("POST export with driver error status = %d, want %d (headers already sent)", resp.StatusCode, http.StatusOK)
+	}
+	if len(fake.exportCalls) != 1 {
+		t.Errorf("Export called %d times, want 1", len(fake.exportCalls))
+	}
+}
+
+// multipartImport sends a POST /api/databases/appdb/import with the given
+// form fields (sent before the file part) and the named file.
+func multipartImport(t *testing.T, srv *httptest.Server, cookie string, fields map[string]string, fileName, fileContent []byte) *http.Response {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	for k, v := range fields {
+		if err := mw.WriteField(k, v); err != nil {
+			t.Fatalf("write field %s: %v", k, err)
+		}
+	}
+	if fileName != nil {
+		fw, err := mw.CreateFormFile("file", string(fileName))
+		if err != nil {
+			t.Fatalf("create form file: %v", err)
+		}
+		if _, err := fw.Write(fileContent); err != nil {
+			t.Fatalf("write file content: %v", err)
+		}
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/databases/appdb/import", &buf)
+	if err != nil {
+		t.Fatalf("build import request: %v", err)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: cookie})
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("POST import: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	return resp
+}
+
+// ndjsonLines decodes a JSON-lines body into ordered objects.
+func ndjsonLines(t *testing.T, raw []byte) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	for dec.More() {
+		var m map[string]any
+		if err := dec.Decode(&m); err != nil {
+			t.Fatalf("decode ndjson line from %q: %v", raw, err)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+func TestImportHandler_Multipart(t *testing.T) {
+	t.Run("sql import streams progress", func(t *testing.T) {
+		fake := &stubDriver{info: driver.DriverInfo{Name: "FakeDB"}, progSteps: []progStep{{100, 200}, {200, 200}}}
+		h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, fake))
+		srv := httptest.NewServer(h)
+		t.Cleanup(srv.Close)
+		cookie := loginSession(t, srv)
+
+		resp := multipartImport(t, srv, cookie,
+			map[string]string{"type": "sql"}, []byte("dump.sql"), []byte("INSERT INTO t VALUES (1);"))
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("POST import status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+		if ct := resp.Header.Get("Content-Type"); ct != "application/x-ndjson" {
+			t.Errorf("Content-Type = %q, want application/x-ndjson", ct)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		lines := ndjsonLines(t, raw)
+		if len(lines) != 3 {
+			t.Fatalf("progress lines = %v, want 3 (2 progress + final ok)", lines)
+		}
+		if lines[0]["done"] != float64(100) || lines[0]["total"] != float64(200) || lines[0]["ok"] != nil {
+			t.Errorf("line[0] = %v, want {done:100,total:200}", lines[0])
+		}
+		if lines[1]["done"] != float64(200) || lines[1]["total"] != float64(200) {
+			t.Errorf("line[1] = %v, want {done:200,total:200}", lines[1])
+		}
+		if lines[2]["done"] != float64(200) || lines[2]["ok"] != true || lines[2]["error"] != nil {
+			t.Errorf("line[2] = %v, want the final {done:200,ok:true}", lines[2])
+		}
+
+		if len(fake.importSQLCalls) != 1 {
+			t.Fatalf("ImportSQL called %d times, want 1", len(fake.importSQLCalls))
+		}
+		call := fake.importSQLCalls[0]
+		if call.db != "appdb" || call.input != "INSERT INTO t VALUES (1);" {
+			t.Errorf("ImportSQL call = %+v, want appdb with the raw file content", call)
+		}
+	})
+
+	t.Run("sql import error stops the stream", func(t *testing.T) {
+		fake := &stubDriver{
+			info:         driver.DriverInfo{Name: "FakeDB"},
+			progSteps:    []progStep{{120, 200}},
+			importSQLErr: errors.New("syntax error at line 3"),
+		}
+		h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, fake))
+		srv := httptest.NewServer(h)
+		t.Cleanup(srv.Close)
+		cookie := loginSession(t, srv)
+
+		resp := multipartImport(t, srv, cookie,
+			map[string]string{"type": "sql"}, []byte("dump.sql"), []byte("SELECT 1;"))
+		raw, _ := io.ReadAll(resp.Body)
+		lines := ndjsonLines(t, raw)
+		if len(lines) != 2 {
+			t.Fatalf("progress lines = %v, want 2 (progress + error, then stop)", lines)
+		}
+		if lines[1]["done"] != float64(120) || lines[1]["error"] != "syntax error at line 3" || lines[1]["ok"] != nil {
+			t.Errorf("line[1] = %v, want {done:120,error:...} without ok", lines[1])
+		}
+	})
+
+	t.Run("csv import parses options", func(t *testing.T) {
+		fake := &stubDriver{info: driver.DriverInfo{Name: "FakeDB"}, progSteps: []progStep{{2, 2}}}
+		h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, fake))
+		srv := httptest.NewServer(h)
+		t.Cleanup(srv.Close)
+		cookie := loginSession(t, srv)
+
+		resp := multipartImport(t, srv, cookie,
+			map[string]string{"type": "csv", "table": "users", "separator": ";", "enclosure": "\"", "skipHeader": "true"},
+			[]byte("data.csv"), []byte("name;age\nada;36\ngrace;29\n"))
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("POST import status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		lines := ndjsonLines(t, raw)
+		if len(lines) != 2 || lines[1]["ok"] != true || lines[1]["done"] != float64(2) {
+			t.Errorf("lines = %v, want progress + final {done:2,ok:true}", lines)
+		}
+
+		if len(fake.importCSVCalls) != 1 {
+			t.Fatalf("ImportCSV called %d times, want 1", len(fake.importCSVCalls))
+		}
+		call := fake.importCSVCalls[0]
+		if call.db != "appdb" || call.table != "users" || !strings.Contains(call.input, "ada;36") {
+			t.Errorf("ImportCSV call = %+v, want appdb.users with the raw file content", call)
+		}
+		want := driver.CSVImportOpts{Separator: ";", Enclosure: "\"", SkipHeader: true}
+		if call.opts != want {
+			t.Errorf("ImportCSV opts = %+v, want %+v", call.opts, want)
+		}
+	})
+
+	t.Run("gzipped sql passes through untouched", func(t *testing.T) {
+		fake := &stubDriver{info: driver.DriverInfo{Name: "FakeDB"}}
+		h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, fake))
+		srv := httptest.NewServer(h)
+		t.Cleanup(srv.Close)
+		cookie := loginSession(t, srv)
+
+		// The driver decompresses gzip transparently; the API layer must
+		// hand over the stream without reading or rewriting it.
+		var gz bytes.Buffer
+		zw := gzip.NewWriter(&gz)
+		if _, err := zw.Write([]byte("INSERT INTO t VALUES (1);")); err != nil {
+			t.Fatalf("gzip write: %v", err)
+		}
+		if err := zw.Close(); err != nil {
+			t.Fatalf("gzip close: %v", err)
+		}
+
+		resp := multipartImport(t, srv, cookie,
+			map[string]string{"type": "sql"}, []byte("dump.sql.gz"), gz.Bytes())
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("POST import status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+		if len(fake.importSQLCalls) != 1 {
+			t.Fatalf("ImportSQL called %d times, want 1", len(fake.importSQLCalls))
+		}
+		if got := fake.importSQLCalls[0].input; got != gz.String() {
+			t.Errorf("ImportSQL input differs from the uploaded gzip stream")
+		}
+	})
+
+	t.Run("csv without table", func(t *testing.T) {
+		fake := &stubDriver{info: driver.DriverInfo{Name: "FakeDB"}}
+		h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, fake))
+		srv := httptest.NewServer(h)
+		t.Cleanup(srv.Close)
+		cookie := loginSession(t, srv)
+
+		resp := multipartImport(t, srv, cookie,
+			map[string]string{"type": "csv"}, []byte("data.csv"), []byte("a,b\n"))
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("POST csv import without table status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+		}
+		if len(fake.importCSVCalls) != 0 {
+			t.Errorf("ImportCSV called %d times, want 0", len(fake.importCSVCalls))
+		}
+	})
+
+	t.Run("missing file part", func(t *testing.T) {
+		fake := &stubDriver{info: driver.DriverInfo{Name: "FakeDB"}}
+		h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, fake))
+		srv := httptest.NewServer(h)
+		t.Cleanup(srv.Close)
+		cookie := loginSession(t, srv)
+
+		resp := multipartImport(t, srv, cookie,
+			map[string]string{"type": "sql"}, nil, nil)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("POST import without file status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+		}
+		if len(fake.importSQLCalls) != 0 {
+			t.Errorf("ImportSQL called %d times, want 0", len(fake.importSQLCalls))
+		}
+	})
+}
+
+func TestImportHandler_InvalidType(t *testing.T) {
+	fake := &stubDriver{info: driver.DriverInfo{Name: "FakeDB"}}
+	h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, fake))
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	cookie := loginSession(t, srv)
+
+	for _, typ := range []string{"xml", ""} {
+		fields := map[string]string{"type": typ}
+		if typ == "" {
+			delete(fields, "type")
+		}
+		resp := multipartImport(t, srv, cookie, fields, []byte("data.xml"), []byte("<a/>"))
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("POST import type=%q status = %d, want %d", typ, resp.StatusCode, http.StatusBadRequest)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		if code := errCode(t, raw); code != "bad_request" {
+			t.Errorf("error code = %q, want %q", code, "bad_request")
+		}
+	}
+	if len(fake.importSQLCalls)+len(fake.importCSVCalls) != 0 {
+		t.Errorf("import driver called on an invalid type, want 0 calls")
 	}
 }

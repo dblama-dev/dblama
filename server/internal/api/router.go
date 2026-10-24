@@ -55,6 +55,17 @@ func NewRouter(cfg config.Config, sessions *session.Store, drivers *driver.Regis
 			authed.Delete("/session", s.handleLogout)
 			authed.Get("/databases", s.handleDatabases)
 
+			// Console: raw SQL execution, cancel and EXPLAIN. Every
+			// route is a POST and already covered by the group's
+			// RequireCSRFHeader.
+			authed.Post("/databases/{db}/query", s.handleQuery)
+			authed.Post("/query/{queryID}/cancel", s.handleCancel)
+			authed.Post("/query", s.handleExplain)
+
+			// Dump export and data import.
+			authed.Post("/databases/{db}/export", s.handleExport)
+			authed.Post("/databases/{db}/import", s.handleImport)
+
 			// Tables and rows of one database. Every non-GET route is
 			// already covered by the group's RequireCSRFHeader.
 			authed.Route("/databases/{db}/tables", func(tables chi.Router) {
