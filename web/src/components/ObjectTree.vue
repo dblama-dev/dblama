@@ -14,7 +14,10 @@
       clearable
       :placeholder="t('tree.search')"
     />
-    <n-alert v-if="catalog.error" type="error" :title="t('tree.loadFailed')">
+    <n-alert v-if="dbsError" type="error" :title="t('tree.selectDb')">
+      {{ dbsError }}
+    </n-alert>
+    <n-alert v-else-if="catalog.error" type="error" :title="t('tree.loadFailed')">
       {{ catalog.error }}
     </n-alert>
     <n-tree
