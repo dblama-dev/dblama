@@ -34,11 +34,14 @@ export default {
     tables: 'Tables',
     views: 'Views',
     selectTable: 'Select a table',
+    newTable: 'New table',
     loadFailed: 'Failed to load the table list',
   },
   table: {
     data: 'Data',
     structure: 'Structure',
+    new: 'New table',
+    newDataHint: 'The table does not exist yet — fill in the structure and save.',
   },
   grid: {
     addRow: 'Add row',

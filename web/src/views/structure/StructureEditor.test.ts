@@ -71,7 +71,7 @@ function mockBase(): void {
   })
 }
 
-function mountEditor(): ReturnType<typeof mount> {
+function mountEditor(table = 'users'): ReturnType<typeof mount> {
   const pinia = createPinia()
   setActivePinia(pinia)
     // Teleport is stubbed so notification content stays inside the wrapper.
@@ -80,7 +80,7 @@ function mountEditor(): ReturnType<typeof mount> {
         setup() {
           return () =>
             h(NNotificationProvider, null, {
-              default: () => h(StructureEditor, { db: 'mydb', table: 'users' }),
+              default: () => h(StructureEditor, { db: 'mydb', table }),
             })
         },
       }),
@@ -215,6 +215,13 @@ describe('StructureEditor', () => {
     await clickSave(wrapper)
 
     expect(putBodies()[0].columns.map((c) => c.name)).toEqual(['title', 'id', 'size'])
+    // Every row carries its placement from the new display order — that
+    // is what makes the reorder a server-side effect (MODIFY ... FIRST /
+    // AFTER) instead of a silent no-op.
+    const positions = Object.fromEntries(
+      putBodies()[0].columns.map((c) => [c.name, c.position]),
+    )
+    expect(positions).toEqual({ title: 'FIRST', id: 'title', size: 'id' })
     wrapper.unmount()
   })
 
@@ -283,7 +290,10 @@ describe('StructureEditor', () => {
     expect(puts[0]).toEqual({
       newName: 'users',
       columns: [
-        { name: 'id', oldName: 'id', type: 'int', nullable: false, autoIncrement: true },
+        // Every column carries its position from the display order (the
+        // backend renders FIRST/AFTER for MODIFY as well; an unchanged
+        // position is an idempotent no-op on the server).
+        { name: 'id', oldName: 'id', type: 'int', nullable: false, autoIncrement: true, position: 'FIRST' },
         {
           name: 'title',
           oldName: 'title',
@@ -291,6 +301,7 @@ describe('StructureEditor', () => {
           length: '255',
           nullable: true,
           default: { value: 'untitled', isSqlExpression: false },
+          position: 'id',
         },
         {
           name: 'size',
@@ -299,6 +310,7 @@ describe('StructureEditor', () => {
           length: '10,2',
           unsigned: true,
           nullable: true,
+          position: 'title',
         },
       ],
       indexes: def.indexes,
@@ -353,6 +365,43 @@ describe('StructureEditor', () => {
     expect(mockedApi).toHaveBeenCalledWith('POST', `${defUrl}/indexes`, [
       { name: 'PRIMARY', type: 'PRIMARY', columns: [{ name: 'id' }] },
     ])
+    wrapper.unmount()
+  })
+
+  it('create mode: no def fetch, PUT to tables/_new and a created event with the new name', async () => {
+    const newUrl = '/api/databases/mydb/tables/_new'
+    mockedApi.mockImplementation(async (method, url) => {
+      if (method === 'PUT' && url === newUrl) return undefined
+      throw new Error(`unexpected api call: ${method} ${url}`)
+    })
+    const wrapper = mountEditor('_new')
+    await flushPromises()
+
+    // The _new placeholder has no definition behind it: no GET.
+    expect(mockedApi).not.toHaveBeenCalledWith('GET', newUrl)
+    // The table name field starts empty and the save button is disabled
+    // until a table name and at least one column exist.
+    expect(wrapper.find('[data-testid="struct-save"]').attributes('disabled')).toBeDefined()
+
+    wrapper.find('.struct-field--table-name').findComponent(NInput).vm.$emit('update:value', 'newtbl')
+    await wrapper.find('[data-testid="struct-add"]').trigger('click')
+    await flushPromises()
+    const added = rows(wrapper)[0]
+    setString(added, 'struct-field--name', 'id')
+    field(added, 'struct-field--type').findComponent(NSelect).vm.$emit('update:value', 'int')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="struct-save"]').attributes('disabled')).toBeUndefined()
+    await clickSave(wrapper)
+
+    expect(mockedApi).toHaveBeenCalledWith('PUT', newUrl, {
+      newName: 'newtbl',
+      columns: [{ name: 'id', type: 'int', nullable: true, position: 'FIRST' }],
+      indexes: [],
+      foreignKeys: [],
+      options: {},
+    })
+    expect(wrapper.findComponent(StructureEditor).emitted('created')).toEqual([['newtbl']])
     wrapper.unmount()
   })
 })

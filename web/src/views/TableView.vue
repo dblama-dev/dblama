@@ -2,14 +2,19 @@
   <section class="table-view">
     <n-breadcrumb>
       <n-breadcrumb-item>{{ db }}</n-breadcrumb-item>
-      <n-breadcrumb-item>{{ table }}</n-breadcrumb-item>
+      <n-breadcrumb-item>{{ isNewTable ? t('table.new') : table }}</n-breadcrumb-item>
     </n-breadcrumb>
     <n-tabs type="line" :value="view" @update:value="switchView">
       <n-tab name="data">{{ t('table.data') }}</n-tab>
       <n-tab name="structure">{{ t('table.structure') }}</n-tab>
     </n-tabs>
+    <!-- Create mode (_new): no rows exist yet, the data tab is a
+         placeholder and only the structure editor is usable. -->
+    <div v-if="view === 'data' && isNewTable" class="table-view__placeholder">
+      {{ t('table.newDataHint') }}
+    </div>
     <DataGrid
-      v-if="view === 'data'"
+      v-else-if="view === 'data'"
       :columns="page?.columns ?? []"
       :rows="page?.rows ?? []"
       :total-rows="page?.totalRows ?? 0"
@@ -33,8 +38,10 @@
       :db="db"
       :table="table"
       @renamed="onTableRenamed"
+      @created="onTableCreated"
     />
     <RowModal
+      v-if="!isNewTable"
       :show="rowModal.show"
       :mode="rowModal.mode"
       :rows-path="rowsPath"
@@ -56,6 +63,7 @@ import { NBreadcrumb, NBreadcrumbItem, NTab, NTabs } from 'naive-ui'
 
 import { api, ApiError } from '../api/client'
 import type { ColumnDef, Page, TableDef } from '../api/types'
+import { useCatalogStore } from '../stores/catalog'
 import DataGrid from '../components/DataGrid.vue'
 import RowModal from '../components/RowModal.vue'
 import StructureEditor from './structure/StructureEditor.vue'
@@ -71,6 +79,8 @@ const notification = useNotification()
 const db = computed(() => String(route.params.db ?? ''))
 const table = computed(() => String(route.params.t ?? ''))
 const view = computed(() => (route.query.view === 'structure' ? 'structure' : 'data'))
+// The literal "_new" is the create-table placeholder, not a table name.
+const isNewTable = computed(() => table.value === '_new')
 
 function switchView(next: string | number): void {
   void router.push({ query: { ...route.query, view: next } })
@@ -83,6 +93,17 @@ async function onTableRenamed(next: string): Promise<void> {
     name: route.name,
     params: { ...route.params, t: next },
     query: route.query,
+  })
+}
+
+// After a create-mode save: refresh the tree with the new table and move
+// the route onto it (structure view stays open for further editing).
+async function onTableCreated(next: string): Promise<void> {
+  await useCatalogStore().invalidate(db.value)
+  await router.replace({
+    name: route.name,
+    params: { ...route.params, t: next },
+    query: { ...route.query, view: 'structure' },
   })
 }
 
@@ -152,6 +173,8 @@ async function refetch(): Promise<void> {
 }
 
 async function reload(): Promise<void> {
+  // The _new placeholder has no table behind it — no pk or rows fetch.
+  if (isNewTable.value) return
   pageIndex.value = 1
   sort.value = null
   filters.value = []
@@ -263,5 +286,10 @@ function onRowSaved(): void {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.table-view__placeholder {
+  padding: 24px;
+  opacity: 0.6;
 }
 </style>

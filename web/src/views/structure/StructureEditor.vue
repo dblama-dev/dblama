@@ -19,7 +19,13 @@ import OptionsEditor from './OptionsEditor.vue'
 //     "FIRST" or "AFTER <previous column>")
 //   - oldName != "" + type == ""  → DROP
 // The read side sets oldName = name, so an untouched round-trip only
-// produces MODIFY statements.
+// produces MODIFY statements. Every row carries a position (FIRST or
+// AFTER the previous displayed column), so reordering existing columns
+// reaches the server too.
+// Create mode: when the route's table is the literal "_new" no
+// definition is fetched; saving PUTs the whole TableDef to
+// /tables/_new (an empty table name makes the backend CREATE it) and
+// the created name is reported back via the created event.
 
 interface EditableColumn {
   key: number
@@ -45,7 +51,7 @@ interface EditableColumn {
 }
 
 const props = defineProps<{ db: string; table: string }>()
-const emit = defineEmits<{ renamed: [name: string] }>()
+const emit = defineEmits<{ renamed: [name: string]; created: [name: string] }>()
 
 const { t } = useI18n()
 const notification = useNotification()
@@ -95,9 +101,13 @@ const path = computed(
     `/api/databases/${encodeURIComponent(props.db)}/tables/${encodeURIComponent(props.table)}`,
 )
 
+// Create mode: the route addresses the literal "_new" placeholder, no
+// definition exists yet.
+const createMode = computed(() => props.table === '_new')
+
 const loading = ref(false)
 const saving = ref(false)
-const tableName = ref(props.table)
+const tableName = ref(props.table === '_new' ? '' : props.table)
 const rows = ref<EditableColumn[]>([])
 const options = ref<TableOptions>({})
 const indexes = ref<Index[]>([])
@@ -141,6 +151,7 @@ function fromDef(c: ColumnDef): EditableColumn {
 }
 
 async function load(): Promise<void> {
+  if (createMode.value) return
   loading.value = true
   try {
     const def = await api<TableDef>('GET', path.value)
@@ -238,6 +249,10 @@ function onGeneratedChanged(row: EditableColumn, value: '' | 'VIRTUAL' | 'STORED
 const canSave = computed(
   () =>
     tableName.value.trim() !== '' &&
+    // Create mode needs at least one column (the backend rejects an
+    // empty CREATE TABLE anyway); alter mode with zero surviving rows
+    // is left to the backend to report.
+    (!createMode.value || rows.value.some((r) => !r.markedForDeletion)) &&
     rows.value
       .filter((r) => !r.markedForDeletion)
       .every((r) => r.name.trim() !== '' && r.type.trim() !== ''),
@@ -281,10 +296,13 @@ function toColumnDef(row: EditableColumn, after: string): ColumnDef {
   if (collation !== '') col.collation = collation
   if (row.comment !== '') col.comment = row.comment
 
-  // New columns only: placement is FIRST or AFTER the previous column of
-  // the desired order (buildAlterTable takes it from the position field,
-  // not from the array order).
-  if (!row.originalName) col.position = after || 'FIRST'
+  // Every column (not only new ones) carries its placement from the
+  // desired display order — FIRST for the first row, AFTER the previous
+  // non-deleted row otherwise. For an unchanged MODIFY the clause is a
+  // harmless, idempotent no-op; for a moved column it is what makes the
+  // reorder reach the server at all (buildAlterTable takes the placement
+  // from the position field, not from the array order).
+  col.position = after || 'FIRST'
   return col
 }
 
@@ -308,6 +326,22 @@ function buildColumns(): ColumnDef[] {
 async function save(): Promise<void> {
   saving.value = true
   try {
+    if (createMode.value) {
+      // The empty table name is the backend's CREATE TABLE contract;
+      // the name of the new table travels in newName.
+      await api('PUT', path.value, {
+        newName: tableName.value,
+        columns: buildColumns(),
+        indexes: indexes.value,
+        foreignKeys: foreignKeys.value,
+        options: options.value,
+      })
+      notification.success({ content: t('structure.saved'), duration: 3000 })
+      // The parent navigates to the new table (and invalidates the
+      // catalog); the db/table watch then loads the fresh definition.
+      emit('created', tableName.value)
+      return
+    }
     await api('PUT', path.value, {
       newName: tableName.value,
       columns: buildColumns(),
@@ -574,10 +608,16 @@ async function save(): Promise<void> {
         </NButton>
       </div>
 
-      <h3 class="structure-editor__title">
+      <h3
+        v-if="!createMode"
+        class="structure-editor__title"
+      >
         {{ t('structure.indexes') }}
       </h3>
+      <!-- The indexes endpoint only exists for a saved table; on create
+           the inline indexes list of the PUT body is used instead. -->
       <IndexEditor
+        v-if="!createMode"
         :db="db"
         :table="table"
         :indexes="indexes"

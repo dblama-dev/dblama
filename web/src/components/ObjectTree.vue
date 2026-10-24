@@ -34,10 +34,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, h, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { NAlert, NInput, NSelect, NTree, type TreeOption } from 'naive-ui'
+import { NAlert, NButton, NInput, NSelect, NTree, type TreeOption } from 'naive-ui'
 
 import { api } from '../api/client'
 import { useCatalogStore } from '../stores/catalog'
@@ -105,7 +105,25 @@ const treeData = computed<TreeOption[]>(() => {
     .filter((table) => !table.isView && matches(table.name))
     .map((table) => ({ key: `table:${table.name}`, label: table.name, isLeaf: true }))
   const children: TreeOption[] = [
-    { key: 'group:tables', label: t('tree.tables'), children: tables },
+    {
+      key: 'group:tables',
+      label: t('tree.tables'),
+      children: tables,
+      // The "+" opens the structure editor on the _new placeholder to
+      // create a table; stopPropagation keeps the click from selecting
+      // or expanding the group node.
+      suffix: () =>
+        h(NButton, {
+          size: 'tiny',
+          quaternary: true,
+          title: t('tree.newTable'),
+          'data-testid': 'tree-add-table',
+          onClick: (e: MouseEvent) => {
+            e.stopPropagation()
+            void createTable()
+          },
+        }, { default: () => '+' }),
+    },
   ]
   const views = catalog.tables
     .filter((table) => table.isView && matches(table.name))
@@ -124,6 +142,12 @@ function onSelect(keys: string[]): void {
   selectedKeys.value = [key]
   // Identifiers may contain %, ? or #; vue-router decodes params on read.
   void router.push(`/db/${encodeURIComponent(db.value)}/table/${encodeURIComponent(table)}`)
+}
+
+/** Opens the create-table structure editor on the _new placeholder. */
+function createTable(): void {
+  if (db.value === null) return
+  void router.push(`/db/${encodeURIComponent(db.value)}/table/${encodeURIComponent('_new')}?view=structure`)
 }
 </script>
 

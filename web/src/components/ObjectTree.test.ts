@@ -122,6 +122,17 @@ describe('ObjectTree', () => {
     expect(pushSpy).toHaveBeenCalledWith('/db/mydb/table/users')
   })
 
+  it('pushes the _new structure route when the tables group "+" button is clicked', async () => {
+    const wrapper = await mountTree()
+
+    const add = wrapper.find('[data-testid="tree-add-table"]')
+    expect(add.exists()).toBe(true)
+    await add.trigger('click')
+    await flushPromises()
+
+    expect(pushSpy).toHaveBeenCalledWith('/db/mydb/table/_new?view=structure')
+  })
+
   it('URL-encodes identifiers with special characters in navigation', async () => {
     // Names like "data 100%" are legal MySQL identifiers; %, ? and # would
     // break or truncate the path if pushed raw.
