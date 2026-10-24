@@ -28,9 +28,12 @@
       @delete-row="deleteRows([$event])"
       @delete-rows="deleteRows"
     />
-    <p v-else class="table-view__stub">
-      {{ view }}: {{ db }}.{{ table }}
-    </p>
+    <StructureEditor
+      v-else-if="view === 'structure'"
+      :db="db"
+      :table="table"
+      @renamed="onTableRenamed"
+    />
     <RowModal
       :show="rowModal.show"
       :mode="rowModal.mode"
@@ -55,6 +58,7 @@ import { api, ApiError } from '../api/client'
 import type { ColumnDef, Page, TableDef } from '../api/types'
 import DataGrid from '../components/DataGrid.vue'
 import RowModal from '../components/RowModal.vue'
+import StructureEditor from './structure/StructureEditor.vue'
 import { buildRowsQuery, type RowsFilter, type RowsSort } from '../lib/tableQuery'
 
 const { t } = useI18n()
@@ -70,6 +74,16 @@ const view = computed(() => (route.query.view === 'structure' ? 'structure' : 'd
 
 function switchView(next: string | number): void {
   void router.push({ query: { ...route.query, view: next } })
+}
+
+// After a structure-editor rename the route must follow the new table
+// name; the db/table watches then reload both views' data.
+async function onTableRenamed(next: string): Promise<void> {
+  await router.replace({
+    name: route.name,
+    params: { ...route.params, t: next },
+    query: route.query,
+  })
 }
 
 const rowsPath = computed(
@@ -249,9 +263,5 @@ function onRowSaved(): void {
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-
-.table-view__stub {
-  opacity: 0.6;
 }
 </style>
