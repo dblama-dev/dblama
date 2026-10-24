@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/hitslab/db-manager/server/internal/driver"
-	"github.com/hitslab/db-manager/server/internal/sqlgen"
 )
 
 // saveImageExpectations holds the per-image read-back expectations of the
@@ -351,18 +350,18 @@ func TestSaveTable_RoundTripPreservesColumns(t *testing.T) {
 	}
 }
 
-// queryCount returns COUNT(*) of one table read over a raw connection
+// queryCount returns COUNT(*) of db.table read over a raw connection
 // (TableInfo.Rows is only an estimate for InnoDB).
-func queryCount(t *testing.T, cfg driver.ConnConfig, table string) int64 {
+func queryCount(t *testing.T, cfg driver.ConnConfig, db, table string) int64 {
 	t.Helper()
-	db, err := sql.Open("mysql", DSN(cfg, cfg.Password))
+	dsnDB, err := sql.Open("mysql", DSN(cfg, cfg.Password))
 	if err != nil {
 		t.Fatalf("open count connection: %v", err)
 	}
-	defer func() { _ = db.Close() }()
+	defer func() { _ = dsnDB.Close() }()
 	var n int64
-	if err := db.QueryRow("SELECT COUNT(*) FROM " + sqlgen.QuoteIdent(table)).Scan(&n); err != nil {
-		t.Fatalf("count %s: %v", table, err)
+	if err := dsnDB.QueryRow("SELECT COUNT(*) FROM " + qualifiedIdent(db, table)).Scan(&n); err != nil {
+		t.Fatalf("count %s.%s: %v", db, table, err)
 	}
 	return n
 }
@@ -472,6 +471,20 @@ func TestSaveIndexes_PrimaryDrop(t *testing.T) {
 			if err := drv.SaveIndexes(ctx, cfg.Database, "t5_prim", unnamed); err == nil {
 				t.Error("SaveIndexes(unnamed unique) error: expected error, got nil")
 			}
+			// Unknown types are rejected instead of silently rendered as
+			// plain INDEX.
+			weird := []driver.Index{{Name: "uq", Type: "UNIQUE KEY", Columns: []driver.IndexColumn{{Name: "x"}}}}
+			if err := drv.SaveIndexes(ctx, cfg.Database, "t5_prim", weird); err == nil {
+				t.Error("SaveIndexes(unknown type) error: expected error, got nil")
+			}
+			// Duplicate names within one desired list are a hard error.
+			dup := []driver.Index{
+				{Name: "uq", Type: "INDEX", Columns: []driver.IndexColumn{{Name: "x"}}},
+				{Name: "UQ", Type: "INDEX", Columns: []driver.IndexColumn{{Name: "id"}}},
+			}
+			if err := drv.SaveIndexes(ctx, cfg.Database, "t5_prim", dup); err == nil {
+				t.Error("SaveIndexes(duplicate name) error: expected error, got nil")
+			}
 		})
 	}
 }
@@ -501,7 +514,7 @@ func TestTruncateTables(t *testing.T) {
 				t.Fatalf("TruncateTables() error: %v", err)
 			}
 			for _, table := range []string{"t5_trunc_a", "t5_trunc_b"} {
-				if n := queryCount(t, cfg, table); n != 0 {
+				if n := queryCount(t, cfg, cfg.Database, table); n != 0 {
 					t.Errorf("count of %s after truncate = %d, want 0", table, n)
 				}
 			}
@@ -516,7 +529,7 @@ func TestTruncateTables(t *testing.T) {
 			if !strings.Contains(err.Error(), "t5_missing") {
 				t.Errorf("TruncateTables() error %q, want it to mention %q", err, "t5_missing")
 			}
-			if n := queryCount(t, cfg, "t5_trunc_a"); n != 1 {
+			if n := queryCount(t, cfg, cfg.Database, "t5_trunc_a"); n != 1 {
 				t.Errorf("count of t5_trunc_a after aborted truncate = %d, want 1", n)
 			}
 
@@ -525,7 +538,7 @@ func TestTruncateTables(t *testing.T) {
 			if err == nil {
 				t.Fatal("TruncateTables(empty name) error: expected error, got nil")
 			}
-			if n := queryCount(t, cfg, "t5_trunc_a"); n != 1 {
+			if n := queryCount(t, cfg, cfg.Database, "t5_trunc_a"); n != 1 {
 				t.Errorf("count of t5_trunc_a after rejected call = %d, want 1", n)
 			}
 		})
@@ -609,6 +622,99 @@ func TestDropViews(t *testing.T) {
 			}
 			if err := drv.DropViews(ctx, cfg.Database, []string{""}); err == nil {
 				t.Error("DropViews(empty name) error: expected error, got nil")
+			}
+		})
+	}
+}
+
+// TestWrites_CrossSchemaTargeting proves the write operations address
+// the schema named by their db argument, not the DSN's default
+// database: identical tables live in the login database and a second
+// one, every operation runs with db = second schema, and the login
+// database's table must come out untouched.
+func TestWrites_CrossSchemaTargeting(t *testing.T) {
+	for _, img := range testImages {
+		t.Run(img.image, func(t *testing.T) {
+			cfg := startDB(t, img.image)
+			drv := connectOK(t, cfg)
+			ctx := context.Background()
+
+			execDDL(t, cfg, "CREATE DATABASE t5_other")
+			t.Cleanup(func() {
+				execDDL(t, cfg, "DROP DATABASE IF EXISTS t5_other")
+				execDDL(t, cfg, "DROP TABLE IF EXISTS t5_x")
+			})
+			execDDL(t, cfg, "CREATE TABLE t5_x (id INT NOT NULL, name VARCHAR(32) NOT NULL)")
+			execDDL(t, cfg, "CREATE TABLE t5_other.t5_x (id INT NOT NULL, name VARCHAR(32) NOT NULL)")
+			execDDL(t, cfg, "INSERT INTO t5_x (id, name) VALUES (1, 'x')")
+			execDDL(t, cfg, "INSERT INTO t5_other.t5_x (id, name) VALUES (1, 'x')")
+
+			// TRUNCATE empties only the second schema's table.
+			if err := drv.TruncateTables(ctx, "t5_other", []string{"t5_x"}); err != nil {
+				t.Fatalf("TruncateTables(t5_other) error: %v", err)
+			}
+			if n := queryCount(t, cfg, "t5_other", "t5_x"); n != 0 {
+				t.Errorf("count of t5_other.t5_x after truncate = %d, want 0", n)
+			}
+			if n := queryCount(t, cfg, cfg.Database, "t5_x"); n != 1 {
+				t.Errorf("count of login-db t5_x after cross-schema truncate = %d, want 1", n)
+			}
+
+			// SaveTable adds a column only to the second schema's table.
+			desired := driver.TableDef{
+				Columns: []driver.ColumnDef{
+					{Name: "id", OldName: "id", Type: "int"},
+					{Name: "name", OldName: "name", Type: "varchar", Length: "32"},
+					{Name: "extra", Type: "int", Nullable: true},
+				},
+			}
+			if err := drv.SaveTable(ctx, "t5_other", "t5_x", desired); err != nil {
+				t.Fatalf("SaveTable(t5_other) error: %v", err)
+			}
+			otherDef, err := drv.TableDef(ctx, "t5_other", "t5_x")
+			if err != nil {
+				t.Fatalf("TableDef(t5_other.t5_x) error: %v", err)
+			}
+			if len(otherDef.Columns) != 3 || otherDef.Columns[2].Name != "extra" {
+				t.Errorf("t5_other.t5_x columns = %+v, want a new %q column", otherDef.Columns, "extra")
+			}
+			loginDef, err := drv.TableDef(ctx, cfg.Database, "t5_x")
+			if err != nil {
+				t.Fatalf("TableDef(login t5_x) error: %v", err)
+			}
+			if len(loginDef.Columns) != 2 {
+				t.Errorf("login-db t5_x columns = %+v, want the original 2 (untouched)", loginDef.Columns)
+			}
+
+			// SaveIndexes adds the index only to the second schema's table.
+			idxs := []driver.Index{
+				{Name: "uq_name", Type: "UNIQUE", Columns: []driver.IndexColumn{{Name: "name"}}},
+			}
+			if err := drv.SaveIndexes(ctx, "t5_other", "t5_x", idxs); err != nil {
+				t.Fatalf("SaveIndexes(t5_other) error: %v", err)
+			}
+			otherDef, err = drv.TableDef(ctx, "t5_other", "t5_x")
+			if err != nil {
+				t.Fatalf("TableDef(t5_other.t5_x) after SaveIndexes error: %v", err)
+			}
+			assertIndexes(t, otherDef.Indexes, idxs)
+			loginDef, err = drv.TableDef(ctx, cfg.Database, "t5_x")
+			if err != nil {
+				t.Fatalf("TableDef(login t5_x) after SaveIndexes error: %v", err)
+			}
+			if len(loginDef.Indexes) != 0 {
+				t.Errorf("login-db t5_x indexes = %+v, want none (untouched)", loginDef.Indexes)
+			}
+
+			// DROP TABLE removes only the second schema's table.
+			if err := drv.DropTables(ctx, "t5_other", []string{"t5_x"}); err != nil {
+				t.Fatalf("DropTables(t5_other) error: %v", err)
+			}
+			if _, err := drv.TableDef(ctx, "t5_other", "t5_x"); err == nil || !strings.Contains(err.Error(), "not found") {
+				t.Errorf("TableDef(t5_other.t5_x) after drop = %v, want a not-found error", err)
+			}
+			if _, err := drv.TableDef(ctx, cfg.Database, "t5_x"); err != nil {
+				t.Errorf("TableDef(login t5_x) after cross-schema drop: %v, want the table intact", err)
 			}
 		})
 	}

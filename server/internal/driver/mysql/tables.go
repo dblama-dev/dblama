@@ -64,10 +64,9 @@ func (d *MysqlDriver) ListTables(ctx context.Context, db string) ([]driver.Table
 	return tables, nil
 }
 
-// The object-destructive operations run against the connection's
-// default schema: the DSN binds each driver instance to one database,
-// so the names carry no schema prefix and db is validated and used in
-// error messages only.
+// The object-destructive operations qualify every name with db: the db
+// argument selects the target schema, regardless of the DSN's default
+// database, and is validated before any statement runs.
 
 // TruncateTables empties the named tables in order. Every name is
 // validated before the first statement runs; the first error aborts
@@ -82,7 +81,7 @@ func (d *MysqlDriver) TruncateTables(ctx context.Context, db string, tables []st
 		}
 	}
 	for _, table := range tables {
-		if _, err := d.db.ExecContext(ctx, "TRUNCATE TABLE "+sqlgen.QuoteIdent(table)); err != nil {
+		if _, err := d.db.ExecContext(ctx, "TRUNCATE TABLE "+qualifiedIdent(db, table)); err != nil {
 			return fmt.Errorf("truncate %s.%s: %w", db, table, err)
 		}
 	}
@@ -103,7 +102,7 @@ func (d *MysqlDriver) DropTables(ctx context.Context, db string, tables []string
 		}
 	}
 	for _, table := range tables {
-		if _, err := d.db.ExecContext(ctx, "DROP TABLE "+sqlgen.QuoteIdent(table)); err != nil {
+		if _, err := d.db.ExecContext(ctx, "DROP TABLE "+qualifiedIdent(db, table)); err != nil {
 			return fmt.Errorf("drop table %s.%s: %w", db, table, err)
 		}
 	}
@@ -123,7 +122,7 @@ func (d *MysqlDriver) DropViews(ctx context.Context, db string, views []string) 
 		}
 	}
 	for _, view := range views {
-		if _, err := d.db.ExecContext(ctx, "DROP VIEW "+sqlgen.QuoteIdent(view)); err != nil {
+		if _, err := d.db.ExecContext(ctx, "DROP VIEW "+qualifiedIdent(db, view)); err != nil {
 			return fmt.Errorf("drop view %s.%s: %w", db, view, err)
 		}
 	}

@@ -46,7 +46,7 @@ func fullCreateFixture() driver.TableDef {
 	}
 }
 
-const wantFullCreateDDL = "CREATE TABLE `child` (\n" +
+const wantFullCreateDDL = "CREATE TABLE `appdb`.`child` (\n" +
 	"  `id` int unsigned NOT NULL AUTO_INCREMENT,\n" +
 	"  `name` varchar(64) NOT NULL DEFAULT 'x' COMMENT 'user name',\n" +
 	"  `kind` enum('a','b','c') NULL,\n" +
@@ -60,7 +60,7 @@ const wantFullCreateDDL = "CREATE TABLE `child` (\n" +
 	") ENGINE=InnoDB AUTO_INCREMENT=42 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='child table'"
 
 func TestBuildCreateTable(t *testing.T) {
-	got, err := buildCreateTable(fullCreateFixture())
+	got, err := buildCreateTable("appdb", fullCreateFixture())
 	if err != nil {
 		t.Fatalf("buildCreateTable() error: %v", err)
 	}
@@ -86,19 +86,19 @@ func TestBuildAlterTable(t *testing.T) {
 		Options: driver.TableOptions{Engine: "InnoDB", Comment: "new comment"},
 	}
 
-	got, err := buildAlterTable("child", desired)
+	got, err := buildAlterTable("appdb", "child", desired)
 	if err != nil {
 		t.Fatalf("buildAlterTable() error: %v", err)
 	}
 	want := []string{
-		"ALTER TABLE `child` RENAME TO `child_new`",
+		"ALTER TABLE `appdb`.`child` RENAME TO `appdb`.`child_new`",
 		// Steps after the rename must address the new table name.
-		"ALTER TABLE `child_new` CHANGE COLUMN `name` `title` varchar(128) NOT NULL DEFAULT 'x' COMMENT 'renamed'",
-		"ALTER TABLE `child_new` DROP COLUMN `kind`",
-		"ALTER TABLE `child_new` ADD COLUMN `size_code` char(2) NULL COLLATE `utf8mb4_bin` FIRST",
-		"ALTER TABLE `child_new` ADD COLUMN `parent_id` int unsigned NULL AFTER `title`",
-		"ALTER TABLE `child_new` MODIFY COLUMN `price` decimal(12,4) NULL",
-		"ALTER TABLE `child_new` ENGINE=InnoDB COMMENT='new comment'",
+		"ALTER TABLE `appdb`.`child_new` CHANGE COLUMN `name` `title` varchar(128) NOT NULL DEFAULT 'x' COMMENT 'renamed'",
+		"ALTER TABLE `appdb`.`child_new` DROP COLUMN `kind`",
+		"ALTER TABLE `appdb`.`child_new` ADD COLUMN `size_code` char(2) NULL COLLATE `utf8mb4_bin` FIRST",
+		"ALTER TABLE `appdb`.`child_new` ADD COLUMN `parent_id` int unsigned NULL AFTER `title`",
+		"ALTER TABLE `appdb`.`child_new` MODIFY COLUMN `price` decimal(12,4) NULL",
+		"ALTER TABLE `appdb`.`child_new` ENGINE=InnoDB COMMENT='new comment'",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("buildAlterTable() produced %d statements, want %d:\n%v", len(got), len(want), got)
@@ -118,11 +118,11 @@ func TestBuildAlterTable_NoRenameWhenSameName(t *testing.T) {
 		},
 		// Zero options must not produce an options step at all.
 	}
-	got, err := buildAlterTable("same_t4", desired)
+	got, err := buildAlterTable("appdb", "same_t4", desired)
 	if err != nil {
 		t.Fatalf("buildAlterTable() error: %v", err)
 	}
-	want := []string{"ALTER TABLE `same_t4` MODIFY COLUMN `id` int NOT NULL"}
+	want := []string{"ALTER TABLE `appdb`.`same_t4` MODIFY COLUMN `id` int NOT NULL"}
 	if len(got) != len(want) || got[0] != want[0] {
 		t.Errorf("buildAlterTable() = %v, want %v", got, want)
 	}
@@ -138,11 +138,11 @@ func TestBuildCreateTable_EnumEscape(t *testing.T) {
 			{Name: "bs", Type: "enum", Nullable: true, EnumValues: []string{"a", `a\b`, `path\`}},
 		},
 	}
-	got, err := buildCreateTable(desired)
+	got, err := buildCreateTable("appdb", desired)
 	if err != nil {
 		t.Fatalf("buildCreateTable() error: %v", err)
 	}
-	want := "CREATE TABLE `odd``names` (\n" +
+	want := "CREATE TABLE `appdb`.`odd``names` (\n" +
 		"  `we``ird` enum('it''s','plain') NULL,\n" +
 		"  `bs` enum('a','a\\\\b','path\\\\') NULL\n" +
 		")"
@@ -169,17 +169,17 @@ func TestBuildAlterTable_ColumnFragmentDefaults(t *testing.T) {
 			{Name: "lit", Type: "varchar", Length: "10", Nullable: true, Default: &driver.DefaultValue{Value: "it's"}},
 		},
 	}
-	got, err := buildAlterTable("t4frag", desired)
+	got, err := buildAlterTable("appdb", "t4frag", desired)
 	if err != nil {
 		t.Fatalf("buildAlterTable() error: %v", err)
 	}
 	want := []string{
-		"ALTER TABLE `t4frag` ADD COLUMN `nullable_int` int NULL DEFAULT NULL",
-		"ALTER TABLE `t4frag` ADD COLUMN `ts3` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP(3)",
-		"ALTER TABLE `t4frag` ADD COLUMN `upd` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP(6)",
-		"ALTER TABLE `t4frag` ADD COLUMN `full` varchar(128) AS (CONCAT(`upd`,'!')) STORED",
-		"ALTER TABLE `t4frag` ADD COLUMN `virt` int AS (1 + 1) VIRTUAL",
-		"ALTER TABLE `t4frag` ADD COLUMN `lit` varchar(10) NULL DEFAULT 'it''s'",
+		"ALTER TABLE `appdb`.`t4frag` ADD COLUMN `nullable_int` int NULL DEFAULT NULL",
+		"ALTER TABLE `appdb`.`t4frag` ADD COLUMN `ts3` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP(3)",
+		"ALTER TABLE `appdb`.`t4frag` ADD COLUMN `upd` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP(6)",
+		"ALTER TABLE `appdb`.`t4frag` ADD COLUMN `full` varchar(128) AS (CONCAT(`upd`,'!')) STORED",
+		"ALTER TABLE `appdb`.`t4frag` ADD COLUMN `virt` int AS (1 + 1) VIRTUAL",
+		"ALTER TABLE `appdb`.`t4frag` ADD COLUMN `lit` varchar(10) NULL DEFAULT 'it''s'",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("buildAlterTable() produced %d statements, want %d:\n%v", len(got), len(want), got)
@@ -193,19 +193,19 @@ func TestBuildAlterTable_ColumnFragmentDefaults(t *testing.T) {
 
 func TestBuildCreateTable_Errors(t *testing.T) {
 	t.Run("empty table name", func(t *testing.T) {
-		_, err := buildCreateTable(driver.TableDef{Columns: []driver.ColumnDef{{Name: "id", Type: "int"}}})
+		_, err := buildCreateTable("appdb", driver.TableDef{Columns: []driver.ColumnDef{{Name: "id", Type: "int"}}})
 		if err == nil {
 			t.Fatal("expected error for empty table name, got nil")
 		}
 	})
 	t.Run("no columns", func(t *testing.T) {
-		_, err := buildCreateTable(driver.TableDef{NewName: "t4"})
+		_, err := buildCreateTable("appdb", driver.TableDef{NewName: "t4"})
 		if err == nil {
 			t.Fatal("expected error for empty column list, got nil")
 		}
 	})
 	t.Run("enum without values", func(t *testing.T) {
-		_, err := buildCreateTable(driver.TableDef{
+		_, err := buildCreateTable("appdb", driver.TableDef{
 			NewName: "t4",
 			Columns: []driver.ColumnDef{{Name: "kind", Type: "enum"}},
 		})
@@ -217,19 +217,19 @@ func TestBuildCreateTable_Errors(t *testing.T) {
 
 func TestBuildAlterTable_Errors(t *testing.T) {
 	t.Run("empty table", func(t *testing.T) {
-		_, err := buildAlterTable("", driver.TableDef{Columns: []driver.ColumnDef{{Name: "id", OldName: "id", Type: "int"}}})
+		_, err := buildAlterTable("appdb", "", driver.TableDef{Columns: []driver.ColumnDef{{Name: "id", OldName: "id", Type: "int"}}})
 		if err == nil {
 			t.Fatal("expected error for empty table name, got nil")
 		}
 	})
 	t.Run("column with neither type nor old name", func(t *testing.T) {
-		_, err := buildAlterTable("t4", driver.TableDef{Columns: []driver.ColumnDef{{Name: "ghost"}}})
+		_, err := buildAlterTable("appdb", "t4", driver.TableDef{Columns: []driver.ColumnDef{{Name: "ghost"}}})
 		if err == nil {
 			t.Fatal("expected error for column without type and old name, got nil")
 		}
 	})
 	t.Run("bad length", func(t *testing.T) {
-		_, err := buildAlterTable("t4", driver.TableDef{Columns: []driver.ColumnDef{
+		_, err := buildAlterTable("appdb", "t4", driver.TableDef{Columns: []driver.ColumnDef{
 			{Name: "bad", Type: "varchar", Length: "64) ENGINE=InnoDB; DROP TABLE x"},
 		}})
 		if err == nil {
@@ -237,7 +237,7 @@ func TestBuildAlterTable_Errors(t *testing.T) {
 		}
 	})
 	t.Run("generated without expression", func(t *testing.T) {
-		_, err := buildAlterTable("t4", driver.TableDef{Columns: []driver.ColumnDef{
+		_, err := buildAlterTable("appdb", "t4", driver.TableDef{Columns: []driver.ColumnDef{
 			{Name: "gen", Type: "int", Nullable: true, Generated: "STORED"},
 		}})
 		if err == nil {
@@ -245,7 +245,7 @@ func TestBuildAlterTable_Errors(t *testing.T) {
 		}
 	})
 	t.Run("generated not null", func(t *testing.T) {
-		_, err := buildAlterTable("t4", driver.TableDef{Columns: []driver.ColumnDef{
+		_, err := buildAlterTable("appdb", "t4", driver.TableDef{Columns: []driver.ColumnDef{
 			{Name: "gen", Type: "int", Generated: "STORED", Default: &driver.DefaultValue{Value: "1", IsSQLExpression: true}},
 		}})
 		if err == nil {

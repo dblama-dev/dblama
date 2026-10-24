@@ -24,16 +24,17 @@ var (
 // the table (NewName is its name, indexes and foreign keys go inline),
 // a non-empty one alters it — rename first, then column operations, then
 // table options. Index and foreign key changes on an existing table are
-// handled by SaveIndexes (Task 5) and are intentionally ignored here.
-// Every executed statement is numbered: errors are wrapped as
-// "step %d".
+// handled by SaveIndexes and are intentionally ignored here. The db
+// argument qualifies the target schema of every statement, regardless of
+// the DSN's default database. Every executed statement is numbered:
+// errors are wrapped as "step %d".
 func (d *MysqlDriver) SaveTable(ctx context.Context, db, table string, desired driver.TableDef) error {
 	if db == "" {
 		return fmt.Errorf("save table: database name is empty")
 	}
 
 	if table == "" {
-		stmt, err := buildCreateTable(desired)
+		stmt, err := buildCreateTable(db, desired)
 		if err != nil {
 			return fmt.Errorf("save table: %w", err)
 		}
@@ -43,7 +44,7 @@ func (d *MysqlDriver) SaveTable(ctx context.Context, db, table string, desired d
 		return nil
 	}
 
-	stmts, err := buildAlterTable(table, desired)
+	stmts, err := buildAlterTable(db, table, desired)
 	if err != nil {
 		return fmt.Errorf("save table %s.%s: %w", db, table, err)
 	}
@@ -56,11 +57,12 @@ func (d *MysqlDriver) SaveTable(ctx context.Context, db, table string, desired d
 }
 
 // buildCreateTable renders the CREATE TABLE statement of the desired
-// state: columns in order, PRIMARY/UNIQUE/KEY indexes and foreign keys
-// inline, table options as the trailing clause. DDL needs no bound
-// arguments: identifiers are backtick-quoted and every string literal is
-// SQL-escaped from structured values.
-func buildCreateTable(d driver.TableDef) (string, error) {
+// state, qualified with the target schema db: columns in order,
+// PRIMARY/UNIQUE/KEY indexes and foreign keys inline, table options as
+// the trailing clause. DDL needs no bound arguments: identifiers are
+// backtick-quoted and every string literal is SQL-escaped from
+// structured values.
+func buildCreateTable(db string, d driver.TableDef) (string, error) {
 	if d.NewName == "" {
 		return "", fmt.Errorf("create table: table name is empty")
 	}
@@ -96,15 +98,16 @@ func buildCreateTable(d driver.TableDef) (string, error) {
 		return "", fmt.Errorf("create table %s: %w", d.NewName, err)
 	}
 
-	return "CREATE TABLE " + sqlgen.QuoteIdent(d.NewName) + " (\n  " +
+	return "CREATE TABLE " + qualifiedIdent(db, d.NewName) + " (\n  " +
 		strings.Join(parts, ",\n  ") + "\n)" + options, nil
 }
 
 // buildAlterTable renders the ALTER TABLE statements of the desired
-// state, in execution order: rename (step 1, if NewName differs), the
-// column operations in the order the columns are listed, and finally the
-// table options update. Later statements address the renamed table.
-func buildAlterTable(table string, d driver.TableDef) ([]string, error) {
+// state, qualified with the target schema db, in execution order:
+// rename (step 1, if NewName differs), the column operations in the
+// order the columns are listed, and finally the table options update.
+// Later statements address the renamed table.
+func buildAlterTable(db, table string, d driver.TableDef) ([]string, error) {
 	if table == "" {
 		return nil, fmt.Errorf("alter table: table name is empty")
 	}
@@ -112,7 +115,7 @@ func buildAlterTable(table string, d driver.TableDef) ([]string, error) {
 	var stmts []string
 	current := table
 	if d.NewName != "" && d.NewName != table {
-		stmts = append(stmts, "ALTER TABLE "+sqlgen.QuoteIdent(table)+" RENAME TO "+sqlgen.QuoteIdent(d.NewName))
+		stmts = append(stmts, "ALTER TABLE "+qualifiedIdent(db, table)+" RENAME TO "+qualifiedIdent(db, d.NewName))
 		current = d.NewName
 	}
 
@@ -130,25 +133,25 @@ func buildAlterTable(table string, d driver.TableDef) ([]string, error) {
 			case c.Position != "":
 				placement = " AFTER " + sqlgen.QuoteIdent(c.Position)
 			}
-			stmts = append(stmts, "ALTER TABLE "+sqlgen.QuoteIdent(current)+" ADD COLUMN "+frag+placement)
+			stmts = append(stmts, "ALTER TABLE "+qualifiedIdent(db, current)+" ADD COLUMN "+frag+placement)
 		case c.OldName != "" && c.Type == "": // DROP
 			if c.Name == "" {
 				return nil, fmt.Errorf("alter table %s: column %d is marked for drop but has no name", table, i+1)
 			}
-			stmts = append(stmts, "ALTER TABLE "+sqlgen.QuoteIdent(current)+" DROP COLUMN "+sqlgen.QuoteIdent(c.Name))
+			stmts = append(stmts, "ALTER TABLE "+qualifiedIdent(db, current)+" DROP COLUMN "+sqlgen.QuoteIdent(c.Name))
 		case c.OldName != "" && c.OldName != c.Name: // CHANGE
 			frag, err := columnFragment(c)
 			if err != nil {
 				return nil, fmt.Errorf("alter table %s: column %d: %w", table, i+1, err)
 			}
-			stmts = append(stmts, "ALTER TABLE "+sqlgen.QuoteIdent(current)+
+			stmts = append(stmts, "ALTER TABLE "+qualifiedIdent(db, current)+
 				" CHANGE COLUMN "+sqlgen.QuoteIdent(c.OldName)+" "+frag)
 		case c.OldName != "": // MODIFY (OldName == Name)
 			frag, err := columnFragment(c)
 			if err != nil {
 				return nil, fmt.Errorf("alter table %s: column %d: %w", table, i+1, err)
 			}
-			stmts = append(stmts, "ALTER TABLE "+sqlgen.QuoteIdent(current)+" MODIFY COLUMN "+frag)
+			stmts = append(stmts, "ALTER TABLE "+qualifiedIdent(db, current)+" MODIFY COLUMN "+frag)
 		default:
 			return nil, fmt.Errorf("alter table %s: column %d (%q) has neither an old name nor a type", table, i+1, c.Name)
 		}
@@ -159,7 +162,7 @@ func buildAlterTable(table string, d driver.TableDef) ([]string, error) {
 		return nil, fmt.Errorf("alter table %s: %w", table, err)
 	}
 	if len(opts) > 0 {
-		stmts = append(stmts, "ALTER TABLE "+sqlgen.QuoteIdent(current)+" "+strings.Join(opts, " "))
+		stmts = append(stmts, "ALTER TABLE "+qualifiedIdent(db, current)+" "+strings.Join(opts, " "))
 	}
 	return stmts, nil
 }
@@ -278,6 +281,28 @@ func columnTypeFragment(c driver.ColumnDef) (string, error) {
 	return c.Type, nil
 }
 
+// qualifiedIdent renders a schema-qualified identifier: each of db and
+// name is backtick-quoted independently, so no raw client string ever
+// forms part of the DDL text. Every write statement addresses its
+// target through this helper: the db argument selects the schema,
+// regardless of the DSN's default database.
+func qualifiedIdent(db, name string) string {
+	return sqlgen.QuoteIdent(db) + "." + sqlgen.QuoteIdent(name)
+}
+
+// validIndexType reports whether idx.Type is one of the supported
+// index types (PRIMARY, UNIQUE, INDEX, FULLTEXT, SPATIAL),
+// case-insensitively; anything else is rejected instead of silently
+// rendered as a plain INDEX.
+func validIndexType(idxType string) bool {
+	switch strings.ToUpper(idxType) {
+	case "PRIMARY", "UNIQUE", "INDEX", "FULLTEXT", "SPATIAL":
+		return true
+	default:
+		return false
+	}
+}
+
 // SaveIndexes applies the full desired index state of one table (the
 // Adminer alter_indexes model): current indexes missing from desired
 // are dropped — the PRIMARY via DROP PRIMARY KEY, never via DROP
@@ -294,7 +319,16 @@ func (d *MysqlDriver) SaveIndexes(ctx context.Context, db, table string, desired
 	if table == "" {
 		return fmt.Errorf("save indexes: %w: table name", sqlgen.ErrEmptyIdentifier)
 	}
+	seen := make(map[string]struct{}, len(desired))
 	for i, idx := range desired {
+		if !validIndexType(idx.Type) {
+			return fmt.Errorf("save indexes %s.%s: index %d (%s): unknown type %q", db, table, i+1, idx.Name, idx.Type)
+		}
+		key := strings.ToLower(idx.Name)
+		if _, dup := seen[key]; dup {
+			return fmt.Errorf("save indexes %s.%s: index %d: duplicate index name %q", db, table, i+1, idx.Name)
+		}
+		seen[key] = struct{}{}
 		if idx.Type != "PRIMARY" && idx.Name == "" {
 			return fmt.Errorf("save indexes %s.%s: index %d: %w: index name", db, table, i+1, sqlgen.ErrEmptyIdentifier)
 		}
@@ -326,9 +360,9 @@ func (d *MysqlDriver) SaveIndexes(ctx context.Context, db, table string, desired
 			continue
 		}
 		if cur.Type == "PRIMARY" {
-			stmts = append(stmts, "ALTER TABLE "+sqlgen.QuoteIdent(table)+" DROP PRIMARY KEY")
+			stmts = append(stmts, "ALTER TABLE "+qualifiedIdent(db, table)+" DROP PRIMARY KEY")
 		} else {
-			stmts = append(stmts, "ALTER TABLE "+sqlgen.QuoteIdent(table)+" DROP INDEX "+sqlgen.QuoteIdent(cur.Name))
+			stmts = append(stmts, "ALTER TABLE "+qualifiedIdent(db, table)+" DROP INDEX "+sqlgen.QuoteIdent(cur.Name))
 		}
 	}
 	// Then adds: desired indexes that are absent or changed.
@@ -341,7 +375,7 @@ func (d *MysqlDriver) SaveIndexes(ctx context.Context, db, table string, desired
 		if err != nil {
 			return fmt.Errorf("save indexes %s.%s: %w", db, table, err)
 		}
-		stmts = append(stmts, "ALTER TABLE "+sqlgen.QuoteIdent(table)+" "+frag)
+		stmts = append(stmts, "ALTER TABLE "+qualifiedIdent(db, table)+" "+frag)
 	}
 
 	for i, stmt := range stmts {
@@ -368,21 +402,21 @@ func indexEqual(a, b driver.Index) bool {
 }
 
 // buildAlterAddIndex renders the ADD clause of one ALTER TABLE index
-// operation; the default type renders as a plain INDEX, matching
-// indexFragment.
+// operation. SaveIndexes validates the type before calling, so the
+// default branch can only be reached with INDEX (case-insensitively).
 func buildAlterAddIndex(idx driver.Index) (string, error) {
 	cols, err := indexColumnsFragment(idx.Columns)
 	if err != nil {
 		return "", err
 	}
-	switch idx.Type {
+	switch strings.ToUpper(idx.Type) {
 	case "PRIMARY":
 		return "ADD PRIMARY KEY (" + cols + ")", nil
 	case "UNIQUE", "FULLTEXT", "SPATIAL":
 		if idx.Name == "" {
 			return "", fmt.Errorf("%s index without a name", strings.ToLower(idx.Type))
 		}
-		return "ADD " + idx.Type + " " + sqlgen.QuoteIdent(idx.Name) + " (" + cols + ")", nil
+		return "ADD " + strings.ToUpper(idx.Type) + " " + sqlgen.QuoteIdent(idx.Name) + " (" + cols + ")", nil
 	default: // INDEX
 		return "ADD INDEX " + sqlgen.QuoteIdent(idx.Name) + " (" + cols + ")", nil
 	}
