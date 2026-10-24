@@ -224,6 +224,32 @@ describe('RowModal', () => {
     expect(saveButton(wrapper)?.props('disabled')).toBe(true)
   })
 
+  it('exempts an untouched auto-increment column from the required check and sends null', async () => {
+    mockedApi.mockResolvedValue({ lastInsertId: 1 })
+    const wrapper = mountModal()
+
+    // Only the genuinely required email is filled; the NOT NULL
+    // auto-increment id stays untouched and must not block the save.
+    setString(wrapper, 'email', 'x@y.z')
+    await flushPromises()
+
+    expect(saveButton(wrapper)?.props('disabled')).toBe(false)
+    await saveButton(wrapper)?.trigger('click')
+    await flushPromises()
+
+    const modal = wrapper.findComponent(RowModal)
+    expect(modal.emitted('saved')).toHaveLength(1)
+    expect(mockedApi).toHaveBeenCalledWith('POST', rowsPath, {
+      name: '',
+      age: null,
+      role: '',
+      bio: '',
+      email: 'x@y.z',
+      id: null,
+    })
+    wrapper.unmount()
+  })
+
   it('patches only the changed fields on edit with where = row pk', async () => {
     mockedApi.mockResolvedValue(undefined)
     const wrapper = mountModal({

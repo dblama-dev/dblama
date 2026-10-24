@@ -267,7 +267,9 @@ function buildChangedValues(): Record<string, unknown> {
 
 const canSave = computed(() => {
   for (const col of props.columns) {
-    if (col.nullable) continue
+    // An AUTO_INCREMENT column fills itself: an untouched auto-inc
+    // column must not block the save (buildValues sends null for it).
+    if (col.nullable || col.autoIncrement) continue
     if (nulls[col.name] === true) return false
     const v = values[col.name]
     if (v === null || v === undefined || v === '') return false
