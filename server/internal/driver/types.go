@@ -238,7 +238,9 @@ type Driver interface {
 	// instance (0 when that write generated none). The value lives in
 	// the mutex-protected driver state — driver instances are shared
 	// across requests, so a per-connection LAST_INSERT_ID() would not
-	// be reliable.
+	// be reliable. It is driver state, not per-request state: the last
+	// insert wins across concurrent requests, so an id must be read
+	// immediately after the insert it belongs to.
 	LastInsertID(ctx context.Context) (int64, error)
 	Close() error
 }

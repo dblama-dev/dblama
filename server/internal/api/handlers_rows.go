@@ -133,7 +133,11 @@ type lastInsertIDResponse struct {
 }
 
 // handleRowInsert inserts one row and reports the auto_increment id the
-// insert generated.
+// insert generated. LastInsertID is driver state, not per-request
+// state: the last insert wins across concurrent requests, so the
+// reported id is only guaranteed to belong to this request's insert
+// when no other insert ran against the same driver between the insert
+// and the read back below.
 func (s *apiServer) handleRowInsert(w http.ResponseWriter, r *http.Request) {
 	var vals driver.RowValues
 	if !decodeJSONBody(w, r, &vals) {
