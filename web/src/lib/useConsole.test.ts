@@ -165,9 +165,59 @@ describe('useConsole', () => {
     // Up walks from the most recent entry to older ones.
     expect(c.historyPrev()).toBe('SELECT 2')
     expect(c.historyPrev()).toBe('SELECT 1')
-    // Down walks back toward the most recent entry, then back to none.
+    // Down walks back toward the most recent entry, then restores the
+    // pre-cycle draft (the editor text at the first Up: 'SELECT 2').
     expect(c.historyNext()).toBe('SELECT 2')
+    expect(c.historyNext()).toBe('SELECT 2')
+    // The draft is returned once; afterwards the cycle is over.
     expect(c.historyNext()).toBeNull()
+  })
+
+  it('restores the pre-cycle draft when Down walks past the newest entry', async () => {
+    routeApi()
+    const c = makeConsole()
+    c.sql.value = 'SELECT 1'
+    await c.execute()
+    c.sql.value = 'SELECT 2'
+    await c.execute()
+    // A typed draft that was never executed.
+    c.sql.value = 'SELECT draft'
+
+    expect(c.historyPrev()).toBe('SELECT 2')
+    expect(c.historyPrev()).toBe('SELECT 1')
+    expect(c.historyNext()).toBe('SELECT 2')
+    expect(c.historyNext()).toBe('SELECT draft')
+    expect(c.historyNext()).toBeNull()
+    // Cycling again snapshots the restored draft anew: one Up to the
+    // newest entry, one Down straight back to the draft.
+    expect(c.historyPrev()).toBe('SELECT 2')
+    expect(c.historyNext()).toBe('SELECT draft')
+  })
+
+  it('restarts the cycle when it is reset from outside (e.g. a history pick)', async () => {
+    routeApi()
+    const c = makeConsole()
+    c.sql.value = 'SELECT 1'
+    await c.execute()
+    c.sql.value = 'SELECT 2'
+    await c.execute()
+
+    c.historyPrev()
+    c.resetHistoryCycle()
+
+    // The stale position is gone: Down is a no-op again and Up starts
+    // from the top of the list.
+    expect(c.historyNext()).toBeNull()
+    expect(c.historyPrev()).toBe('SELECT 2')
+  })
+
+  it('does not restore a stale draft after a failed execute', async () => {
+    mockedApi.mockRejectedValue(new Error('syntax error'))
+    const c = makeConsole()
+    c.sql.value = 'BROKEN'
+    await c.execute()
+
+    expect(c.historyPrev()).toBeNull()
   })
 
   it('returns null from historyPrev when the history is empty', () => {

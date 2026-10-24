@@ -164,6 +164,9 @@ function onHistoryPick(value: string | null): void {
   if (value === null || editor === null) return
   const entry = c.history.value[Number(value)]
   if (entry !== undefined) {
+    // A pick replaces the doc from outside the Alt+Up/Down keys, so any
+    // in-progress cycle (and its draft snapshot) is dropped first.
+    c.resetHistoryCycle()
     replaceDoc(editor, entry)
   }
 }

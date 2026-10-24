@@ -24,9 +24,16 @@ export function useConsole(scope: ConsoleScope) {
   const history = ref<string[]>(loadHistory(scope.serverKey))
   /** Position inside history while cycling; -1 means "not cycling". */
   let historyPos = -1
+  /** Editor text before the first Up of a cycling session; restored
+   * when Down walks past the newest entry. */
+  let historyDraft: string | null = null
 
-  function resetHistoryPos(): void {
+  /** Forgets an in-progress cycle: used when the doc is replaced from
+   * outside the Alt+Up/Down keys (e.g. a history dropdown pick) and when
+   * a new run starts, so a stale position cannot skip entries. */
+  function resetHistoryCycle(): void {
     historyPos = -1
+    historyDraft = null
   }
 
   /** Runs one SQL batch: queryID per run, backend defaults for maxRows
@@ -40,6 +47,7 @@ export function useConsole(scope: ConsoleScope) {
     error.value = ''
     results.value = null
     queryID.value = crypto.randomUUID()
+    resetHistoryCycle()
     try {
       const payload = await api<{ results: QueryResult[] }>(
         'POST',
@@ -49,7 +57,6 @@ export function useConsole(scope: ConsoleScope) {
       results.value = payload.results ?? []
       pushHistory(scope.serverKey, trimmed)
       history.value = loadHistory(scope.serverKey)
-      resetHistoryPos()
       return true
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
@@ -74,6 +81,7 @@ export function useConsole(scope: ConsoleScope) {
     executing.value = true
     error.value = ''
     results.value = null
+    resetHistoryCycle()
     try {
       const payload = await api<{ result: QueryResult | null }>('POST', '/api/query', {
         db: scope.db(),
@@ -97,18 +105,26 @@ export function useConsole(scope: ConsoleScope) {
   }
 
   /** Alt+Up: the next older history entry (starting at the most recent),
-   * or null when the history is exhausted. */
+   * or null when the history is exhausted. The first Up of a session
+   * snapshots the editor text so Down can restore it later. */
   function historyPrev(): string | null {
     if (history.value.length === 0) return null
+    if (historyPos === -1) historyDraft = sql.value
     historyPos = Math.min(historyPos + 1, history.value.length - 1)
     return history.value[historyPos] ?? null
   }
 
-  /** Alt+Down: the next newer entry, or null once back at the start. */
+  /** Alt+Down: the next newer entry; once past the newest one, the
+   * pre-cycle draft is returned once, then null. */
   function historyNext(): string | null {
     if (historyPos < 0) return null
     historyPos -= 1
-    return historyPos < 0 ? null : (history.value[historyPos] ?? null)
+    if (historyPos < 0) {
+      const draft = historyDraft
+      historyDraft = null
+      return draft
+    }
+    return history.value[historyPos] ?? null
   }
 
   return {
@@ -123,6 +139,7 @@ export function useConsole(scope: ConsoleScope) {
     cancel,
     historyPrev,
     historyNext,
+    resetHistoryCycle,
   }
 }
 
