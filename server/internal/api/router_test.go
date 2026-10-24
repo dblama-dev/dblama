@@ -861,6 +861,19 @@ func loginSession(t *testing.T, srv *httptest.Server) string {
 	return sessionCookie(t, resp).Value
 }
 
+// loginSessionDB logs in with database db selected and returns the
+// session cookie value — the flow of a user who picked a database on the
+// login screen (required by the dump endpoints).
+func loginSessionDB(t *testing.T, srv *httptest.Server, db string) string {
+	t.Helper()
+	resp := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/session",
+		loginBody("dbhost", "3307", db), "")
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("login status = %d, want %d", resp.StatusCode, http.StatusNoContent)
+	}
+	return sessionCookie(t, resp).Value
+}
+
 func TestTablesListHandler(t *testing.T) {
 	t.Run("requires auth", func(t *testing.T) {
 		h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, &stubDriver{}))
@@ -1647,6 +1660,42 @@ func TestExplainHandler(t *testing.T) {
 			t.Fatalf("POST explain empty sql status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
 		}
 	})
+
+	t.Run("multi-statement sql is rejected without executing", func(t *testing.T) {
+		// A trailing statement must never fire because the user pressed
+		// EXPLAIN: ExecSQL would run every statement of the batch.
+		fake.execCalls = nil
+		resp := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/query",
+			`{"db":"appdb","sql":"SELECT 1; UPDATE t SET x=1"}`, cookie)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("POST explain two statements status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		if code := errCode(t, b); code != "bad_request" {
+			t.Errorf("error code = %q, want %q", code, "bad_request")
+		}
+		if !strings.Contains(string(b), "explain accepts a single statement") {
+			t.Errorf("error body = %s, want the single-statement message", b)
+		}
+		if len(fake.execCalls) != 0 {
+			t.Errorf("ExecSQL called %d times for a multi-statement explain, want 0", len(fake.execCalls))
+		}
+	})
+
+	t.Run("single statement is trimmed and prefixed", func(t *testing.T) {
+		fake.execCalls = nil
+		resp := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/query",
+			`{"db":"appdb","sql":"  SELECT * FROM users;  "}`, cookie)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("POST explain trailing semicolon status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+		if len(fake.execCalls) != 1 {
+			t.Fatalf("ExecSQL called %d times, want 1", len(fake.execCalls))
+		}
+		if got := fake.execCalls[0].query; got != "EXPLAIN SELECT * FROM users" {
+			t.Errorf("ExecSQL query = %q, want the EXPLAIN-prefixed trimmed statement", got)
+		}
+	})
 }
 
 // --- Transfer endpoints: export / import ---
@@ -1656,7 +1705,7 @@ func TestExportHandler_Validation(t *testing.T) {
 	h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, fake))
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	cookie := loginSession(t, srv)
+	cookie := loginSessionDB(t, srv, "appdb")
 
 	tests := []struct {
 		name, body string
@@ -1709,7 +1758,7 @@ func TestExportHandler_StreamHeaders(t *testing.T) {
 			h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, fake))
 			srv := httptest.NewServer(h)
 			t.Cleanup(srv.Close)
-			cookie := loginSession(t, srv)
+			cookie := loginSessionDB(t, srv, "appdb")
 
 			body := fmt.Sprintf(`{"format":%q,"gzip":%t,"tables":%s}`, tc.format, tc.gzip, tablesFor(tc.format))
 			resp := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/databases/appdb/export", body, cookie)
@@ -1754,7 +1803,7 @@ func TestExportHandler_DriverErrorTruncates(t *testing.T) {
 	h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, fake))
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	cookie := loginSession(t, srv)
+	cookie := loginSessionDB(t, srv, "appdb")
 
 	resp := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/databases/appdb/export",
 		`{"format":"sql","tables":[]}`, cookie)
@@ -1763,6 +1812,48 @@ func TestExportHandler_DriverErrorTruncates(t *testing.T) {
 	}
 	if len(fake.exportCalls) != 1 {
 		t.Errorf("Export called %d times, want 1", len(fake.exportCalls))
+	}
+}
+
+// TestExportHandler_RequiresLoginDatabase pins that export is bound to
+// the session's login database: the driver dumps its own login database,
+// so a session without one has nothing to dump and a {db} different from
+// the login database would silently dump the wrong schema. Both are 400
+// before any header is written.
+func TestExportHandler_RequiresLoginDatabase(t *testing.T) {
+	tests := []struct {
+		name    string
+		loginDB string
+	}{
+		{"login without a database", ""},
+		{"db differs from the login database", "otherdb"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &stubDriver{info: driver.DriverInfo{Name: "FakeDB"}, exportOutput: "DUMP-DATA"}
+			h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, fake))
+			srv := httptest.NewServer(h)
+			t.Cleanup(srv.Close)
+			cookie := loginSessionDB(t, srv, tc.loginDB)
+
+			resp := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/databases/appdb/export",
+				`{"format":"sql","tables":[]}`, cookie)
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("POST export status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+			}
+			b, _ := io.ReadAll(resp.Body)
+			if code := errCode(t, b); code != "bad_request" {
+				t.Errorf("error code = %q, want %q", code, "bad_request")
+			}
+			// Rejected before the headers: the error is the JSON envelope,
+			// not an attachment.
+			if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+				t.Errorf("error Content-Type = %q, want application/json", ct)
+			}
+			if len(fake.exportCalls) != 0 {
+				t.Errorf("Export called %d times, want 0", len(fake.exportCalls))
+			}
+		})
 	}
 }
 

@@ -45,14 +45,29 @@ func (fw flushWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// handleExport streams a database dump as an attachment. Format (and, for
-// delimited formats, the exactly-one-table requirement) is validated
-// before any header is written so an invalid request still gets the JSON
-// error envelope. Once the headers are sent, a driver failure can no
-// longer become JSON — the response has already begun, so the error
-// simply truncates the connection (documented ruling 3; the client sees
-// an incomplete download).
+// handleExport streams a database dump as an attachment. The requested
+// database must match the session: the driver's Export dumps its own
+// login database, so a session logged in without a database has nothing
+// to dump and a {db} other than the login database would silently dump
+// the wrong schema. Both are bad_request before any header is written.
+// Format (and, for delimited formats, the exactly-one-table requirement)
+// is validated before any header too, so an invalid request still gets
+// the JSON error envelope. Once the headers are sent, a driver failure
+// can no longer become JSON — the response has already begun, so the
+// error simply truncates the connection (documented ruling 3; the client
+// sees an incomplete download).
 func (s *apiServer) handleExport(w http.ResponseWriter, r *http.Request) {
+	sess, _ := session.FromContext(r.Context())
+	if sess.Database == "" {
+		WriteErr(w, http.StatusBadRequest, ErrBadRequest("export requires logging in with a database"))
+		return
+	}
+	if urlDB := chi.URLParam(r, "db"); urlDB != sess.Database {
+		WriteErr(w, http.StatusBadRequest, ErrBadRequest(
+			"export dumps the login database "+sess.Database+", not "+urlDB))
+		return
+	}
+
 	var req driver.ExportRequest
 	if !decodeJSONBody(w, r, &req) {
 		return
@@ -77,7 +92,6 @@ func (s *apiServer) handleExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
 	w.WriteHeader(http.StatusOK)
 
-	sess, _ := session.FromContext(r.Context())
 	flusher, _ := w.(http.Flusher)
 	_ = sess.Driver.Export(r.Context(), req, flushWriter{w: w, f: flusher})
 }

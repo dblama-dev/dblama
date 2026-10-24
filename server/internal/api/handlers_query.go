@@ -13,6 +13,7 @@ import (
 
 	"github.com/hitslab/db-manager/server/internal/driver"
 	"github.com/hitslab/db-manager/server/internal/session"
+	"github.com/hitslab/db-manager/server/internal/sqlgen"
 )
 
 // Query limits: maxRows is hard-capped (spec §9.7) and timeoutSec is
@@ -102,8 +103,10 @@ type explainResponse struct {
 
 // handleExplain runs "EXPLAIN " + the raw SQL on the named database with
 // a fixed 60s timeout and returns the first (only) statement result. The
-// generated queryID is internal — an EXPLAIN is never cancellable from
-// the console.
+// SQL must be a single statement: ExecSQL would execute every trailing
+// statement too, and a trailing UPDATE behind a harmless-looking SELECT
+// must not fire because the user pressed EXPLAIN. The generated queryID
+// is internal — an EXPLAIN is never cancellable from the console.
 func (s *apiServer) handleExplain(w http.ResponseWriter, r *http.Request) {
 	var req explainRequest
 	if !decodeJSONBody(w, r, &req) {
@@ -117,9 +120,19 @@ func (s *apiServer) handleExplain(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, ErrBadRequest("sql is required"))
 		return
 	}
+	stmts := sqlgen.SplitStatements(req.SQL)
+	if len(stmts) > 1 {
+		WriteErr(w, http.StatusBadRequest, ErrBadRequest("explain accepts a single statement"))
+		return
+	}
+	if len(stmts) == 0 {
+		// Whitespace or comments only: nothing to explain.
+		WriteErr(w, http.StatusBadRequest, ErrBadRequest("sql is required"))
+		return
+	}
 
 	sess, _ := session.FromContext(r.Context())
-	results, err := sess.Driver.ExecSQL(r.Context(), req.DB, "EXPLAIN "+req.SQL, newQueryID(),
+	results, err := sess.Driver.ExecSQL(r.Context(), req.DB, "EXPLAIN "+stmts[0], newQueryID(),
 		driver.ExecOpts{TimeoutSec: explainTimeoutSec})
 	if err != nil {
 		writeDriverErr(w, err)
