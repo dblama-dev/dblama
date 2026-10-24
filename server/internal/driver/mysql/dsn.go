@@ -23,8 +23,11 @@ func DSN(cfg driver.ConnConfig, pass string) string {
 		Addr:   cfg.Host + ":" + cfg.Port,
 		DBName: cfg.Database,
 		Params: map[string]string{
-			"parseTime":         "true",
-			"charset":           "utf8mb4",
+			"parseTime": "true",
+			"charset":   "utf8mb4",
+			// The SQL console sends multi-statement batches; additive for
+			// every other caller (single statements are unaffected).
+			"multiStatements":   "true",
 			"interpolateParams": "true",
 		},
 		Timeout:      5 * time.Second,

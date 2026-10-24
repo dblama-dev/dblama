@@ -47,6 +47,11 @@ func TestDSNRoundTripsSpecialCharacters(t *testing.T) {
 	if !parsed.InterpolateParams {
 		t.Error("parsed InterpolateParams = false, want true")
 	}
+	// The SQL console executes multi-statement batches, so the DSN must
+	// enable multiStatements (additive for every other caller).
+	if !parsed.MultiStatements {
+		t.Error("parsed MultiStatements = false, want true")
+	}
 	for _, param := range []string{"charset=utf8mb4", "parseTime=true"} {
 		if !strings.Contains(dsn, param) {
 			t.Errorf("DSN %q does not contain %q", dsn, param)

@@ -199,6 +199,14 @@ func (d *stubDriver) UpsertRows(context.Context, string, string, []driver.RowVal
 	return nil
 }
 
+func (d *stubDriver) ExecSQL(context.Context, string, string, string, driver.ExecOpts) ([]driver.Result, error) {
+	return nil, nil
+}
+
+func (d *stubDriver) CancelQuery(context.Context, string) error {
+	return nil
+}
+
 func (d *stubDriver) LastInsertID(context.Context) (int64, error) {
 	return d.lastInsertID, nil
 }

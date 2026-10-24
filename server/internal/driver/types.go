@@ -178,6 +178,29 @@ type RowValues map[string]any
 // full-table write can be issued.
 type PK map[string]any
 
+// ExecOpts tunes one ExecSQL call. The zero value enables the defaults:
+// MaxRows 0 → 1000, TimeoutSec 0 → 60.
+type ExecOpts struct {
+	// MaxRows caps the rows buffered per statement's result; a result
+	// with more rows is cut at the limit and flagged Truncated.
+	MaxRows int
+	// TimeoutSec bounds the whole batch execution; 0 → 60.
+	TimeoutSec int
+}
+
+// Result is one statement's outcome inside an ExecSQL batch. A
+// row-returning statement fills Columns/Rows (Truncated when the row
+// limit cut it); a non-row statement fills AffectedRows/LastInsertID.
+// Seconds is the statement's own execution time.
+type Result struct {
+	Columns      []ColumnMeta `json:"columns"`
+	Rows         [][]any      `json:"rows"`
+	AffectedRows int64        `json:"affectedRows,omitempty"`
+	LastInsertID int64        `json:"lastInsertId,omitempty"`
+	Truncated    bool         `json:"truncated,omitempty"`
+	Seconds      float64      `json:"seconds"`
+}
+
 // Driver is a connection-bound database driver instance.
 type Driver interface {
 	Info() DriverInfo
@@ -242,6 +265,23 @@ type Driver interface {
 	// insert wins across concurrent requests, so an id must be read
 	// immediately after the insert it belongs to.
 	LastInsertID(ctx context.Context) (int64, error)
+	// ExecSQL runs the (possibly multi-statement) console query against
+	// database db on a dedicated connection and returns one Result per
+	// statement, in order. Statements split on ';' outside strings and
+	// comments (no DELIMITER support). A statement that returns rows
+	// yields Columns/Rows (up to opts.MaxRows, flagged Truncated);
+	// every other statement yields AffectedRows/LastInsertID — detected
+	// by a pinned keyword heuristic (SELECT/SHOW/DESC/DESCRIBE/EXPLAIN/
+	// WITH), so a row-returning statement outside that list comes back
+	// without rows. The first failing statement aborts the rest: the
+	// Results accumulated so far are returned together with the error.
+	// A dedicated connection per call: db other than the login database
+	// is selected via USE on that connection.
+	ExecSQL(ctx context.Context, db, query string, queryID string, opts ExecOpts) ([]Result, error)
+	// CancelQuery cancels the running query registered under queryID.
+	// An unknown queryID (the query already finished, or never ran) is
+	// not an error: nil is returned.
+	CancelQuery(ctx context.Context, queryID string) error
 	Close() error
 }
 

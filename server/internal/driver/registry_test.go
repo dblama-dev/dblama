@@ -78,6 +78,14 @@ func (f *fakeDriver) LastInsertID(context.Context) (int64, error) {
 	return 0, nil
 }
 
+func (f *fakeDriver) ExecSQL(context.Context, string, string, string, ExecOpts) ([]Result, error) {
+	return nil, nil
+}
+
+func (f *fakeDriver) CancelQuery(context.Context, string) error {
+	return nil
+}
+
 func (f *fakeDriver) Close() error { return nil }
 
 func TestRegistry_List(t *testing.T) {

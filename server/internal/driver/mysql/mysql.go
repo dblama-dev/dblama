@@ -39,6 +39,15 @@ type MysqlDriver struct {
 	info driver.DriverInfo
 	caps driver.Caps
 
+	// loginDB is the database the pool's DSN is bound to; ExecSQL uses
+	// it to decide whether a dedicated connection needs a USE switch.
+	loginDB string
+
+	// queries maps running console query ids to their dedicated
+	// connections (CancelQuery's registry). The mutex guards the map
+	// because a driver instance is shared across requests.
+	queries queryRegistry
+
 	// lastInsertID holds the auto_increment value of the most recent
 	// row write (InsertRow/UpsertRows). The mutex guards it because a
 	// driver instance is shared across requests.
@@ -71,9 +80,10 @@ func Connect(ctx context.Context, cfg driver.ConnConfig) (driver.Driver, error) 
 
 	flavor, version := ParseFlavor(versionRaw)
 	return &MysqlDriver{
-		db:   db,
-		info: driver.DriverInfo{Name: serverName(flavor), Flavor: flavor, Version: version, User: cfg.User, Host: cfg.Host},
-		caps: capsFor(flavor, version),
+		db:      db,
+		info:    driver.DriverInfo{Name: serverName(flavor), Flavor: flavor, Version: version, User: cfg.User, Host: cfg.Host},
+		caps:    capsFor(flavor, version),
+		loginDB: cfg.Database,
 	}, nil
 }
 
