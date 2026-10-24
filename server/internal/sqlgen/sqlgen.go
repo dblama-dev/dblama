@@ -86,6 +86,16 @@ func QuoteIdent(name string) string {
 	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
 }
 
+// QuoteIdentPg wraps name in PostgreSQL double quotes, doubling any inner
+// double quote so it cannot break out of the quoted identifier. Case is
+// preserved: "MixedCase" stays mixed-case where an unquoted identifier
+// would fold to lowercase. It does not validate emptiness: QuoteIdentPg("")
+// returns `""` and callers must reject empty identifiers with
+// ErrEmptyIdentifier.
+func QuoteIdentPg(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
 // BuildSelect builds a parameterized SELECT statement. Filters are joined
 // with AND, values are bound as ? placeholders (IS NULL / IS NOT NULL emit
 // no placeholder), IN / NOT IN expand into one placeholder per comma-

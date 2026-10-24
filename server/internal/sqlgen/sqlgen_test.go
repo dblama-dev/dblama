@@ -26,6 +26,27 @@ func TestQuoteIdent(t *testing.T) {
 	}
 }
 
+func TestQuoteIdentPg(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"simple", "a", `"a"`},
+		{"inner double quote doubled", `a"b`, `"a""b"`},
+		{"mixed case preserved", "MixedCase", `"MixedCase"`},
+		{"reserved word", "order", `"order"`},
+		{"empty yields empty quotes", "", `""`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := QuoteIdentPg(tt.in); got != tt.want {
+				t.Errorf("QuoteIdentPg(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAllowedOperators(t *testing.T) {
 	want := map[string]bool{
 		"=": true, "!=": true, "<": true, ">": true, "<=": true, ">=": true,

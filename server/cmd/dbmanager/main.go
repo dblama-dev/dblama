@@ -18,6 +18,7 @@ import (
 	"github.com/hitslab/db-manager/server/internal/config"
 	"github.com/hitslab/db-manager/server/internal/driver"
 	"github.com/hitslab/db-manager/server/internal/driver/mysql"
+	"github.com/hitslab/db-manager/server/internal/driver/postgres"
 	"github.com/hitslab/db-manager/server/internal/session"
 )
 
@@ -38,6 +39,7 @@ func run() error {
 	registry := driver.NewRegistry()
 	registry.Register(driver.DriverMeta{ID: "mysql", Name: "MySQL", DefaultPort: "3306"}, mysql.Connect)
 	registry.Register(driver.DriverMeta{ID: "mariadb", Name: "MariaDB", DefaultPort: "3306"}, mysql.Connect)
+	registry.Register(driver.DriverMeta{ID: "postgres", Name: "PostgreSQL", DefaultPort: "5432"}, postgres.Connect)
 
 	store := session.NewStore(cfg.SessionTTL, 1000, time.Now)
 	stopJanitor := store.StartJanitor(time.Minute)
