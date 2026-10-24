@@ -4,6 +4,7 @@ package mysql
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -321,5 +322,347 @@ func TestSelectRows_EmptyNames(t *testing.T) {
 	}
 	if _, err := drv.PrimaryKey(ctx, "db", ""); err == nil {
 		t.Error("PrimaryKey(empty table) error: expected error, got nil")
+	}
+}
+
+// --- Row write operations (Task 7) ---
+
+// seedWriteTable creates the row-write playground table write_t7 (id
+// INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(50), note VARCHAR(50))
+// and registers its cleanup. note is nullable with no default, so NULL
+// and '' can be told apart after a write.
+func seedWriteTable(t *testing.T, cfg driverConnConfig) {
+	t.Helper()
+	execDDL(t, cfg, "CREATE TABLE write_t7 (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(50), note VARCHAR(50))")
+	t.Cleanup(func() { execDDL(t, cfg, "DROP TABLE IF EXISTS write_t7") })
+}
+
+// readAll returns the full content of table ordered by the given column
+// — the verification helper of the write tests.
+func readAll(t *testing.T, drv driver.Driver, cfg driverConnConfig, table, order string) driver.Page {
+	t.Helper()
+	page, err := drv.SelectRows(context.Background(), cfg.Database, table, sqlgen.SelectQuery{
+		Sorts: []sqlgen.Sort{{Column: order}},
+	})
+	if err != nil {
+		t.Fatalf("SelectRows(%s) after write: %v", table, err)
+	}
+	return page
+}
+
+func TestInsertRow_NullVsEmpty(t *testing.T) {
+	for _, tc := range testImages {
+		t.Run(tc.image, func(t *testing.T) {
+			cfg := startDB(t, tc.image)
+			drv := connectOK(t, cfg)
+			seedWriteTable(t, cfg)
+
+			// JSON null arrives as nil and must land as SQL NULL; ""
+			// must land as an empty string. The two are never conflated.
+			if err := drv.InsertRow(context.Background(), cfg.Database, "write_t7", driver.RowValues{
+				"id": int64(1), "name": "with-null", "note": nil,
+			}); err != nil {
+				t.Fatalf("InsertRow(NULL note) error: %v", err)
+			}
+			if err := drv.InsertRow(context.Background(), cfg.Database, "write_t7", driver.RowValues{
+				"id": int64(2), "name": "with-empty", "note": "",
+			}); err != nil {
+				t.Fatalf("InsertRow(empty note) error: %v", err)
+			}
+
+			page := readAll(t, drv, cfg, "write_t7", "id")
+			if len(page.Rows) != 2 {
+				t.Fatalf("len(Rows) = %d, want 2", len(page.Rows))
+			}
+			if got := page.Rows[0][2]; got != nil {
+				t.Errorf("row 1 note = %#v (%T), want nil (SQL NULL)", got, got)
+			}
+			if got := page.Rows[1][2]; got != "" {
+				t.Errorf("row 2 note = %#v (%T), want \"\"", got, got)
+			}
+		})
+	}
+}
+
+func TestInsertRow_LastInsertID(t *testing.T) {
+	for _, tc := range testImages {
+		t.Run(tc.image, func(t *testing.T) {
+			cfg := startDB(t, tc.image)
+			drv := connectOK(t, cfg)
+			seedWriteTable(t, cfg)
+			ctx := context.Background()
+
+			if err := drv.InsertRow(ctx, cfg.Database, "write_t7", driver.RowValues{"name": "first"}); err != nil {
+				t.Fatalf("InsertRow(first) error: %v", err)
+			}
+			id, err := drv.LastInsertID(ctx)
+			if err != nil {
+				t.Fatalf("LastInsertID() error: %v", err)
+			}
+			if id != 1 {
+				t.Errorf("LastInsertID() after first insert = %d, want 1", id)
+			}
+
+			if err := drv.InsertRow(ctx, cfg.Database, "write_t7", driver.RowValues{"name": "second"}); err != nil {
+				t.Fatalf("InsertRow(second) error: %v", err)
+			}
+			id, err = drv.LastInsertID(ctx)
+			if err != nil {
+				t.Fatalf("LastInsertID() error: %v", err)
+			}
+			if id != 2 {
+				t.Errorf("LastInsertID() after second insert = %d, want 2", id)
+			}
+
+			page := readAll(t, drv, cfg, "write_t7", "id")
+			if len(page.Rows) != 2 {
+				t.Fatalf("len(Rows) = %d, want 2", len(page.Rows))
+			}
+			if page.Rows[0][0] != int64(1) || page.Rows[1][0] != int64(2) {
+				t.Errorf("ids = %v, %v; want 1, 2", page.Rows[0][0], page.Rows[1][0])
+			}
+		})
+	}
+}
+
+func TestUpdateRow_ByPK(t *testing.T) {
+	for _, tc := range testImages {
+		t.Run(tc.image, func(t *testing.T) {
+			cfg := startDB(t, tc.image)
+			drv := connectOK(t, cfg)
+			seedWriteTable(t, cfg)
+			ctx := context.Background()
+
+			if err := drv.InsertRow(ctx, cfg.Database, "write_t7", driver.RowValues{
+				"id": int64(1), "name": "old", "note": "keep",
+			}); err != nil {
+				t.Fatalf("InsertRow(row 1) error: %v", err)
+			}
+			if err := drv.InsertRow(ctx, cfg.Database, "write_t7", driver.RowValues{
+				"id": int64(2), "name": "old2", "note": "keep",
+			}); err != nil {
+				t.Fatalf("InsertRow(row 2) error: %v", err)
+			}
+
+			// Update by PK: several SET values (one of them NULL), only
+			// the addressed row changes.
+			if err := drv.UpdateRow(ctx, cfg.Database, "write_t7",
+				driver.PK{"id": int64(1)},
+				driver.RowValues{"name": "new", "note": nil},
+			); err != nil {
+				t.Fatalf("UpdateRow() error: %v", err)
+			}
+
+			page := readAll(t, drv, cfg, "write_t7", "id")
+			if len(page.Rows) != 2 {
+				t.Fatalf("len(Rows) = %d, want 2", len(page.Rows))
+			}
+			if page.Rows[0][1] != "new" || page.Rows[0][2] != nil {
+				t.Errorf("row 1 = (%v, %v), want (new, nil)", page.Rows[0][1], page.Rows[0][2])
+			}
+			if page.Rows[1][1] != "old2" || page.Rows[1][2] != "keep" {
+				t.Errorf("row 2 = (%v, %v), want (old2, keep) — untouched", page.Rows[1][1], page.Rows[1][2])
+			}
+
+			// An empty values set or an empty where must be rejected
+			// before any statement: no unqualified full-table UPDATE.
+			if err := drv.UpdateRow(ctx, cfg.Database, "write_t7",
+				driver.PK{"id": int64(1)}, driver.RowValues{}); err == nil {
+				t.Error("UpdateRow(empty vals) error = nil, want error")
+			}
+			if err := drv.UpdateRow(ctx, cfg.Database, "write_t7",
+				driver.PK{}, driver.RowValues{"name": "boom"}); err == nil {
+				t.Error("UpdateRow(empty where) error = nil, want error")
+			}
+			if page := readAll(t, drv, cfg, "write_t7", "id"); len(page.Rows) != 2 || page.Rows[1][1] != "old2" {
+				t.Errorf("table changed by a rejected UpdateRow: %v rows", len(page.Rows))
+			}
+		})
+	}
+}
+
+func TestUpdateRow_NoPK(t *testing.T) {
+	for _, tc := range testImages {
+		t.Run(tc.image, func(t *testing.T) {
+			cfg := startDB(t, tc.image)
+			drv := connectOK(t, cfg)
+			execDDL(t, cfg, "CREATE TABLE write_nopk_t7 (a INT, b VARCHAR(50))")
+			t.Cleanup(func() { execDDL(t, cfg, "DROP TABLE IF EXISTS write_nopk_t7") })
+			ctx := context.Background()
+
+			// Two identical rows: the table has no primary key, so the
+			// where is all columns and a single UPDATE matches both.
+			for i := 0; i < 2; i++ {
+				if err := drv.InsertRow(ctx, cfg.Database, "write_nopk_t7", driver.RowValues{
+					"a": int64(1), "b": "x",
+				}); err != nil {
+					t.Fatalf("InsertRow(%d) error: %v", i+1, err)
+				}
+			}
+
+			if err := drv.UpdateRow(ctx, cfg.Database, "write_nopk_t7",
+				driver.PK{"a": int64(1), "b": "x"},
+				driver.RowValues{"b": "y"},
+			); err != nil {
+				t.Fatalf("UpdateRow() error: %v", err)
+			}
+
+			// Affected-rows semantics: every row matching the where
+			// changes — both duplicates end up updated.
+			page := readAll(t, drv, cfg, "write_nopk_t7", "b")
+			if len(page.Rows) != 2 {
+				t.Fatalf("len(Rows) = %d, want 2", len(page.Rows))
+			}
+			for i, row := range page.Rows {
+				if row[0] != int64(1) || row[1] != "y" {
+					t.Errorf("row %d = (%v, %v), want (1, y)", i, row[0], row[1])
+				}
+			}
+		})
+	}
+}
+
+func TestDeleteRows_Multiple(t *testing.T) {
+	for _, tc := range testImages {
+		t.Run(tc.image, func(t *testing.T) {
+			cfg := startDB(t, tc.image)
+			drv := connectOK(t, cfg)
+			seedWriteTable(t, cfg)
+			ctx := context.Background()
+
+			for i := int64(1); i <= 4; i++ {
+				if err := drv.InsertRow(ctx, cfg.Database, "write_t7", driver.RowValues{
+					"id": i, "name": fmt.Sprintf("row%d", i),
+				}); err != nil {
+					t.Fatalf("InsertRow(%d) error: %v", i, err)
+				}
+			}
+
+			// Two rows in one call, transactional.
+			if err := drv.DeleteRows(ctx, cfg.Database, "write_t7", []driver.PK{
+				{"id": int64(1)},
+				{"id": int64(3)},
+			}); err != nil {
+				t.Fatalf("DeleteRows() error: %v", err)
+			}
+
+			page := readAll(t, drv, cfg, "write_t7", "id")
+			gotIDs := make([]int64, len(page.Rows))
+			for i, row := range page.Rows {
+				id, ok := row[0].(int64)
+				if !ok {
+					t.Fatalf("row %d id = %v (%T), want int64", i, row[0], row[0])
+				}
+				gotIDs[i] = id
+			}
+			if !slices.Equal(gotIDs, []int64{2, 4}) {
+				t.Errorf("remaining ids = %v, want [2 4]", gotIDs)
+			}
+		})
+	}
+}
+
+func TestDeleteRows_EmptyWhere(t *testing.T) {
+	for _, tc := range testImages {
+		t.Run(tc.image, func(t *testing.T) {
+			cfg := startDB(t, tc.image)
+			drv := connectOK(t, cfg)
+			seedWriteTable(t, cfg)
+			ctx := context.Background()
+
+			for i := int64(1); i <= 2; i++ {
+				if err := drv.InsertRow(ctx, cfg.Database, "write_t7", driver.RowValues{
+					"id": i, "name": "stay",
+				}); err != nil {
+					t.Fatalf("InsertRow(%d) error: %v", i, err)
+				}
+			}
+
+			// Pinned: an empty key inside the list and an empty list are
+			// both errors — a DELETE without WHERE never leaves this
+			// driver.
+			if err := drv.DeleteRows(ctx, cfg.Database, "write_t7", []driver.PK{{}}); err == nil {
+				t.Error("DeleteRows(empty key) error = nil, want error")
+			}
+			if err := drv.DeleteRows(ctx, cfg.Database, "write_t7", nil); err == nil {
+				t.Error("DeleteRows(empty list) error = nil, want error")
+			}
+
+			if page := readAll(t, drv, cfg, "write_t7", "id"); len(page.Rows) != 2 {
+				t.Errorf("rejected DeleteRows damaged the table: %d rows left", len(page.Rows))
+			}
+		})
+	}
+}
+
+func TestUpsertRows(t *testing.T) {
+	for _, tc := range testImages {
+		t.Run(tc.image, func(t *testing.T) {
+			cfg := startDB(t, tc.image)
+			drv := connectOK(t, cfg)
+			seedWriteTable(t, cfg)
+			ctx := context.Background()
+
+			if err := drv.InsertRow(ctx, cfg.Database, "write_t7", driver.RowValues{
+				"id": int64(1), "name": "old", "note": "keep",
+			}); err != nil {
+				t.Fatalf("InsertRow(existing) error: %v", err)
+			}
+
+			// One row hits the existing PK (updated), one is new
+			// (inserted) — a single statement.
+			if err := drv.UpsertRows(ctx, cfg.Database, "write_t7", []driver.RowValues{
+				{"id": int64(1), "name": "updated", "note": "replaced"},
+				{"id": int64(2), "name": "inserted", "note": "fresh"},
+			}); err != nil {
+				t.Fatalf("UpsertRows() error: %v", err)
+			}
+
+			page := readAll(t, drv, cfg, "write_t7", "id")
+			if len(page.Rows) != 2 {
+				t.Fatalf("len(Rows) = %d, want 2", len(page.Rows))
+			}
+			if page.Rows[0][1] != "updated" || page.Rows[0][2] != "replaced" {
+				t.Errorf("row 1 = (%v, %v), want (updated, replaced)", page.Rows[0][1], page.Rows[0][2])
+			}
+			if page.Rows[1][1] != "inserted" || page.Rows[1][2] != "fresh" {
+				t.Errorf("row 2 = (%v, %v), want (inserted, fresh)", page.Rows[1][1], page.Rows[1][2])
+			}
+		})
+	}
+}
+
+func TestUpsertRows_MixedColumns(t *testing.T) {
+	for _, tc := range testImages {
+		t.Run(tc.image, func(t *testing.T) {
+			cfg := startDB(t, tc.image)
+			drv := connectOK(t, cfg)
+			seedWriteTable(t, cfg)
+			ctx := context.Background()
+
+			if err := drv.InsertRow(ctx, cfg.Database, "write_t7", driver.RowValues{
+				"id": int64(1), "name": "original", "note": "keep",
+			}); err != nil {
+				t.Fatalf("InsertRow(existing) error: %v", err)
+			}
+
+			// Rows with different column sets cannot share one INSERT —
+			// rejected before any statement. An empty row list is an
+			// error too (pinned).
+			if err := drv.UpsertRows(ctx, cfg.Database, "write_t7", []driver.RowValues{
+				{"id": int64(5), "name": "a", "note": "n"},
+				{"id": int64(6), "name": "b"},
+			}); err == nil {
+				t.Error("UpsertRows(mixed columns) error = nil, want error")
+			}
+			if err := drv.UpsertRows(ctx, cfg.Database, "write_t7", nil); err == nil {
+				t.Error("UpsertRows(empty list) error = nil, want error")
+			}
+
+			page := readAll(t, drv, cfg, "write_t7", "id")
+			if len(page.Rows) != 1 || page.Rows[0][1] != "original" {
+				t.Errorf("rejected UpsertRows changed the table: %d rows", len(page.Rows))
+			}
+		})
 	}
 }

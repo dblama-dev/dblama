@@ -76,6 +76,26 @@ func (d *stubDriver) PrimaryKey(context.Context, string, string) ([]string, erro
 	return nil, nil
 }
 
+func (d *stubDriver) InsertRow(context.Context, string, string, driver.RowValues) error {
+	return nil
+}
+
+func (d *stubDriver) UpdateRow(context.Context, string, string, driver.PK, driver.RowValues) error {
+	return nil
+}
+
+func (d *stubDriver) DeleteRows(context.Context, string, string, []driver.PK) error {
+	return nil
+}
+
+func (d *stubDriver) UpsertRows(context.Context, string, string, []driver.RowValues) error {
+	return nil
+}
+
+func (d *stubDriver) LastInsertID(context.Context) (int64, error) {
+	return 0, nil
+}
+
 func (d *stubDriver) Close() error {
 	d.closed++
 	return nil

@@ -61,6 +61,26 @@ func (f *fakeDriver) PrimaryKey(context.Context, string, string) ([]string, erro
 	return nil, nil
 }
 
+func (f *fakeDriver) InsertRow(context.Context, string, string, driver.RowValues) error {
+	return nil
+}
+
+func (f *fakeDriver) UpdateRow(context.Context, string, string, driver.PK, driver.RowValues) error {
+	return nil
+}
+
+func (f *fakeDriver) DeleteRows(context.Context, string, string, []driver.PK) error {
+	return nil
+}
+
+func (f *fakeDriver) UpsertRows(context.Context, string, string, []driver.RowValues) error {
+	return nil
+}
+
+func (f *fakeDriver) LastInsertID(context.Context) (int64, error) {
+	return 0, nil
+}
+
 func (f *fakeDriver) Close() error {
 	f.closes.Add(1)
 	return nil

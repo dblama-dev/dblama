@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 
 	_ "github.com/go-sql-driver/mysql" // registers the database/sql driver "mysql"
 
@@ -37,6 +38,12 @@ type MysqlDriver struct {
 	db   *sql.DB
 	info driver.DriverInfo
 	caps driver.Caps
+
+	// lastInsertID holds the auto_increment value of the most recent
+	// row write (InsertRow/UpsertRows). The mutex guards it because a
+	// driver instance is shared across requests.
+	writeMu      sync.Mutex
+	lastInsertID int64
 }
 
 var _ driver.Driver = (*MysqlDriver)(nil)
