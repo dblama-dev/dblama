@@ -93,6 +93,9 @@ const exportBatchSize = 100
 // is ever buffered. With Gzip the stream is wrapped in a gzip writer
 // whose footer is flushed when Export returns.
 //
+// Views are not exported in v0.1 (spec §7 narrowing): the dump covers
+// base tables only, in both the sql and the delimited formats.
+//
 // Paging pins: a single-column primary key pages by keyset (WHERE pk >
 // lastPK ORDER BY pk LIMIT 100) so a live table cannot skip or repeat
 // rows; any other shape (no PK, composite PK) pages by LIMIT/OFFSET,

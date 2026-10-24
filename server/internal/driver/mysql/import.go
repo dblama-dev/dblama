@@ -31,6 +31,18 @@ const (
 	gzipMagic1 = 0x8b
 )
 
+// maxDecompressedInputMB is the decompressed-size cap in megabytes —
+// the same 512 MiB the API layer caps the upload body at. A small .gz
+// can decompress to gigabytes (a decompression bomb), and the script is
+// fully buffered, so the gzip stream is read through a LimitReader of
+// cap+1 and an input that exceeds the cap is rejected.
+const maxDecompressedInputMB = 512
+
+// maxDecompressedInput is maxDecompressedInputMB in bytes. A var only so
+// the cap logic can be unit-tested with a tiny value (the error text
+// stays pinned to the production cap); production code must not write it.
+var maxDecompressedInput int64 = maxDecompressedInputMB << 20
+
 // ImportSQL executes an SQL script read from r against database db on a
 // dedicated connection and reports byte progress. See the driver.Driver
 // contract for the full semantics; the implementation pins are:
@@ -118,20 +130,25 @@ func (d *MysqlDriver) ImportSQL(ctx context.Context, db string, r io.Reader, pro
 }
 
 // readImportInput consumes r once and returns the script text. A gzip
-// stream (magic 1f 8b) is decompressed transparently. No progress is
-// reported here: the stream's size is unknown until it ends and a
-// read-phase done would regress to 0 when execution starts (see
-// ImportSQL).
+// stream (magic 1f 8b) is decompressed transparently, capped at
+// maxDecompressedInput so a decompression bomb cannot exhaust memory.
+// No progress is reported here: the stream's size is unknown until it
+// ends and a read-phase done would regress to 0 when execution starts
+// (see ImportSQL).
 func readImportInput(r io.Reader) (string, error) {
 	br := bufio.NewReader(r)
 	src := io.Reader(br)
+	gzipped := false
 	if magic, err := br.Peek(2); err == nil && magic[0] == gzipMagic0 && magic[1] == gzipMagic1 {
 		gz, err := gzip.NewReader(br)
 		if err != nil {
 			return "", err
 		}
 		defer func() { _ = gz.Close() }()
-		src = gz
+		// cap+1: reading one byte past the cap is what tells "over the
+		// limit" apart from "exactly at it".
+		src = io.LimitReader(gz, maxDecompressedInput+1)
+		gzipped = true
 	}
 
 	var buf bytes.Buffer
@@ -148,6 +165,9 @@ func readImportInput(r io.Reader) (string, error) {
 			return "", rerr
 		}
 	}
+	if gzipped && int64(buf.Len()) > maxDecompressedInput {
+		return "", fmt.Errorf("decompressed dump exceeds %dMB", maxDecompressedInputMB)
+	}
 	return buf.String(), nil
 }
 
@@ -162,6 +182,12 @@ func excerpt(s string) string {
 // csvBatchSize is the row count of one multi-row INSERT statement of the
 // CSV import — the same batch size the dump writer streams in.
 const csvBatchSize = 100
+
+// progressRowStride is the row stride of ImportCSV's progress reports:
+// per-row callbacks on a big file would flood the NDJSON stream (and the
+// browser painting it), so progress is reported every 1000th row plus
+// the final row (done == total on success).
+const progressRowStride = 1000
 
 // ImportCSV imports delimited rows read from r into table in database db
 // and reports row progress. See the driver.Driver contract for the full
@@ -186,9 +212,11 @@ const csvBatchSize = 100
 //     "\"" semantics still apply and any other character fails before
 //     reading; SkipHeader discards the first record;
 //   - progress: the row count is unknown until the stream ends, so
-//     progress(done=n, total=n) is reported after every row read and the
-//     final count is the number of imported rows; a nil progress is
-//     allowed. An input with no data rows (nothing at all, or only the
+//     done tracks rows read: progress(done=n, total=n) is reported
+//     every 1000th row (progressRowStride) plus the final row — per-row
+//     callbacks would flood the progress stream — and the final count
+//     is the number of imported rows; a nil progress is allowed. An
+//     input with no data rows (nothing at all, or only the
 //     skipped header) is an error, mirroring ImportSQL's empty script.
 func (d *MysqlDriver) ImportCSV(ctx context.Context, db, table string, r io.Reader, opts driver.CSVImportOpts, progress func(done, total int64)) error {
 	if db == "" {
@@ -286,7 +314,7 @@ func (d *MysqlDriver) ImportCSV(ctx context.Context, db, table string, r io.Read
 				args = append(args, f)
 			}
 		}
-		if progress != nil {
+		if progress != nil && nrows%progressRowStride == 0 {
 			progress(int64(nrows), int64(nrows))
 		}
 		if nrows-batchFirst+1 == csvBatchSize {
@@ -298,6 +326,11 @@ func (d *MysqlDriver) ImportCSV(ctx context.Context, db, table string, r io.Read
 	}
 	if nrows == 0 {
 		return fmt.Errorf("import csv: empty input")
+	}
+	// The final row always reports, even when it is not on the stride —
+	// the done == total contract of a successful import.
+	if progress != nil && nrows%progressRowStride != 0 {
+		progress(int64(nrows), int64(nrows))
 	}
 	if err := flush(nrows); err != nil {
 		return err

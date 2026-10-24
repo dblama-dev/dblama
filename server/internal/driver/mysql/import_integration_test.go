@@ -477,6 +477,46 @@ func TestImportCSV_Batching(t *testing.T) {
 	}
 }
 
+// TestImportCSV_ProgressThrottle pins the throttled progress contract:
+// a 120-row import reports far fewer than 120 times (per-row callbacks
+// would flood the progress stream) and the final call still reports
+// done == total == 120 — the done == total contract of a successful
+// import is kept regardless of the stride.
+func TestImportCSV_ProgressThrottle(t *testing.T) {
+	for _, tc := range testImages {
+		t.Run(tc.image, func(t *testing.T) {
+			cfg := startDB(t, tc.image)
+			drv := connectOK(t, cfg)
+
+			execDDL(t, cfg, "CREATE TABLE imp_csv_prog (id INT PRIMARY KEY)")
+			t.Cleanup(func() { execDDL(t, cfg, "DROP TABLE IF EXISTS imp_csv_prog") })
+
+			var sb strings.Builder
+			for i := 1; i <= 120; i++ {
+				fmt.Fprintf(&sb, "%d\n", i)
+			}
+
+			var calls int
+			var lastDone, lastTotal int64
+			progress := func(done, total int64) {
+				calls++
+				lastDone, lastTotal = done, total
+			}
+			if err := drv.ImportCSV(context.Background(), cfg.Database, "imp_csv_prog",
+				strings.NewReader(sb.String()), driver.CSVImportOpts{}, progress); err != nil {
+				t.Fatalf("ImportCSV error: %v", err)
+			}
+
+			if calls > 10 {
+				t.Errorf("progress called %d times for 120 rows, want <= 10 (throttled)", calls)
+			}
+			if lastDone != 120 || lastTotal != 120 {
+				t.Errorf("final progress = (%d, %d), want (120, 120)", lastDone, lastTotal)
+			}
+		})
+	}
+}
+
 // TestImportCSV_RowError pins the failure semantics: the error names the
 // first row of the failing batch, the failing batch is applied
 // atomically (none of its rows land) and the batches before it stay

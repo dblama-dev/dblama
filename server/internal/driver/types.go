@@ -300,8 +300,10 @@ type Driver interface {
 	LastInsertID(ctx context.Context) (int64, error)
 	// ExecSQL runs the (possibly multi-statement) console query against
 	// database db on a dedicated connection and returns one Result per
-	// statement, in order. Statements split on ';' outside strings and
-	// comments (no DELIMITER support). A statement that returns rows
+	// statement, in order. Statements are split by
+	// sqlgen.SplitStatements — mysql-client semantics with DELIMITER
+	// support, so a DELIMITER-wrapped trigger/routine block is one
+	// statement. A statement that returns rows
 	// yields Columns/Rows (up to opts.MaxRows, flagged Truncated);
 	// every other statement yields AffectedRows/LastInsertID — detected
 	// by a pinned keyword heuristic (SELECT/SHOW/DESC/DESCRIBE/EXPLAIN/
@@ -364,8 +366,10 @@ type Driver interface {
 	//
 	// progress reports rows. PIN: the row count is unknown until the
 	// stream ends, so done tracks rows read: progress(done=n, total=n)
-	// is called after every row and the final call reports done == total
-	// == the number of imported rows. A nil progress is allowed.
+	// is called every 1000th row plus the final row (per-row callbacks
+	// would flood the progress stream) and the final call reports
+	// done == total == the number of imported rows. A nil progress is
+	// allowed.
 	//
 	// The first failing row aborts the import: rows before its batch
 	// have been applied and are not rolled back, the failing batch is
