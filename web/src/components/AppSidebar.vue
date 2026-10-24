@@ -1,20 +1,15 @@
 <template>
   <aside class="app-sidebar">
-    {{ t('sidebar.placeholder') }}
+    <ObjectTree />
   </aside>
 </template>
 
 <script setup lang="ts">
-import { useI18n } from 'vue-i18n'
-
-const { t } = useI18n()
+import ObjectTree from './ObjectTree.vue'
 </script>
 
 <style scoped>
-/* Empty placeholder: the object tree lands in П2. */
 .app-sidebar {
-  padding: 12px;
-  font-size: 12px;
-  opacity: 0.6;
+  height: 100%;
 }
 </style>

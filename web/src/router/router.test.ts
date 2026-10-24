@@ -82,4 +82,28 @@ describe('router guard', () => {
     await router.push('/login')
     expect(router.currentRoute.value.path).toBe('/server')
   })
+
+  it('resolves /db/:db/table/:t with a session and bounces to /login without one', async () => {
+    const store = useSessionStore()
+    store.sessionInfo = sessionInfo
+
+    await router.push('/db/mydb/table/users')
+    expect(router.currentRoute.value.path).toBe('/db/mydb/table/users')
+    expect(router.currentRoute.value.params).toMatchObject({ db: 'mydb', t: 'users' })
+
+    store.sessionInfo = null
+    // A push to the very same path would be deduplicated without running
+    // the guard, so navigate to another /db path.
+    await router.push('/db/otherdb/table/x')
+    expect(router.currentRoute.value.path).toBe('/login')
+  })
+
+  it('renders the /db/:db placeholder under the same layout', async () => {
+    const store = useSessionStore()
+    store.sessionInfo = sessionInfo
+
+    await router.push('/db/mydb')
+    expect(router.currentRoute.value.path).toBe('/db/mydb')
+    expect(router.currentRoute.value.params).toMatchObject({ db: 'mydb' })
+  })
 })

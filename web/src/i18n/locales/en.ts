@@ -31,4 +31,16 @@ export default {
   sidebar: {
     placeholder: 'Object tree arrives in P2',
   },
+  tree: {
+    selectDb: 'Database',
+    search: 'Search',
+    tables: 'Tables',
+    views: 'Views',
+    selectTable: 'Select a table',
+    loadFailed: 'Failed to load the table list',
+  },
+  table: {
+    data: 'Data',
+    structure: 'Structure',
+  },
 }

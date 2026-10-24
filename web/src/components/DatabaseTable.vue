@@ -9,6 +9,7 @@
       :columns="columns"
       :data="databases"
       :loading="loading"
+      :row-props="rowProps"
       :bordered="false"
     />
   </div>
@@ -27,7 +28,7 @@ defineProps<{
   loading?: boolean
 }>()
 
-const emit = defineEmits<{ refresh: [] }>()
+const emit = defineEmits<{ refresh: []; open: [name: string] }>()
 
 const { t } = useI18n()
 
@@ -40,6 +41,12 @@ const columns = computed<DataTableColumns<DatabaseInfo>>(() => [
   },
   { title: t('server.columns.collation'), key: 'collation' },
 ])
+
+// Clicking a row opens the database in the tree view.
+const rowProps = (row: DatabaseInfo): Record<string, unknown> => ({
+  style: 'cursor: pointer',
+  onClick: () => emit('open', row.name),
+})
 </script>
 
 <style scoped>

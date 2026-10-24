@@ -2,8 +2,10 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 import BasicLayout from '../layouts/BasicLayout.vue'
 import { useSessionStore } from '../stores/session'
+import DbView from '../views/DbView.vue'
 import LoginView from '../views/LoginView.vue'
 import ServerView from '../views/ServerView.vue'
+import TableView from '../views/TableView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -14,6 +16,14 @@ const router = createRouter({
       path: '/server',
       component: BasicLayout,
       children: [{ path: '', name: 'server', component: ServerView }],
+    },
+    {
+      path: '/db/:db',
+      component: BasicLayout,
+      children: [
+        { path: '', name: 'db', component: DbView },
+        { path: 'table/:t', name: 'db-table', component: TableView },
+      ],
     },
   ],
 })

@@ -31,4 +31,16 @@ export default {
   sidebar: {
     placeholder: 'Дерево объектов появится в П2',
   },
+  tree: {
+    selectDb: 'База данных',
+    search: 'Поиск',
+    tables: 'Таблицы',
+    views: 'Views',
+    selectTable: 'Выберите таблицу',
+    loadFailed: 'Не удалось загрузить список таблиц',
+  },
+  table: {
+    data: 'Данные',
+    structure: 'Структура',
+  },
 }
