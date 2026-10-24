@@ -39,8 +39,7 @@ var versionPattern = regexp.MustCompile(`PostgreSQL (\d+\.\d+)`)
 // PostgresDriver is a connection-bound PostgreSQL driver instance.
 // Outside this package it is consumed only as a driver.Driver (and as a
 // driver.SchemaAware — handlers select the schema via SetSchema before
-// calling the table methods). The last insert id state (task 4) still to
-// come extends this struct.
+// calling the table methods).
 //
 //nolint:revive // name mirrors the package, "Driver" would collide with the driver contract type
 type PostgresDriver struct {
@@ -60,6 +59,20 @@ type PostgresDriver struct {
 	// API session, so one schema is current at a time.
 	schema   string
 	schemaMu sync.RWMutex
+
+	// writeMu guards lastInsertID — the id captured from the RETURNING
+	// clause of the most recent InsertRow (0 when that insert generated
+	// none), read back through LastInsertID.
+	writeMu      sync.Mutex
+	lastInsertID int64
+
+	// serialPK caches per table ("schema.table") the single-column
+	// server-generated primary key column ("" when there is none) — the
+	// RETURNING target of InsertRow, detected once per table (Ruling 2).
+	// serialMu guards it; the save paths drop entries their ALTERs may
+	// have invalidated.
+	serialMu sync.Mutex
+	serialPK map[string]string
 }
 
 var _ driver.Driver = (*PostgresDriver)(nil)
@@ -86,11 +99,12 @@ func Connect(ctx context.Context, cfg driver.ConnConfig) (driver.Driver, error) 
 	}
 
 	return &PostgresDriver{
-		db:      db,
-		info:    driver.DriverInfo{Name: "PostgreSQL", Flavor: "postgres", Version: parseVersion(versionRaw), User: cfg.User, Host: cfg.Host},
-		caps:    postgresCaps(),
-		loginDB: cfg.Database,
-		schema:  defaultSchema,
+		db:       db,
+		info:     driver.DriverInfo{Name: "PostgreSQL", Flavor: "postgres", Version: parseVersion(versionRaw), User: cfg.User, Host: cfg.Host},
+		caps:     postgresCaps(),
+		loginDB:  cfg.Database,
+		schema:   defaultSchema,
+		serialPK: make(map[string]string),
 	}, nil
 }
 

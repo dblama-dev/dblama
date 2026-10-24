@@ -59,6 +59,12 @@ func (d *PostgresDriver) SaveTable(ctx context.Context, db, table string, desire
 	if err := d.execDDL(ctx, stmts); err != nil {
 		return fmt.Errorf("save table %s.%s: %w", schema, name, err)
 	}
+	// The ALTERs may have changed which column (if any) the server
+	// generates — drop the cached serial-key detection under every name
+	// the table carried through the save.
+	for _, n := range []string{name, table, desired.NewName} {
+		d.invalidateSerialPK(schema, n)
+	}
 	return nil
 }
 
@@ -93,6 +99,8 @@ func (d *PostgresDriver) SaveIndexes(ctx context.Context, db, table string, desi
 	if err := d.execDDL(ctx, stmts); err != nil {
 		return fmt.Errorf("save indexes %s.%s: %w", schema, table, err)
 	}
+	// A changed PRIMARY may have changed the single-column generated key.
+	d.invalidateSerialPK(schema, table)
 	return nil
 }
 

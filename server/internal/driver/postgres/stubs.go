@@ -6,7 +6,6 @@ import (
 	"io"
 
 	"github.com/hitslab/db-manager/server/internal/driver"
-	"github.com/hitslab/db-manager/server/internal/sqlgen"
 )
 
 // This file holds the not-yet-implemented half of the Driver contract so
@@ -14,8 +13,8 @@ import (
 // method below fails with a "not implemented yet" error naming itself;
 // tasks 2–5 of the phase 4 plan replace them one group at a time: tables
 // and structure (task 2), SaveTable/SaveIndexes (task 3), row data
-// (task 4), console and dumps (task 5). When the last stub leaves this
-// file, the file goes too.
+// (task 4), console and dumps (task 5) — only task 5 remains. When the
+// last stub leaves this file, the file goes too.
 
 // notImplemented builds the placeholder error every stub returns; the
 // method name names the missing piece.
@@ -41,36 +40,6 @@ func (d *PostgresDriver) DropTables(context.Context, string, []string) error {
 // DropViews drops the named views (task 3).
 func (d *PostgresDriver) DropViews(context.Context, string, []string) error {
 	return notImplemented("DropViews")
-}
-
-// SelectRows returns one browsed page of a table (task 4).
-func (d *PostgresDriver) SelectRows(context.Context, string, string, sqlgen.SelectQuery) (driver.Page, error) {
-	return driver.Page{}, notImplemented("SelectRows")
-}
-
-// InsertRow inserts one row (task 4).
-func (d *PostgresDriver) InsertRow(context.Context, string, string, driver.RowValues) error {
-	return notImplemented("InsertRow")
-}
-
-// UpdateRow updates the rows matching where (task 4).
-func (d *PostgresDriver) UpdateRow(context.Context, string, string, driver.PK, driver.RowValues) error {
-	return notImplemented("UpdateRow")
-}
-
-// DeleteRows deletes one row per key in one transaction (task 4).
-func (d *PostgresDriver) DeleteRows(context.Context, string, string, []driver.PK) error {
-	return notImplemented("DeleteRows")
-}
-
-// UpsertRows inserts or updates on conflict (task 4).
-func (d *PostgresDriver) UpsertRows(context.Context, string, string, []driver.RowValues) error {
-	return notImplemented("UpsertRows")
-}
-
-// LastInsertID returns the id of the most recent insert (task 4).
-func (d *PostgresDriver) LastInsertID(context.Context) (int64, error) {
-	return 0, notImplemented("LastInsertID")
 }
 
 // ExecSQL runs a console batch statement by statement (task 5).
