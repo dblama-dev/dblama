@@ -54,6 +54,25 @@ func NewRouter(cfg config.Config, sessions *session.Store, drivers *driver.Regis
 			authed.Get("/session", s.handleGetSession)
 			authed.Delete("/session", s.handleLogout)
 			authed.Get("/databases", s.handleDatabases)
+
+			// Tables and rows of one database. Every non-GET route is
+			// already covered by the group's RequireCSRFHeader.
+			authed.Route("/databases/{db}/tables", func(tables chi.Router) {
+				tables.Get("/", s.handleTablesList)
+				tables.Post("/", s.handleBulkTables)
+				tables.Route("/{table}", func(t chi.Router) {
+					t.Get("/", s.handleTableDef)
+					t.Put("/", s.handleSaveTable)
+					t.Delete("/", s.handleDropTable)
+					t.Post("/truncate", s.handleTruncateTable)
+					t.Post("/indexes", s.handleSaveIndexes)
+					t.Get("/rows", s.handleRowsSelect)
+					t.Post("/rows", s.handleRowInsert)
+					t.Patch("/rows", s.handleRowUpdate)
+					t.Delete("/rows", s.handleRowDelete)
+					t.Get("/pk", s.handlePrimaryKey)
+				})
+			})
 		})
 
 		api.NotFound(notFound)
