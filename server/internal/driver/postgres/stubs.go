@@ -28,16 +28,6 @@ func (d *PostgresDriver) ShowCreateTable(context.Context, string, string) (strin
 	return "", notImplemented("ShowCreateTable")
 }
 
-// SaveTable creates or alters a table (task 3).
-func (d *PostgresDriver) SaveTable(context.Context, string, string, driver.TableDef) error {
-	return notImplemented("SaveTable")
-}
-
-// SaveIndexes applies a table's desired index state (task 3).
-func (d *PostgresDriver) SaveIndexes(context.Context, string, string, []driver.Index) error {
-	return notImplemented("SaveIndexes")
-}
-
 // TruncateTables empties the named tables in order (task 3).
 func (d *PostgresDriver) TruncateTables(context.Context, string, []string) error {
 	return notImplemented("TruncateTables")
