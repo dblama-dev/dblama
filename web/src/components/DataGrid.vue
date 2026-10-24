@@ -70,7 +70,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { h } from 'vue'
 import type { DataTableColumns, SelectOption } from 'naive-ui'
@@ -224,6 +224,16 @@ const checkedKeys = ref<string[]>([])
 function onCheckedRowKeys(keys: (string | number)[]): void {
   checkedKeys.value = keys.map(String)
 }
+
+// A refetch replaces the rows: drop checked keys that no longer exist so
+// the selection can never reference deleted rows.
+watch(
+  () => props.rows,
+  () => {
+    const valid = new Set(tableData.value.map((row) => row.__key))
+    checkedKeys.value = checkedKeys.value.filter((key) => valid.has(key))
+  },
+)
 
 function onDeleteSelected(): void {
   const byKey = new Map(tableData.value.map((row) => [row.__key, row]))
