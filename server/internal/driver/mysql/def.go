@@ -248,14 +248,17 @@ func (d *MysqlDriver) tableForeignKeys(ctx context.Context, db, table string) ([
 // the content of the parenthesised suffix (empty for enum and set,
 // whose values are returned instead) and the unsigned flag.
 func parseColumnType(colType string) (base, length string, unsigned bool, enumVals []string) {
-	unsigned = strings.Contains(colType, "unsigned")
 	base = colType
 	if i := strings.IndexAny(base, "( "); i >= 0 {
 		base = base[:i]
 	}
 	if isEnumOrSet(colType) {
-		return base, "", unsigned, enumValues(colType)
+		// An enum/set value may itself contain the word "unsigned"
+		// (enum('unsigned')); the substring scan would report a false
+		// positive, so the flag is skipped for these types.
+		return base, "", false, enumValues(colType)
 	}
+	unsigned = strings.Contains(colType, "unsigned")
 	if i := strings.IndexByte(colType, '('); i >= 0 {
 		if j := strings.LastIndexByte(colType, ')'); j > i {
 			length = colType[i+1 : j]
