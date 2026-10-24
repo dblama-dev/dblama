@@ -95,13 +95,14 @@ func (r *queryRegistry) remove(queryID string) {
 // ExecSQL runs the console query — possibly several ';'-separated
 // statements — on a dedicated connection and returns one Result per
 // statement, in order. See the driver.Driver contract for the full
-// semantics. Pinned mechanism (brief): statements are split
-// client-side by a minimal string/comment-aware splitter (no DELIMITER
-// support — Task 3's sqlgen.SplitStatements replaces it) and executed
-// one by one; row-returning statements (keyword heuristic) go through
-// QueryContext, the rest through ExecContext for AffectedRows /
-// LastInsertID. The first failing statement aborts the batch, but the
-// Results accumulated so far are returned alongside the error.
+// semantics. Pinned mechanism (brief): statements are split client-side
+// by sqlgen.SplitStatements (string/comment-aware, with DELIMITER-block
+// support; '/*! ... */' executable comments are pinned to split like
+// plain block comments) and executed one by one; row-returning
+// statements (keyword heuristic) go through QueryContext, the rest
+// through ExecContext for AffectedRows / LastInsertID. The first
+// failing statement aborts the batch, but the Results accumulated so
+// far are returned alongside the error.
 func (d *MysqlDriver) ExecSQL(ctx context.Context, db, query string, queryID string, opts driver.ExecOpts) ([]driver.Result, error) {
 	if db == "" {
 		return nil, fmt.Errorf("exec sql: %w: database name", sqlgen.ErrEmptyIdentifier)
@@ -297,104 +298,15 @@ func (d *MysqlDriver) CancelQuery(ctx context.Context, queryID string) error {
 	return nil
 }
 
-// splitStatements splits a multi-statement query on ';' boundaries that
-// sit outside single-quoted / double-quoted strings, backtick
-// identifiers and comments, trimming each statement. Minimal Task 1
-// version: no DELIMITER support (Task 3's sqlgen.SplitStatements
-// replaces it) and comments are kept verbatim inside their statement.
-// Only non-blank statements are returned; a query without a single
-// non-blank statement yields nil.
+// splitStatements splits a multi-statement query into statements,
+// delegating to sqlgen.SplitStatements (Task 3): string/comment-aware
+// splitting plus mysql-client DELIMITER-block support. Pinned Task 3
+// difference from the mysql client: '/*! ... */' executable comments
+// split exactly like plain '/* ... */' block comments. Only non-blank
+// statements are returned; a query without a single non-blank
+// statement yields nil.
 func splitStatements(query string) []string {
-	var statements []string
-	start := 0
-	i := 0
-	for i < len(query) {
-		switch c := query[i]; c {
-		case '\'':
-			i = scanQuoted(query, i, '\'', true)
-		case '"':
-			i = scanQuoted(query, i, '"', true)
-		case '`':
-			i = scanQuoted(query, i, '`', false)
-		case '#':
-			i = scanLineComment(query, i)
-		case '-':
-			// MySQL: "--" starts a comment only when followed by
-			// whitespace or end of input ("1--2" is subtraction).
-			if i+1 < len(query) && query[i+1] == '-' && (i+2 == len(query) || isSpaceByte(query[i+2])) {
-				i = scanLineComment(query, i)
-			} else {
-				i++
-			}
-		case '/':
-			if i+1 < len(query) && query[i+1] == '*' {
-				i = scanBlockComment(query, i)
-			} else {
-				i++
-			}
-		case ';':
-			if stmt := strings.TrimSpace(query[start:i]); stmt != "" {
-				statements = append(statements, stmt)
-			}
-			i++
-			start = i
-		default:
-			i++
-		}
-	}
-	if stmt := strings.TrimSpace(query[start:]); stmt != "" {
-		statements = append(statements, stmt)
-	}
-	return statements
-}
-
-// scanQuoted returns the index just past the quoted region opening at
-// i (which holds the opening quote). backslash enables the backslash
-// escapes MySQL applies inside '...' and "..." strings; inside
-// backtick identifiers a backslash is literal. A doubled quote is an
-// escaped quote and stays inside the region. An unterminated region
-// runs to end of input.
-func scanQuoted(q string, i int, quote byte, backslash bool) int {
-	i++
-	for i < len(q) {
-		switch q[i] {
-		case '\\':
-			if backslash {
-				i += 2
-				continue
-			}
-		case quote:
-			if i+1 < len(q) && q[i+1] == quote {
-				i += 2
-				continue
-			}
-			return i + 1
-		}
-		i++
-	}
-	return i
-}
-
-// scanLineComment returns the index of the terminating '\n' (which the
-// main loop then processes as ordinary text) or len(q).
-func scanLineComment(q string, i int) int {
-	for i < len(q) && q[i] != '\n' {
-		i++
-	}
-	return i
-}
-
-// scanBlockComment returns the index just past the "*/" closing the
-// block comment opening at i, or len(q) when unterminated.
-func scanBlockComment(q string, i int) int {
-	i += 2
-	for i+1 < len(q) && (q[i] != '*' || q[i+1] != '/') {
-		i++
-	}
-	if i+1 < len(q) {
-		return i + 2
-	}
-	return len(q)
+	return sqlgen.SplitStatements(query)
 }
 
 func isSpaceByte(c byte) bool {
