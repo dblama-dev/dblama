@@ -28,9 +28,6 @@ export default {
     theme: 'Theme',
     logout: 'Sign out',
   },
-  sidebar: {
-    placeholder: 'Object tree arrives in P2',
-  },
   tree: {
     selectDb: 'Database',
     search: 'Search',

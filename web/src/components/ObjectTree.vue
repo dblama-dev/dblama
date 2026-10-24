@@ -122,7 +122,8 @@ function onSelect(keys: string[]): void {
   if (key === undefined || !key.startsWith('table:') || db.value === null) return
   const table = key.slice('table:'.length)
   selectedKeys.value = [key]
-  void router.push(`/db/${db.value}/table/${table}`)
+  // Identifiers may contain %, ? or #; vue-router decodes params on read.
+  void router.push(`/db/${encodeURIComponent(db.value)}/table/${encodeURIComponent(table)}`)
 }
 </script>
 

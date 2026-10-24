@@ -41,7 +41,7 @@ onMounted(load)
 
 /** Opens the database tree view for the clicked row. */
 function openDb(name: string): void {
-  void router.push(`/db/${name}`)
+  void router.push(`/db/${encodeURIComponent(name)}`)
 }
 </script>
 

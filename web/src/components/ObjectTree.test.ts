@@ -34,6 +34,7 @@ const tables: TableInfo[] = [
   { name: 'users', rows: 3, sizeBytes: 4096, engine: 'InnoDB', comment: '', isView: false },
   { name: 'orders', rows: 5, sizeBytes: 8192, engine: 'InnoDB', comment: '', isView: false },
   { name: 'v_active', rows: 0, sizeBytes: 0, engine: '', comment: '', isView: true },
+  { name: 'data 100%', rows: 1, sizeBytes: 1024, engine: 'InnoDB', comment: '', isView: false },
 ]
 
 /** Routes the mocked api by URL: databases list vs tables of a db. */
@@ -93,7 +94,7 @@ describe('ObjectTree', () => {
     expect(text).toContain('orders')
     // Views go to their own group; the group exists because views exist.
     expect(text).toContain('Таблицы')
-    expect(text).toContain('Views')
+    expect(text).toContain('Представления')
     expect(text).toContain('v_active')
   })
 
@@ -119,6 +120,18 @@ describe('ObjectTree', () => {
     await flushPromises()
 
     expect(pushSpy).toHaveBeenCalledWith('/db/mydb/table/users')
+  })
+
+  it('URL-encodes identifiers with special characters in navigation', async () => {
+    // Names like "data 100%" are legal MySQL identifiers; %, ? and # would
+    // break or truncate the path if pushed raw.
+    const wrapper = await mountTree()
+
+    const tree = wrapper.findComponent(NTree)
+    tree.vm.$emit('update:selected-keys', ['table:data 100%'])
+    await flushPromises()
+
+    expect(pushSpy).toHaveBeenCalledWith('/db/mydb/table/data%20100%25')
   })
 
   it('reloads tables through the catalog store when the database select changes', async () => {

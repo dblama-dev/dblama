@@ -91,6 +91,10 @@ describe('router guard', () => {
     expect(router.currentRoute.value.path).toBe('/db/mydb/table/users')
     expect(router.currentRoute.value.params).toMatchObject({ db: 'mydb', t: 'users' })
 
+    // Encoded identifiers (space, %) decode back to the original name.
+    await router.push('/db/mydb/table/data%20100%25')
+    expect(router.currentRoute.value.params).toMatchObject({ db: 'mydb', t: 'data 100%' })
+
     store.sessionInfo = null
     // A push to the very same path would be deduplicated without running
     // the guard, so navigate to another /db path.

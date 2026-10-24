@@ -28,14 +28,11 @@ export default {
     theme: 'Тема',
     logout: 'Выйти',
   },
-  sidebar: {
-    placeholder: 'Дерево объектов появится в П2',
-  },
   tree: {
     selectDb: 'База данных',
     search: 'Поиск',
     tables: 'Таблицы',
-    views: 'Views',
+    views: 'Представления',
     selectTable: 'Выберите таблицу',
     loadFailed: 'Не удалось загрузить список таблиц',
   },
