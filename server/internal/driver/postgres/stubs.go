@@ -23,16 +23,6 @@ func notImplemented(method string) error {
 	return fmt.Errorf("postgres: %s not implemented yet", method)
 }
 
-// ListTables lists the tables and views of the current schema (task 2).
-func (d *PostgresDriver) ListTables(context.Context, string) ([]driver.TableInfo, error) {
-	return nil, notImplemented("ListTables")
-}
-
-// TableDef reads one table's full structure (task 2).
-func (d *PostgresDriver) TableDef(context.Context, string, string) (driver.TableDef, error) {
-	return driver.TableDef{}, notImplemented("TableDef")
-}
-
 // ShowCreateTable renders a table's CREATE statement (task 5).
 func (d *PostgresDriver) ShowCreateTable(context.Context, string, string) (string, error) {
 	return "", notImplemented("ShowCreateTable")
@@ -66,11 +56,6 @@ func (d *PostgresDriver) DropViews(context.Context, string, []string) error {
 // SelectRows returns one browsed page of a table (task 4).
 func (d *PostgresDriver) SelectRows(context.Context, string, string, sqlgen.SelectQuery) (driver.Page, error) {
 	return driver.Page{}, notImplemented("SelectRows")
-}
-
-// PrimaryKey returns a table's primary key column names (task 2).
-func (d *PostgresDriver) PrimaryKey(context.Context, string, string) ([]string, error) {
-	return nil, notImplemented("PrimaryKey")
 }
 
 // InsertRow inserts one row (task 4).

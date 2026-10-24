@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the database/sql driver "pgx"
 
@@ -17,6 +18,10 @@ import (
 
 // maxOpenConns caps the connection pool per driver instance (spec §4.1).
 const maxOpenConns = 4
+
+// defaultSchema is the schema a fresh driver instance reads and writes
+// until the API layer selects another one through SchemaAware.SetSchema.
+const defaultSchema = "public"
 
 // listDatabasesQuery returns every connectable database except the
 // templates, with its total on-disk size and its collation.
@@ -32,9 +37,10 @@ ORDER BY datname`
 var versionPattern = regexp.MustCompile(`PostgreSQL (\d+\.\d+)`)
 
 // PostgresDriver is a connection-bound PostgreSQL driver instance.
-// Outside this package it is consumed only as a driver.Driver. Later
-// tasks of the phase 4 plan extend the state: the current schema (task 2,
-// mutex-guarded) and the last insert id (task 4).
+// Outside this package it is consumed only as a driver.Driver (and as a
+// driver.SchemaAware — handlers select the schema via SetSchema before
+// calling the table methods). The last insert id state (task 4) still to
+// come extends this struct.
 //
 //nolint:revive // name mirrors the package, "Driver" would collide with the driver contract type
 type PostgresDriver struct {
@@ -47,6 +53,13 @@ type PostgresDriver struct {
 	// import paths (task 5) use it when a dedicated connection must
 	// target another database.
 	loginDB string
+
+	// schema is the current schema every catalog and data query qualifies
+	// inside its SQL text (spec §13.5 — a shared pool must not SET
+	// search_path). schemaMu guards it; one driver instance serves one
+	// API session, so one schema is current at a time.
+	schema   string
+	schemaMu sync.RWMutex
 }
 
 var _ driver.Driver = (*PostgresDriver)(nil)
@@ -77,6 +90,7 @@ func Connect(ctx context.Context, cfg driver.ConnConfig) (driver.Driver, error) 
 		info:    driver.DriverInfo{Name: "PostgreSQL", Flavor: "postgres", Version: parseVersion(versionRaw), User: cfg.User, Host: cfg.Host},
 		caps:    postgresCaps(),
 		loginDB: cfg.Database,
+		schema:  defaultSchema,
 	}, nil
 }
 
