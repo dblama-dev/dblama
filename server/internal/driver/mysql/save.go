@@ -182,8 +182,15 @@ func columnFragment(c driver.ColumnDef) (string, error) {
 	sb.WriteString(typePart)
 
 	if c.Generated != "" {
-		// A generated column's expression travels in Default.Value;
-		// per MySQL grammar NULL/NOT NULL follows the AS clause.
+		// A generated column's expression travels in Default.Value.
+		// Grammar note: MariaDB 11 rejects ANY attribute (NULL, NOT
+		// NULL, COLLATE, COMMENT) after the AS clause, so generated
+		// fragments end at the VIRTUAL/STORED keyword; nullable and
+		// collation are implied (column and table defaults) and a NOT
+		// NULL generated column cannot be expressed cross-flavor.
+		if !c.Nullable {
+			return "", fmt.Errorf("generated column %s: NOT NULL generated columns are not supported cross-flavor", c.Name)
+		}
 		if c.Default == nil || c.Default.Value == "" {
 			return "", fmt.Errorf("generated column %s requires an expression", c.Name)
 		}
@@ -191,34 +198,34 @@ func columnFragment(c driver.ColumnDef) (string, error) {
 		if c.Generated == "VIRTUAL" || c.Generated == "STORED" {
 			sb.WriteString(" " + c.Generated)
 		}
-		if c.Nullable {
-			sb.WriteString(" NULL")
-		} else {
-			sb.WriteString(" NOT NULL")
-		}
+		return sb.String(), nil
+	}
+
+	if c.Unsigned {
+		sb.WriteString(" unsigned")
+	}
+	if c.Nullable {
+		sb.WriteString(" NULL")
 	} else {
-		if c.Unsigned {
-			sb.WriteString(" unsigned")
+		sb.WriteString(" NOT NULL")
+	}
+	if c.Default != nil {
+		// nil Default → no DEFAULT clause; an SQL-expression value
+		// is emitted verbatim (Value "NULL" → DEFAULT NULL, the
+		// model's way to express an explicit nullable default);
+		// everything else is a quoted, escaped literal.
+		switch {
+		case c.Default.IsSQLExpression:
+			sb.WriteString(" DEFAULT " + c.Default.Value)
+		default:
+			sb.WriteString(" DEFAULT " + sqlQuoteString(c.Default.Value))
 		}
-		if c.Nullable {
-			sb.WriteString(" NULL")
-		} else {
-			sb.WriteString(" NOT NULL")
-		}
-		if c.Default != nil {
-			switch {
-			case c.Default.IsSQLExpression:
-				sb.WriteString(" DEFAULT " + c.Default.Value)
-			default:
-				sb.WriteString(" DEFAULT " + sqlQuoteString(c.Default.Value))
-			}
-		}
-		if c.AutoIncrement {
-			sb.WriteString(" AUTO_INCREMENT")
-		}
-		if c.OnUpdate != "" {
-			sb.WriteString(" ON UPDATE " + c.OnUpdate)
-		}
+	}
+	if c.AutoIncrement {
+		sb.WriteString(" AUTO_INCREMENT")
+	}
+	if c.OnUpdate != "" {
+		sb.WriteString(" ON UPDATE " + c.OnUpdate)
 	}
 
 	if c.Collation != "" {
@@ -419,8 +426,11 @@ func alterTableOptions(o driver.TableOptions) ([]string, error) {
 	return parts, nil
 }
 
-// sqlQuoteString renders a SQL string literal, doubling inner single
-// quotes so a value cannot terminate the literal early.
+// sqlQuoteString renders a SQL string literal. Neither test server sets
+// NO_BACKSLASH_ESCAPES, so a backslash is an active escape character:
+// it is doubled (in addition to the quotes) so a value ending in "\"
+// cannot swallow the closing quote and shift the rest of the statement.
 func sqlQuoteString(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }

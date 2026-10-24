@@ -58,8 +58,10 @@ func TestSaveTable_CreateAndReadBack(t *testing.T) {
 				NewName: "t4_create",
 				Columns: []driver.ColumnDef{
 					{Name: "id", Type: "int", AutoIncrement: true},
-					{Name: "name", Type: "varchar", Length: "64", Comment: "user name"},
-					{Name: "kind", Type: "enum", Nullable: true, EnumValues: []string{"a", "b"}},
+					// Backslashes in literals must survive (the DSN
+					// leaves backslash escapes enabled on both servers).
+					{Name: "name", Type: "varchar", Length: "64", Comment: `path\to\dir`},
+					{Name: "kind", Type: "enum", Nullable: true, EnumValues: []string{"a", `a\b`}},
 					{Name: "created_at", Type: "timestamp", Default: &driver.DefaultValue{Value: "CURRENT_TIMESTAMP", IsSQLExpression: true}, OnUpdate: "CURRENT_TIMESTAMP"},
 				},
 				Indexes: []driver.Index{
@@ -86,8 +88,8 @@ func TestSaveTable_CreateAndReadBack(t *testing.T) {
 				NewName: "t4_create",
 				Columns: []driver.ColumnDef{
 					{Name: "id", OldName: "id", Type: "int", Length: aiIntLength(img.image), AutoIncrement: true},
-					{Name: "name", OldName: "name", Type: "varchar", Length: "64", Comment: "user name", Collation: exp.stringCollation},
-					{Name: "kind", OldName: "kind", Type: "enum", Nullable: true, Collation: exp.stringCollation, EnumValues: []string{"a", "b"}},
+					{Name: "name", OldName: "name", Type: "varchar", Length: "64", Comment: `path\to\dir`, Collation: exp.stringCollation},
+					{Name: "kind", OldName: "kind", Type: "enum", Nullable: true, Collation: exp.stringCollation, EnumValues: []string{"a", `a\b`}},
 					{Name: "created_at", OldName: "created_at", Type: "timestamp", Default: &driver.DefaultValue{Value: exp.tsExpr, IsSQLExpression: true}, OnUpdate: exp.tsExpr},
 				},
 				Indexes: []driver.Index{
@@ -297,6 +299,10 @@ func TestSaveTable_RoundTripPreservesColumns(t *testing.T) {
 				Columns: []driver.ColumnDef{
 					{Name: "id", Type: "int", AutoIncrement: true},
 					{Name: "name", Type: "varchar", Length: "64", Default: &driver.DefaultValue{Value: "x"}, Comment: "who"},
+					// The generated expression is read from
+					// GENERATION_EXPRESSION and re-emitted as AS (expr).
+					{Name: "name_up", Type: "varchar", Length: "64", Nullable: true, Generated: "STORED",
+						Default: &driver.DefaultValue{Value: "UPPER(name)", IsSQLExpression: true}},
 					{Name: "kind", Type: "enum", Nullable: true, EnumValues: []string{"a", "b", "c"}},
 					{Name: "price", Type: "decimal", Length: "10,2", Nullable: true},
 					{Name: "size_code", Type: "char", Length: "2", Nullable: true, Collation: "utf8mb4_bin"},

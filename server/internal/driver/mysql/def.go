@@ -22,9 +22,11 @@ FROM information_schema.TABLES
 WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?`
 
 // defColumnsQuery reads the columns of one table in ordinal order.
+// GENERATION_EXPRESSION carries the expression of generated columns,
+// whose COLUMN_DEFAULT is always NULL.
 const defColumnsQuery = `
 SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA,
-       COLLATION_NAME, COLUMN_COMMENT
+       COLLATION_NAME, COLUMN_COMMENT, GENERATION_EXPRESSION
 FROM information_schema.COLUMNS
 WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
 ORDER BY ORDINAL_POSITION`
@@ -129,11 +131,22 @@ func (d *MysqlDriver) tableColumns(ctx context.Context, db, table string) ([]dri
 			extra     sql.NullString
 			collation sql.NullString
 			comment   sql.NullString
+			genExpr   sql.NullString
 		)
-		if err := rows.Scan(&name, &colType, &nullable, &defRaw, &extra, &collation, &comment); err != nil {
+		if err := rows.Scan(&name, &colType, &nullable, &defRaw, &extra, &collation, &comment, &genExpr); err != nil {
 			return nil, fmt.Errorf("scan column row of %s.%s: %w", db, table, err)
 		}
 		base, length, unsigned, enumVals := parseColumnType(colType)
+		generated := generatedKind(extra.String)
+		var def *driver.DefaultValue
+		if generated != "" {
+			// A generated column has no COLUMN_DEFAULT; its expression
+			// travels in Default.Value (the save path renders it as
+			// AS (expr)).
+			def = &driver.DefaultValue{Value: normalizeGenExpr(genExpr.String), IsSQLExpression: true}
+		} else {
+			def = parseColumnDefault(defRaw, extra.String)
+		}
 		columns = append(columns, driver.ColumnDef{
 			Name:          name,
 			OldName:       name, // чтение = Name; SaveTable различает ADD (OldName == "") и MODIFY/CHANGE
@@ -141,10 +154,10 @@ func (d *MysqlDriver) tableColumns(ctx context.Context, db, table string) ([]dri
 			Length:        length,
 			Unsigned:      unsigned,
 			Nullable:      nullable == "YES",
-			Default:       parseColumnDefault(defRaw, extra.String),
+			Default:       def,
 			AutoIncrement: strings.Contains(extra.String, "auto_increment"),
 			OnUpdate:      onUpdateExpr(extra.String),
-			Generated:     generatedKind(extra.String),
+			Generated:     generated,
 			Collation:     collation.String,
 			Comment:       comment.String,
 			EnumValues:    enumVals,
@@ -299,13 +312,31 @@ func splitUnquotedCommas(s string) []string {
 }
 
 // unquoteSQLString removes the surrounding quotes of a SQL string
-// literal and unescapes doubled and backslash-escaped quotes.
+// literal and unescapes the escapes the servers use when reporting
+// literals back (COLUMN_DEFAULT of MariaDB, COLUMN_TYPE of enum/set):
+// doubled quotes (”), backslash-escaped quotes (\') and doubled
+// backslashes (\\). The scan is left-to-right so sequences like \\\'
+// resolve in one pass.
 func unquoteSQLString(s string) string {
 	if len(s) >= 2 && s[0] == '\'' && s[len(s)-1] == '\'' {
 		s = s[1 : len(s)-1]
 	}
-	s = strings.ReplaceAll(s, "''", "'")
-	return strings.ReplaceAll(s, `\'`, "'")
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '\\' && i+1 < len(s) && (s[i+1] == '\\' || s[i+1] == '\'') {
+			b.WriteByte(s[i+1])
+			i++
+			continue
+		}
+		if c == '\'' && i+1 < len(s) && s[i+1] == '\'' {
+			b.WriteByte('\'')
+			i++
+			continue
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
 }
 
 // sqlDefaultRe matches defaults that are SQL expressions rather than
@@ -336,6 +367,29 @@ func parseColumnDefault(raw sql.NullString, extra string) *driver.DefaultValue {
 		value = unquoteSQLString(value)
 	}
 	return &driver.DefaultValue{Value: value, IsSQLExpression: isExpr}
+}
+
+// genIntrocerRe matches the charset introcer MySQL prints before string
+// literals inside GENERATION_EXPRESSION (e.g. _utf8mb4'!').
+var genIntrocerRe = regexp.MustCompile(`_[A-Za-z0-9_]+(')`)
+
+// normalizeGenExpr rewrites MySQL's printed form of a generation
+// expression to standard SQL: string literals are printed as
+// _utf8mb4\'text\' (backslash-quoted, with charset introcer) and become
+// 'text'. Literal backslashes stay doubled so the expression re-parses
+// verbatim. MariaDB already reports the standard form, which passes
+// through unchanged — both flavors then yield the same value.
+func normalizeGenExpr(expr string) string {
+	var b strings.Builder
+	for i := 0; i < len(expr); i++ {
+		if expr[i] == '\\' && i+1 < len(expr) && expr[i+1] == '\'' {
+			b.WriteByte('\'')
+			i++
+			continue
+		}
+		b.WriteByte(expr[i])
+	}
+	return genIntrocerRe.ReplaceAllString(b.String(), "$1")
 }
 
 // isQuotedLiteral reports whether s looks like a quoted string literal.

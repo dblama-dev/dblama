@@ -133,7 +133,13 @@ CREATE TABLE child_t3 (
 					{Name: "price", OldName: "price", Type: "decimal", Length: "10,2", Nullable: true},
 					{Name: "size_code", OldName: "size_code", Type: "char", Length: "2", Nullable: true, Collation: "utf8mb4_bin"},
 					{Name: "created_at", OldName: "created_at", Type: "timestamp", Default: &driver.DefaultValue{Value: exp.tsExpr, IsSQLExpression: true}, OnUpdate: exp.tsExpr},
-					{Name: "full_name", OldName: "full_name", Type: "varchar", Length: "128", Nullable: true, Generated: "STORED", Collation: exp.stringCollation},
+					// The generated expression is read from
+					// GENERATION_EXPRESSION; MySQL's printed form
+					// (_utf8mb4\'...\') is normalized so both images
+					// report the same standard SQL.
+					{Name: "full_name", OldName: "full_name", Type: "varchar", Length: "128", Nullable: true, Generated: "STORED",
+						Default:   &driver.DefaultValue{Value: "concat(`name`,'!')", IsSQLExpression: true},
+						Collation: exp.stringCollation},
 					{Name: "parent_id", OldName: "parent_id", Type: "int", Length: exp.intLength, Unsigned: true, Nullable: true},
 				},
 				Indexes: []driver.Index{

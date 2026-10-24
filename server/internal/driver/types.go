@@ -80,10 +80,13 @@ type ColumnDef struct {
 	AutoIncrement bool          `json:"autoIncrement,omitempty"`
 	OnUpdate      string        `json:"onUpdate,omitempty"`
 	Generated     string        `json:"generated,omitempty"` // "" | "VIRTUAL" | "STORED"
-	Collation     string        `json:"collation,omitempty"`
-	Comment       string        `json:"comment,omitempty"`
-	EnumValues    []string      `json:"enumValues,omitempty"` // парсинг COLUMN_TYPE enum('a','b') с экранированием ''
-	Position      string        `json:"position,omitempty"`   // чтение = "" (позиция в ORDINAL_ORDER)
+	// The following values are used verbatim as SQL by the save path:
+	// OnUpdate, the Default.Value of an IsSQLExpression default (incl.
+	// the expression of a Generated column) and Generated's expression.
+	Collation  string   `json:"collation,omitempty"`
+	Comment    string   `json:"comment,omitempty"`
+	EnumValues []string `json:"enumValues,omitempty"` // парсинг COLUMN_TYPE enum('a','b') с экранированием ''
+	Position   string   `json:"position,omitempty"`   // чтение = "" (позиция в ORDINAL_ORDER)
 }
 
 // IndexColumn is one column of an index. SubPart is the prefixed length

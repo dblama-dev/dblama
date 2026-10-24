@@ -133,6 +133,9 @@ func TestBuildCreateTable_EnumEscape(t *testing.T) {
 		NewName: "odd`names",
 		Columns: []driver.ColumnDef{
 			{Name: "we`ird", Type: "enum", Nullable: true, EnumValues: []string{"it's", "plain"}},
+			// A trailing backslash in a value would previously swallow
+			// the closing quote; it must come back doubled.
+			{Name: "bs", Type: "enum", Nullable: true, EnumValues: []string{"a", `a\b`, `path\`}},
 		},
 	}
 	got, err := buildCreateTable(desired)
@@ -140,7 +143,8 @@ func TestBuildCreateTable_EnumEscape(t *testing.T) {
 		t.Fatalf("buildCreateTable() error: %v", err)
 	}
 	want := "CREATE TABLE `odd``names` (\n" +
-		"  `we``ird` enum('it''s','plain') NULL\n" +
+		"  `we``ird` enum('it''s','plain') NULL,\n" +
+		"  `bs` enum('a','a\\\\b','path\\\\') NULL\n" +
 		")"
 	if got != want {
 		t.Errorf("buildCreateTable() DDL mismatch:\ngot:  %s\nwant: %s", got, want)
@@ -156,7 +160,8 @@ func TestBuildAlterTable_ColumnFragmentDefaults(t *testing.T) {
 			{Name: "ts3", Type: "datetime", Default: &driver.DefaultValue{Value: "CURRENT_TIMESTAMP(3)", IsSQLExpression: true}},
 			// ON UPDATE verbatim.
 			{Name: "upd", Type: "timestamp", Default: &driver.DefaultValue{Value: "CURRENT_TIMESTAMP", IsSQLExpression: true}, OnUpdate: "CURRENT_TIMESTAMP(6)"},
-			// Generated stored: expression in Default.Value, no DEFAULT clause.
+			// Generated stored: expression in Default.Value, no DEFAULT and
+			// no nullability clause (MariaDB rejects attributes after AS).
 			{Name: "full", Type: "varchar", Length: "128", Nullable: true, Generated: "STORED", Default: &driver.DefaultValue{Value: "CONCAT(`upd`,'!')", IsSQLExpression: true}},
 			// Generated virtual.
 			{Name: "virt", Type: "int", Nullable: true, Generated: "VIRTUAL", Default: &driver.DefaultValue{Value: "1 + 1", IsSQLExpression: true}},
@@ -172,8 +177,8 @@ func TestBuildAlterTable_ColumnFragmentDefaults(t *testing.T) {
 		"ALTER TABLE `t4frag` ADD COLUMN `nullable_int` int NULL DEFAULT NULL",
 		"ALTER TABLE `t4frag` ADD COLUMN `ts3` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP(3)",
 		"ALTER TABLE `t4frag` ADD COLUMN `upd` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP(6)",
-		"ALTER TABLE `t4frag` ADD COLUMN `full` varchar(128) AS (CONCAT(`upd`,'!')) STORED NULL",
-		"ALTER TABLE `t4frag` ADD COLUMN `virt` int AS (1 + 1) VIRTUAL NULL",
+		"ALTER TABLE `t4frag` ADD COLUMN `full` varchar(128) AS (CONCAT(`upd`,'!')) STORED",
+		"ALTER TABLE `t4frag` ADD COLUMN `virt` int AS (1 + 1) VIRTUAL",
 		"ALTER TABLE `t4frag` ADD COLUMN `lit` varchar(10) NULL DEFAULT 'it''s'",
 	}
 	if len(got) != len(want) {
@@ -233,23 +238,35 @@ func TestBuildAlterTable_Errors(t *testing.T) {
 	})
 	t.Run("generated without expression", func(t *testing.T) {
 		_, err := buildAlterTable("t4", driver.TableDef{Columns: []driver.ColumnDef{
-			{Name: "gen", Type: "int", Generated: "STORED"},
+			{Name: "gen", Type: "int", Nullable: true, Generated: "STORED"},
 		}})
 		if err == nil {
 			t.Fatal("expected error for generated column without expression, got nil")
+		}
+	})
+	t.Run("generated not null", func(t *testing.T) {
+		_, err := buildAlterTable("t4", driver.TableDef{Columns: []driver.ColumnDef{
+			{Name: "gen", Type: "int", Generated: "STORED", Default: &driver.DefaultValue{Value: "1", IsSQLExpression: true}},
+		}})
+		if err == nil {
+			t.Fatal("expected error for NOT NULL generated column, got nil")
 		}
 	})
 }
 
 // sqlQuoteString is exercised indirectly above; this test pins the
 // escaping helper directly since every string literal depends on it.
+// Backslashes are doubled: neither test server sets NO_BACKSLASH_ESCAPES,
+// so a trailing "\" would otherwise swallow the closing quote.
 func TestSqlQuoteString(t *testing.T) {
 	cases := map[string]string{
 		"x":       "'x'",
 		"":        "''",
 		"it's":    "'it''s'",
 		"a''b'c":  "'a''''b''c'",
-		"back\\x": "'back\\x'", // backslashes pass through: only quotes are escaped
+		"back\\x": "'back\\\\x'", // literal backslash doubled
+		"path\\":  "'path\\\\'",  // trailing backslash cannot swallow the quote
+		"a\\'b":   "'a\\\\''b'",  // backslash and quote doubled independently
 	}
 	for in, want := range cases {
 		if got := sqlQuoteString(in); got != want {
