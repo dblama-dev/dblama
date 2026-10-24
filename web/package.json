@@ -11,6 +11,11 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-sql": "^6.10.0",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
+    "codemirror": "^6.0.2",
     "naive-ui": "^2.45.3",
     "pinia": "^4.1.0",
     "vue": "^3.5.44",
