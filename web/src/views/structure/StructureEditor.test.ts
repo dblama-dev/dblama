@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { defineComponent, h } from 'vue'
+import { defineComponent, h, reactive } from 'vue'
 import {
   NCheckbox,
   NInput,
@@ -402,6 +402,39 @@ describe('StructureEditor', () => {
       options: {},
     })
     expect(wrapper.findComponent(StructureEditor).emitted('created')).toEqual([['newtbl']])
+    wrapper.unmount()
+  })
+
+  it('resets the editor when navigating from a table to create mode', async () => {
+    mockBase()
+    // vue-router reuses the component instance when only the table param
+    // changes (users → _new), so the props must be reactive here.
+    const state = reactive({ db: 'mydb', table: 'users' })
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(
+      defineComponent({
+        setup() {
+          return () =>
+            h(NNotificationProvider, null, {
+              default: () => h(StructureEditor, { db: state.db, table: state.table }),
+            })
+        },
+      }),
+      { global: { plugins: [pinia, i18n], stubs: { teleport: true } } },
+    )
+    await flushPromises()
+    expect(rows(wrapper)).toHaveLength(3)
+    expect(wrapper.find('.struct-field--table-name').find('input').element.value).toBe('users')
+
+    state.table = '_new'
+    await flushPromises()
+
+    // Create mode owns no definition: the editor must not show the
+    // previous table's structure (and no def GET fires for _new —
+    // mockBase would throw on one).
+    expect(rows(wrapper)).toHaveLength(0)
+    expect(wrapper.find('.struct-field--table-name').find('input').element.value).toBe('')
     wrapper.unmount()
   })
 })

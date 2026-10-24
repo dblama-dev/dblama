@@ -44,7 +44,7 @@
       v-if="!isNewTable"
       :show="rowModal.show"
       :mode="rowModal.mode"
-      :rows-path="rowsPath"
+      :rows-path="rowsPath + '/rows'"
       :columns="modalColumns"
       :row="rowModal.row"
       :row-pk="rowModal.pk"

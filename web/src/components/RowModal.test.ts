@@ -498,6 +498,47 @@ describe('TableView row modal and stale-response guard', () => {
     wrapper.unmount()
   })
 
+  it('posts row inserts to the rows endpoint, not the table endpoint', async () => {
+    // Regression pin: the modal used to receive the bare table path and
+    // POST/PATCH against /tables/{t} (chi 405) — the row was never
+    // inserted. The modal's path must be the /rows collection.
+    mockedApi.mockImplementation(async (method, url) => {
+      if (method === 'GET' && url === pkUrl) return { columns: ['id'] }
+      if (method === 'GET' && url === defUrl) {
+        return { columns, indexes: [], foreignKeys: [], options: {} }
+      }
+      if (method === 'POST' && url === rowsUrl) return { lastInsertId: 1 }
+      if (typeof url === 'string' && url.startsWith(rowsUrl)) {
+        return {
+          columns: [
+            { name: 'id', type: 'int', nullable: false },
+            { name: 'name', type: 'varchar', nullable: true },
+          ],
+          rows: [[1, 'alice']],
+          totalRows: 1,
+        }
+      }
+      throw new Error(`unexpected api call: ${method} ${url}`)
+    })
+    const wrapper = await mountView()
+
+    const grid = wrapper.findComponent(DataGrid)
+    grid.vm.$emit('add-row')
+    await flushPromises()
+
+    // id is auto-increment (exempt from the required check), name is
+    // nullable — Save is enabled with both fields untouched.
+    const modal = wrapper.findComponent(RowModal)
+    const save = modal.findAllComponents(NButton).find((b) => b.text() === 'Сохранить')
+    expect(save?.props('disabled')).toBe(false)
+    await save?.trigger('click')
+    await flushPromises()
+
+    expect(mockedApi).toHaveBeenCalledWith('POST', rowsUrl, { id: null, name: '' })
+    expect(modal.emitted('saved')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   it('falls back to the page ColumnMeta when the table definition fetch fails', async () => {
     mockedApi.mockImplementation(async (method, url) => {
       if (method === 'GET' && url === pkUrl) return { columns: ['id'] }

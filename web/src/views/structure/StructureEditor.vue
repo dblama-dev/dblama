@@ -151,7 +151,14 @@ function fromDef(c: ColumnDef): EditableColumn {
 }
 
 async function load(): Promise<void> {
-  if (createMode.value) return
+  if (createMode.value) {
+    // Create mode owns no definition: reset everything so reusing this
+    // component after another table's structure view (vue-router reuses
+    // the component instance) starts from a blank editor instead of the
+    // previous table's state.
+    resetEditor()
+    return
+  }
   loading.value = true
   try {
     const def = await api<TableDef>('GET', path.value)
@@ -165,6 +172,14 @@ async function load(): Promise<void> {
   } finally {
     loading.value = false
   }
+}
+
+function resetEditor(): void {
+  tableName.value = ''
+  rows.value = []
+  options.value = {}
+  indexes.value = []
+  foreignKeys.value = []
 }
 
 watch(
