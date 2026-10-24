@@ -2,6 +2,7 @@ package driver
 
 import (
 	"context"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -84,6 +85,10 @@ func (f *fakeDriver) LastInsertID(context.Context) (int64, error) {
 
 func (f *fakeDriver) ExecSQL(context.Context, string, string, string, ExecOpts) ([]Result, error) {
 	return nil, nil
+}
+
+func (f *fakeDriver) Export(context.Context, ExportRequest, io.Writer) error {
+	return nil
 }
 
 func (f *fakeDriver) CancelQuery(context.Context, string) error {

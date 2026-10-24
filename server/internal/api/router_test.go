@@ -207,6 +207,10 @@ func (d *stubDriver) ExecSQL(context.Context, string, string, string, driver.Exe
 	return nil, nil
 }
 
+func (d *stubDriver) Export(context.Context, driver.ExportRequest, io.Writer) error {
+	return nil
+}
+
 func (d *stubDriver) CancelQuery(context.Context, string) error {
 	return nil
 }

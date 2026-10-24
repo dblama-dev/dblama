@@ -4,6 +4,7 @@ package driver
 
 import (
 	"context"
+	"io"
 
 	"github.com/hitslab/db-manager/server/internal/sqlgen"
 )
@@ -188,6 +189,21 @@ type ExecOpts struct {
 	TimeoutSec int
 }
 
+// ExportRequest describes one dump. Format is one of "sql", "csv",
+// "csv_semicolon", "tsv" — anything else is rejected by the driver
+// before any byte is written. For csv/tsv Tables must name exactly one
+// table (the dump is a single delimited file); for sql an empty Tables
+// list means the whole database (non-view tables). DropIfExists and
+// IfNotExists only apply to the sql format; Gzip wraps the output in a
+// gzip stream. The dump targets the driver's own login database.
+type ExportRequest struct {
+	Format       string   `json:"format"`
+	Tables       []string `json:"tables"`
+	DropIfExists bool     `json:"dropIfExists,omitempty"`
+	IfNotExists  bool     `json:"ifNotExists,omitempty"`
+	Gzip         bool     `json:"gzip,omitempty"`
+}
+
 // Result is one statement's outcome inside an ExecSQL batch. A
 // row-returning statement fills Columns/Rows (Truncated when the row
 // limit cut it); a non-row statement fills AffectedRows/LastInsertID.
@@ -286,6 +302,24 @@ type Driver interface {
 	// An unknown queryID (the query already finished, or never ran) is
 	// not an error: nil is returned.
 	CancelQuery(ctx context.Context, queryID string) error
+	// Export streams a dump of the driver's login database to w in
+	// req.Format ("sql", "csv", "csv_semicolon", "tsv" — anything else
+	// fails before any byte is written). The sql format writes one
+	// section per table: an optional DROP TABLE IF EXISTS, the server's
+	// CREATE statement (rewritten with IF NOT EXISTS when requested)
+	// and the data as batched multi-row INSERTs — statements are
+	// unqualified so the dump can be imported into any database the
+	// importer selects. Rows stream in batches of 100; a single-column
+	// primary key pages by keyset (WHERE pk > lastPK ORDER BY pk), any
+	// other shape pages by LIMIT/OFFSET, which on a live table may skip
+	// or repeat rows (documented caveat). The delimited formats write a
+	// header row and one line per row: NULL → empty field, binary
+	// values as their "0x…" hex string, values enclosed only when
+	// needed. An empty Tables list exports the whole database for sql;
+	// csv/tsv require exactly one table. Gzip wraps the stream; the
+	// gzip footer is flushed when Export returns. Nothing but the
+	// current row and statement is ever buffered.
+	Export(ctx context.Context, req ExportRequest, w io.Writer) error
 	Close() error
 }
 

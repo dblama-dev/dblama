@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"io"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -83,6 +84,10 @@ func (f *fakeDriver) UpsertRows(context.Context, string, string, []driver.RowVal
 
 func (f *fakeDriver) ExecSQL(context.Context, string, string, string, driver.ExecOpts) ([]driver.Result, error) {
 	return nil, nil
+}
+
+func (f *fakeDriver) Export(context.Context, driver.ExportRequest, io.Writer) error {
+	return nil
 }
 
 func (f *fakeDriver) CancelQuery(context.Context, string) error {
