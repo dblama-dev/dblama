@@ -95,6 +95,10 @@ func (f *fakeDriver) ImportSQL(context.Context, string, io.Reader, func(done, to
 	return nil
 }
 
+func (f *fakeDriver) ImportCSV(context.Context, string, string, io.Reader, CSVImportOpts, func(done, total int64)) error {
+	return nil
+}
+
 func (f *fakeDriver) CancelQuery(context.Context, string) error {
 	return nil
 }

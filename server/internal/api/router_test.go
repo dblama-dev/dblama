@@ -215,6 +215,10 @@ func (d *stubDriver) ImportSQL(context.Context, string, io.Reader, func(done, to
 	return nil
 }
 
+func (d *stubDriver) ImportCSV(context.Context, string, string, io.Reader, driver.CSVImportOpts, func(done, total int64)) error {
+	return nil
+}
+
 func (d *stubDriver) CancelQuery(context.Context, string) error {
 	return nil
 }

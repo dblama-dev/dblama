@@ -217,6 +217,19 @@ type Result struct {
 	Seconds      float64      `json:"seconds"`
 }
 
+// CSVImportOpts tunes one ImportCSV call. The zero value enables the
+// defaults: Separator 0 → ",", Enclosure 0 → none, SkipHeader false.
+type CSVImportOpts struct {
+	// Separator is the field separator, a single character (e.g. ",",
+	// ";", "\t"). Empty means ",".
+	Separator string `json:"separator"`
+	// Enclosure is the field-enclosing character (e.g. "\"") — a single
+	// character. Empty means no enclosure.
+	Enclosure string `json:"enclosure"`
+	// SkipHeader discards the file's first record (a column-name header).
+	SkipHeader bool `json:"skipHeader"`
+}
+
 // Driver is a connection-bound database driver instance.
 type Driver interface {
 	Info() DriverInfo
@@ -340,6 +353,27 @@ type Driver interface {
 	// and the progress reported at that point reflects the position —
 	// statements before it have been applied and are not rolled back.
 	ImportSQL(ctx context.Context, db string, r io.Reader, progress func(done, total int64)) error
+	// ImportCSV imports delimited rows read from r into table in database
+	// db: one record per row, fields in the table's ordinal column order,
+	// written as batched multi-row INSERTs of 100 rows with every value
+	// bound as a parameter. An empty field becomes SQL NULL, any other
+	// field is passed as a string and coerced server-side (MySQL
+	// semantics). See CSVImportOpts for the separator, enclosure and
+	// header options; a non-single-character separator or an enclosure
+	// other than "\"" fails before anything is read.
+	//
+	// progress reports rows. PIN: the row count is unknown until the
+	// stream ends, so done tracks rows read: progress(done=n, total=n)
+	// is called after every row and the final call reports done == total
+	// == the number of imported rows. A nil progress is allowed.
+	//
+	// The first failing row aborts the import: rows before its batch
+	// have been applied and are not rolled back, the failing batch is
+	// applied atomically as one statement (all of it or none of it), and
+	// the error names the batch's first row number (1-based, header
+	// excluded). ImportCSV on a non-existent table fails before any
+	// statement.
+	ImportCSV(ctx context.Context, db, table string, r io.Reader, opts CSVImportOpts, progress func(done, total int64)) error
 	Close() error
 }
 

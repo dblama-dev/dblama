@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"context"
 	"database/sql"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -303,6 +304,221 @@ func TestImportSQL_MidError(t *testing.T) {
 			// short of the whole script.
 			if lastDone <= 0 {
 				t.Errorf("progress after failure done = %d, want > 0", lastDone)
+			}
+		})
+	}
+}
+
+// csvByID reads the imported table back through SelectRows and indexes
+// the rows by their first column cast to int64.
+func csvByID(t *testing.T, drv driver.Driver, db, table string) map[int64][]any {
+	t.Helper()
+	page, err := drv.SelectRows(context.Background(), db, table, sqlgen.SelectQuery{Limit: 1000})
+	if err != nil {
+		t.Fatalf("SelectRows %s.%s error: %v", db, table, err)
+	}
+	byID := make(map[int64][]any, len(page.Rows))
+	for _, row := range page.Rows {
+		id, ok := row[0].(int64)
+		if !ok {
+			t.Fatalf("row %v: first column is %T, want int64", row, row[0])
+		}
+		byID[id] = row
+	}
+	return byID
+}
+
+// TestImportCSV_Basic pins the delimited import basics: rows land in the
+// existing table in ordinal column order, numeric fields are passed as
+// strings and coerced server-side, an empty field becomes SQL NULL.
+func TestImportCSV_Basic(t *testing.T) {
+	for _, tc := range testImages {
+		t.Run(tc.image, func(t *testing.T) {
+			cfg := startDB(t, tc.image)
+			drv := connectOK(t, cfg)
+
+			execDDL(t, cfg, "CREATE TABLE imp_csv_t (id INT PRIMARY KEY, name VARCHAR(50), balance FLOAT)")
+			t.Cleanup(func() { execDDL(t, cfg, "DROP TABLE IF EXISTS imp_csv_t") })
+
+			// Default opts: separator ",", no header skip.
+			data := "1,alice,100.5\n2,,\n3,bob,-3.25\n"
+			if err := drv.ImportCSV(context.Background(), cfg.Database, "imp_csv_t",
+				strings.NewReader(data), driver.CSVImportOpts{}, nil); err != nil {
+				t.Fatalf("ImportCSV error: %v", err)
+			}
+
+			byID := csvByID(t, drv, cfg.Database, "imp_csv_t")
+			if len(byID) != 3 {
+				t.Fatalf("imported %d rows, want 3", len(byID))
+			}
+			// Numerics coerced server-side: the CSV text "1" lands in the
+			// INT column and scans back as int64. The FLOAT value's Go
+			// type differs between images/protocols (float32/float64/
+			// string), so it is compared via its text form.
+			if row := byID[1]; row[1] != "alice" || fmt.Sprint(row[2]) != "100.5" {
+				t.Errorf("row 1 = %v, want [1 alice 100.5]", row)
+			}
+			// Empty fields → NULL in both a text and a numeric column.
+			if row := byID[2]; row[1] != nil || row[2] != nil {
+				t.Errorf("row 2 = %v, want name and balance NULL", row)
+			}
+			if row := byID[3]; row[1] != "bob" || fmt.Sprint(row[2]) != "-3.25" {
+				t.Errorf("row 3 = %v, want [3 bob -3.25]", row)
+			}
+		})
+	}
+}
+
+// TestImportCSV_Quoted pins the enclosure handling: a configured
+// enclosure character shields the separator, doubled enclosures become
+// literal enclosure characters and line breaks inside an enclosed field
+// do not end the record.
+func TestImportCSV_Quoted(t *testing.T) {
+	for _, tc := range testImages {
+		t.Run(tc.image, func(t *testing.T) {
+			cfg := startDB(t, tc.image)
+			drv := connectOK(t, cfg)
+
+			execDDL(t, cfg, "CREATE TABLE imp_csv_q (id INT PRIMARY KEY, name VARCHAR(100), note VARCHAR(100))")
+			t.Cleanup(func() { execDDL(t, cfg, "DROP TABLE IF EXISTS imp_csv_q") })
+
+			data := "1;\"a;b\";\"say \"\"hi\"\"\"\n" +
+				"2;\"multi\nline\";plain\n"
+			opts := driver.CSVImportOpts{Separator: ";", Enclosure: `"`}
+			if err := drv.ImportCSV(context.Background(), cfg.Database, "imp_csv_q",
+				strings.NewReader(data), opts, nil); err != nil {
+				t.Fatalf("ImportCSV error: %v", err)
+			}
+
+			byID := csvByID(t, drv, cfg.Database, "imp_csv_q")
+			if len(byID) != 2 {
+				t.Fatalf("imported %d rows, want 2", len(byID))
+			}
+			if row := byID[1]; row[1] != "a;b" || row[2] != `say "hi"` {
+				t.Errorf("row 1 = %v, want [1 a;b say \"hi\"]", row)
+			}
+			if row := byID[2]; row[1] != "multi\nline" || row[2] != "plain" {
+				t.Errorf("row 2 = %v, want name \"multi\\nline\" and note plain", row)
+			}
+		})
+	}
+}
+
+// TestImportCSV_HeaderSkip pins SkipHeader: the file's first record is
+// discarded and only the data rows land in the table.
+func TestImportCSV_HeaderSkip(t *testing.T) {
+	for _, tc := range testImages {
+		t.Run(tc.image, func(t *testing.T) {
+			cfg := startDB(t, tc.image)
+			drv := connectOK(t, cfg)
+
+			execDDL(t, cfg, "CREATE TABLE imp_csv_h (id INT PRIMARY KEY, name VARCHAR(20))")
+			t.Cleanup(func() { execDDL(t, cfg, "DROP TABLE IF EXISTS imp_csv_h") })
+
+			data := "id,name\n1,ann\n2,joe\n"
+			opts := driver.CSVImportOpts{SkipHeader: true}
+			if err := drv.ImportCSV(context.Background(), cfg.Database, "imp_csv_h",
+				strings.NewReader(data), opts, nil); err != nil {
+				t.Fatalf("ImportCSV error: %v", err)
+			}
+
+			byID := csvByID(t, drv, cfg.Database, "imp_csv_h")
+			if len(byID) != 2 {
+				t.Fatalf("imported %d rows, want 2 (header skipped)", len(byID))
+			}
+			if row := byID[1]; row[1] != "ann" {
+				t.Errorf("row 1 = %v, want [1 ann]", row)
+			}
+			if row := byID[2]; row[1] != "joe" {
+				t.Errorf("row 2 = %v, want [2 joe]", row)
+			}
+		})
+	}
+}
+
+// TestImportCSV_Batching pins the batch mechanics on the boundaries: 250
+// rows stream through the 100-row multi-row INSERT batches (100, 100,
+// 50) and all of them arrive. The progress contract is pinned on the
+// final call: done == total == the imported row count.
+func TestImportCSV_Batching(t *testing.T) {
+	for _, tc := range testImages {
+		t.Run(tc.image, func(t *testing.T) {
+			cfg := startDB(t, tc.image)
+			drv := connectOK(t, cfg)
+
+			execDDL(t, cfg, "CREATE TABLE imp_csv_b (id INT PRIMARY KEY, v VARCHAR(20))")
+			t.Cleanup(func() { execDDL(t, cfg, "DROP TABLE IF EXISTS imp_csv_b") })
+
+			var sb strings.Builder
+			for i := 1; i <= 250; i++ {
+				fmt.Fprintf(&sb, "%d,v%d\n", i, i)
+			}
+
+			var lastDone, lastTotal int64
+			progress := func(done, total int64) { lastDone, lastTotal = done, total }
+			if err := drv.ImportCSV(context.Background(), cfg.Database, "imp_csv_b",
+				strings.NewReader(sb.String()), driver.CSVImportOpts{}, progress); err != nil {
+				t.Fatalf("ImportCSV error: %v", err)
+			}
+
+			byID := csvByID(t, drv, cfg.Database, "imp_csv_b")
+			if len(byID) != 250 {
+				t.Fatalf("imported %d rows, want 250", len(byID))
+			}
+			for i := int64(1); i <= 250; i++ {
+				if row, ok := byID[i]; !ok || row[1] != fmt.Sprintf("v%d", i) {
+					t.Fatalf("row %d missing or wrong: %v", i, row)
+				}
+			}
+			if lastDone != 250 || lastTotal != 250 {
+				t.Errorf("final progress = (%d, %d), want (250, 250)", lastDone, lastTotal)
+			}
+		})
+	}
+}
+
+// TestImportCSV_RowError pins the failure semantics: the error names the
+// first row of the failing batch, the failing batch is applied
+// atomically (none of its rows land) and the batches before it stay
+// applied. The garbage row is the first row of batch 2, so the named
+// row is the bad one.
+func TestImportCSV_RowError(t *testing.T) {
+	for _, tc := range testImages {
+		t.Run(tc.image, func(t *testing.T) {
+			cfg := startDB(t, tc.image)
+			drv := connectOK(t, cfg)
+
+			execDDL(t, cfg, "CREATE TABLE imp_csv_e (id INT PRIMARY KEY)")
+			t.Cleanup(func() { execDDL(t, cfg, "DROP TABLE IF EXISTS imp_csv_e") })
+
+			var sb strings.Builder
+			for i := 1; i <= 100; i++ { // batch 1: rows 1..100
+				fmt.Fprintf(&sb, "%d\n", i)
+			}
+			sb.WriteString("garbage-101\n") // row 101: opens batch 2, not numeric
+			for i := 102; i <= 110; i++ {
+				fmt.Fprintf(&sb, "%d\n", i)
+			}
+
+			err := drv.ImportCSV(context.Background(), cfg.Database, "imp_csv_e",
+				strings.NewReader(sb.String()), driver.CSVImportOpts{}, nil)
+			if err == nil {
+				t.Fatal("ImportCSV with garbage into INT: expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), "101") {
+				t.Errorf("error %q does not mention the failing batch's first row 101", err)
+			}
+
+			// Batch 1 applied in full, batch 2 not at all (statement
+			// atomicity).
+			byID := csvByID(t, drv, cfg.Database, "imp_csv_e")
+			if len(byID) != 100 {
+				t.Errorf("applied %d rows, want exactly batch 1's 100", len(byID))
+			}
+			for i := 101; i <= 110; i++ {
+				if _, ok := byID[int64(i)]; ok {
+					t.Errorf("row %d applied, want rolled back with its batch", i)
+				}
 			}
 		})
 	}
