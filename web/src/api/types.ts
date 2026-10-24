@@ -145,3 +145,16 @@ export interface Page {
   rows: unknown[][]
   totalRows: number
 }
+
+// Mirror of driver.ExportRequest: format is "sql", "csv", "csv_semicolon"
+// or "tsv". For sql an empty tables list dumps the whole database; the
+// delimited formats require exactly one table (validated server-side and
+// pre-checked in the UI). dropIfExists/ifNotExists only apply to sql,
+// gzip wraps any format.
+export interface ExportRequest {
+  format: string
+  tables: string[]
+  dropIfExists?: boolean
+  ifNotExists?: boolean
+  gzip?: boolean
+}

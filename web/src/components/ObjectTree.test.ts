@@ -132,6 +132,19 @@ describe('ObjectTree', () => {
     expect(pushSpy).toHaveBeenCalledWith('/db/mydb/console')
   })
 
+  it('pushes the export and import routes when those leaves are clicked', async () => {
+    const wrapper = await mountTree()
+
+    const tree = wrapper.findComponent(NTree)
+    tree.vm.$emit('update:selected-keys', ['export'])
+    await flushPromises()
+    expect(pushSpy).toHaveBeenCalledWith('/db/mydb/export')
+
+    tree.vm.$emit('update:selected-keys', ['import'])
+    await flushPromises()
+    expect(pushSpy).toHaveBeenCalledWith('/db/mydb/import')
+  })
+
   it('pushes the _new structure route when the tables group "+" button is clicked', async () => {
     const wrapper = await mountTree()
 

@@ -4,6 +4,8 @@ import BasicLayout from '../layouts/BasicLayout.vue'
 import { useSessionStore } from '../stores/session'
 import ConsoleView from '../views/ConsoleView.vue'
 import DbView from '../views/DbView.vue'
+import ExportView from '../views/ExportView.vue'
+import ImportView from '../views/ImportView.vue'
 import LoginView from '../views/LoginView.vue'
 import ServerView from '../views/ServerView.vue'
 import TableView from '../views/TableView.vue'
@@ -25,6 +27,8 @@ const router = createRouter({
         { path: '', name: 'db', component: DbView },
         { path: 'table/:t', name: 'db-table', component: TableView },
         { path: 'console', name: 'db-console', component: ConsoleView },
+        { path: 'export', name: 'db-export', component: ExportView },
+        { path: 'import', name: 'db-import', component: ImportView },
       ],
     },
   ],

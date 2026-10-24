@@ -112,6 +112,16 @@ const treeData = computed<TreeOption[]>(() => {
       isLeaf: true,
     },
     {
+      key: 'export',
+      label: t('tree.export'),
+      isLeaf: true,
+    },
+    {
+      key: 'import',
+      label: t('tree.import'),
+      isLeaf: true,
+    },
+    {
       key: 'group:tables',
       label: t('tree.tables'),
       children: tables,
@@ -146,8 +156,8 @@ function onSelect(keys: string[]): void {
   if (key === undefined || db.value === null) return
   selectedKeys.value = [key]
   // Identifiers may contain %, ? or #; vue-router decodes params on read.
-  if (key === 'console') {
-    void router.push(`/db/${encodeURIComponent(db.value)}/console`)
+  if (key === 'console' || key === 'export' || key === 'import') {
+    void router.push(`/db/${encodeURIComponent(db.value)}/${key}`)
     return
   }
   if (!key.startsWith('table:')) return
