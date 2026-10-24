@@ -266,7 +266,11 @@ func (d *MysqlDriver) InsertRow(ctx context.Context, db, table string, vals driv
 	if err != nil {
 		return fmt.Errorf("insert row into %s.%s: %w", db, table, err)
 	}
-	res, err := d.db.ExecContext(ctx, qualifyWrite("INSERT INTO ", query, db, table), args...)
+	qualified, err := qualifyWrite("INSERT INTO ", query, db, table)
+	if err != nil {
+		return fmt.Errorf("insert row into %s.%s: %w", db, table, err)
+	}
+	res, err := d.db.ExecContext(ctx, qualified, args...)
 	if err != nil {
 		return fmt.Errorf("insert row into %s.%s: %w", db, table, err)
 	}
@@ -306,7 +310,11 @@ func (d *MysqlDriver) UpdateRow(ctx context.Context, db, table string, where dri
 		return fmt.Errorf("update row in %s.%s: %w", db, table, err)
 	}
 	args := slices.Concat(setArgs, whereArgs)
-	if _, err := d.db.ExecContext(ctx, qualifyWrite("UPDATE ", query, db, table), args...); err != nil {
+	qualified, err := qualifyWrite("UPDATE ", query, db, table)
+	if err != nil {
+		return fmt.Errorf("update row in %s.%s: %w", db, table, err)
+	}
+	if _, err := d.db.ExecContext(ctx, qualified, args...); err != nil {
 		return fmt.Errorf("update row in %s.%s: %w", db, table, err)
 	}
 	return nil
@@ -345,7 +353,12 @@ func (d *MysqlDriver) DeleteRows(ctx context.Context, db, table string, where []
 			_ = tx.Rollback()
 			return fmt.Errorf("delete rows from %s.%s: key %d: %w", db, table, i+1, err)
 		}
-		if _, err := tx.ExecContext(ctx, qualifyWrite("DELETE FROM ", query, db, table), args...); err != nil {
+		qualified, err := qualifyWrite("DELETE FROM ", query, db, table)
+		if err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("delete rows from %s.%s: key %d: %w", db, table, i+1, err)
+		}
+		if _, err := tx.ExecContext(ctx, qualified, args...); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("delete rows from %s.%s: key %d: %w", db, table, i+1, err)
 		}
@@ -406,7 +419,11 @@ func (d *MysqlDriver) UpsertRows(ctx context.Context, db, table string, rows []d
 	}
 	query += " ON DUPLICATE KEY UPDATE " + strings.Join(sets, ",")
 
-	res, err := d.db.ExecContext(ctx, qualifyWrite("INSERT INTO ", query, db, table), args...)
+	qualified, err := qualifyWrite("INSERT INTO ", query, db, table)
+	if err != nil {
+		return fmt.Errorf("upsert rows into %s.%s: %w", db, table, err)
+	}
+	res, err := d.db.ExecContext(ctx, qualified, args...)
 	if err != nil {
 		return fmt.Errorf("upsert rows into %s.%s: %w", db, table, err)
 	}
@@ -419,7 +436,11 @@ func (d *MysqlDriver) UpsertRows(ctx context.Context, db, table string, rows []d
 // (0 when that write generated none or nothing was written yet). The
 // value lives in the mutex-protected driver state — driver instances
 // are shared across requests, so a per-connection LAST_INSERT_ID()
-// would not be reliable.
+// would not be reliable. Because it is driver state, the last insert
+// wins across concurrent requests: a request that inserts twice in a
+// row reads the id of its own second insert, but a concurrent insert
+// from another request between the two overwrites the value. Callers
+// that need their id must read it immediately after their insert.
 func (d *MysqlDriver) LastInsertID(_ context.Context) (int64, error) {
 	d.writeMu.Lock()
 	defer d.writeMu.Unlock()
@@ -469,7 +490,14 @@ func sameKeys(m map[string]any, keys []string) bool {
 // write statement for the schema-qualified `db`.`table` form. The table
 // reference always directly follows the statement's verb, so the verb
 // prefixes the substitution: a table name that also occurs inside the
-// quoted database name cannot be hit.
-func qualifyWrite(verb, query, db, table string) string {
-	return strings.Replace(query, verb+sqlgen.QuoteIdent(table), verb+qualifiedIdent(db, table), 1)
+// quoted database name cannot be hit. If the verb-anchored pattern is
+// absent (a statement layout change would silently drop the schema
+// qualification otherwise) an error is returned instead of the
+// unqualified query.
+func qualifyWrite(verb, query, db, table string) (string, error) {
+	qualified := strings.Replace(query, verb+sqlgen.QuoteIdent(table), verb+qualifiedIdent(db, table), 1)
+	if qualified == query {
+		return "", fmt.Errorf("qualifyWrite: verb not found in %q", query)
+	}
+	return qualified, nil
 }
