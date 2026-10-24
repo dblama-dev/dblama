@@ -52,3 +52,84 @@ export interface LoginForm {
   password: string
   database?: string
 }
+
+// --- Tables and rows (mirrors of the Go types in server/internal/driver,
+// camelCase as written in the json tags) ---
+
+export interface TableInfo {
+  name: string
+  rows: number
+  sizeBytes: number
+  engine: string
+  comment: string
+  isView: boolean
+}
+
+export interface DefaultValue {
+  value: string
+  isSqlExpression?: boolean
+}
+
+export interface ColumnDef {
+  name: string
+  oldName?: string
+  type: string
+  length?: string
+  unsigned?: boolean
+  nullable: boolean
+  default?: DefaultValue | null
+  autoIncrement?: boolean
+  onUpdate?: string
+  generated?: string
+  collation?: string
+  comment?: string
+  enumValues?: string[]
+  position?: string
+}
+
+export interface IndexColumn {
+  name: string
+  subPart?: number
+}
+
+export interface Index {
+  name: string
+  type: string
+  columns: IndexColumn[]
+}
+
+export interface ForeignKey {
+  name: string
+  columns: string[]
+  refTable: string
+  refColumns: string[]
+  onDelete?: string
+  onUpdate?: string
+}
+
+export interface TableOptions {
+  engine?: string
+  collation?: string
+  comment?: string
+  autoIncrement?: number
+}
+
+export interface TableDef {
+  newName?: string
+  columns: ColumnDef[]
+  indexes: Index[]
+  foreignKeys: ForeignKey[]
+  options: TableOptions
+}
+
+export interface ColumnMeta {
+  name: string
+  type: string
+  nullable: boolean
+}
+
+export interface Page {
+  columns: ColumnMeta[]
+  rows: unknown[][]
+  totalRows: number
+}
