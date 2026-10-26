@@ -66,6 +66,16 @@ func NewRouter(cfg config.Config, sessions *session.Store, drivers *driver.Regis
 			authed.Post("/databases/{db}/export", s.handleExport)
 			authed.Post("/databases/{db}/import", s.handleImport)
 
+			// Schema and sequence capabilities (PostgreSQL); drivers
+			// without them answer driver_not_supported.
+			authed.Get("/schemas", s.handleSchemasList)
+			authed.Get("/sequences", s.handleSequencesList)
+			authed.Post("/sequences", s.handleSequenceCreate)
+			authed.Route("/sequences/{name}", func(seq chi.Router) {
+				seq.Delete("/", s.handleSequenceDrop)
+				seq.Patch("/", s.handleSequenceUpdate)
+			})
+
 			// Tables and rows of one database. Every non-GET route is
 			// already covered by the group's RequireCSRFHeader.
 			authed.Route("/databases/{db}/tables", func(tables chi.Router) {

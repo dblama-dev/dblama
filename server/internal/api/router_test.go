@@ -46,6 +46,17 @@ type stubDriver struct {
 	saveIndexesErr   error
 	truncateCalls    []tablesOpCall
 	truncateErr      error
+	// Schema and sequence capability configuration and recordings. A nil
+	// schemaAware/sequenceMgr models a driver without the capability.
+	schemaAware   bool
+	gotSchemas    []string
+	schemaErr     error
+	setSchemaErr  error
+	schemaCalls   []string
+	sequenceMgr   bool
+	sequences     []driver.SequenceInfo
+	seqErr        error
+	seqCalls      []string
 	dropTablesCalls  []tablesOpCall
 	dropTablesErr    error
 	dropViewsCalls   []tablesOpCall
@@ -306,6 +317,63 @@ func (d *stubDriver) CancelQuery(_ context.Context, queryID string) error {
 
 func (d *stubDriver) LastInsertID(context.Context) (int64, error) {
 	return d.lastInsertID, nil
+}
+
+func (d *stubDriver) SetSchema(schema string) error {
+	if d.setSchemaErr != nil {
+		return d.setSchemaErr
+	}
+	if !d.schemaAware {
+		return errCapabilityMissing
+	}
+	d.schemaCalls = append(d.schemaCalls, schema)
+	return nil
+}
+
+func (d *stubDriver) CurrentSchema() string {
+	if n := len(d.schemaCalls); n > 0 {
+		return d.schemaCalls[n-1]
+	}
+	return "public"
+}
+
+func (d *stubDriver) ListSchemas(context.Context) ([]string, error) {
+	if !d.schemaAware {
+		return nil, errCapabilityMissing
+	}
+	return d.gotSchemas, d.schemaErr
+}
+
+func (d *stubDriver) ListSequences(_ context.Context, schema string) ([]driver.SequenceInfo, error) {
+	if !d.sequenceMgr {
+		return nil, errCapabilityMissing
+	}
+	d.seqCalls = append(d.seqCalls, "list:"+schema)
+	return d.sequences, d.seqErr
+}
+
+func (d *stubDriver) CreateSequence(_ context.Context, name string, _ int64) error {
+	if !d.sequenceMgr {
+		return errCapabilityMissing
+	}
+	d.seqCalls = append(d.seqCalls, "create:"+name)
+	return d.seqErr
+}
+
+func (d *stubDriver) DropSequence(_ context.Context, name string) error {
+	if !d.sequenceMgr {
+		return errCapabilityMissing
+	}
+	d.seqCalls = append(d.seqCalls, "drop:"+name)
+	return d.seqErr
+}
+
+func (d *stubDriver) AlterSequence(_ context.Context, name string, _, _ *int64) error {
+	if !d.sequenceMgr {
+		return errCapabilityMissing
+	}
+	d.seqCalls = append(d.seqCalls, "alter:"+name)
+	return d.seqErr
 }
 
 func (d *stubDriver) Close() error {

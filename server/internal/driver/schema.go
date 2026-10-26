@@ -1,5 +1,7 @@
 package driver
 
+import "context"
+
 // SchemaAware is the optional driver extension for servers that organize
 // tables into schemas inside one database (PostgreSQL): drivers that
 // implement it keep a current-schema selection the API layer sets from
@@ -20,4 +22,7 @@ type SchemaAware interface {
 	// CurrentSchema returns the current schema ("public" on PostgreSQL
 	// until the first SetSchema).
 	CurrentSchema() string
+	// ListSchemas returns the user-visible schema names of the login
+	// database (system schemas excluded).
+	ListSchemas(ctx context.Context) ([]string, error)
 }

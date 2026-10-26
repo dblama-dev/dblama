@@ -58,6 +58,7 @@ type tablesResponse struct {
 // handleTablesList lists the tables and views of one database.
 func (s *apiServer) handleTablesList(w http.ResponseWriter, r *http.Request) {
 	sess, _ := session.FromContext(r.Context())
+	applySchemaParam(r, sess)
 
 	tables, err := sess.Driver.ListTables(r.Context(), chi.URLParam(r, "db"))
 	if err != nil {
@@ -73,6 +74,7 @@ func (s *apiServer) handleTablesList(w http.ResponseWriter, r *http.Request) {
 // handleTableDef returns the full structure of one table.
 func (s *apiServer) handleTableDef(w http.ResponseWriter, r *http.Request) {
 	sess, _ := session.FromContext(r.Context())
+	applySchemaParam(r, sess)
 
 	def, err := sess.Driver.TableDef(r.Context(), chi.URLParam(r, "db"), chi.URLParam(r, "table"))
 	if err != nil {
@@ -86,11 +88,12 @@ func (s *apiServer) handleTableDef(w http.ResponseWriter, r *http.Request) {
 // means create: the driver receives an empty current name and takes the
 // new name from the body; any other table name alters the existing one.
 func (s *apiServer) handleSaveTable(w http.ResponseWriter, r *http.Request) {
+	sess, _ := session.FromContext(r.Context())
+	applySchemaParam(r, sess)
 	var def driver.TableDef
 	if !decodeJSONBody(w, r, &def) {
 		return
 	}
-	sess, _ := session.FromContext(r.Context())
 
 	table := chi.URLParam(r, "table")
 	if table == "_new" {
@@ -107,6 +110,7 @@ func (s *apiServer) handleSaveTable(w http.ResponseWriter, r *http.Request) {
 // the query carries isView=true.
 func (s *apiServer) handleDropTable(w http.ResponseWriter, r *http.Request) {
 	sess, _ := session.FromContext(r.Context())
+	applySchemaParam(r, sess)
 
 	db := chi.URLParam(r, "db")
 	table := chi.URLParam(r, "table")
@@ -126,6 +130,7 @@ func (s *apiServer) handleDropTable(w http.ResponseWriter, r *http.Request) {
 // handleTruncateTable empties the table named in the path.
 func (s *apiServer) handleTruncateTable(w http.ResponseWriter, r *http.Request) {
 	sess, _ := session.FromContext(r.Context())
+	applySchemaParam(r, sess)
 
 	if err := sess.Driver.TruncateTables(r.Context(), chi.URLParam(r, "db"),
 		[]string{chi.URLParam(r, "table")}); err != nil {
@@ -137,11 +142,12 @@ func (s *apiServer) handleTruncateTable(w http.ResponseWriter, r *http.Request) 
 
 // handleSaveIndexes applies the full desired index state of one table.
 func (s *apiServer) handleSaveIndexes(w http.ResponseWriter, r *http.Request) {
+	sess, _ := session.FromContext(r.Context())
+	applySchemaParam(r, sess)
 	var indexes []driver.Index
 	if !decodeJSONBody(w, r, &indexes) {
 		return
 	}
-	sess, _ := session.FromContext(r.Context())
 
 	if err := sess.Driver.SaveIndexes(r.Context(), chi.URLParam(r, "db"),
 		chi.URLParam(r, "table"), indexes); err != nil {
@@ -159,11 +165,12 @@ type bulkTablesRequest struct {
 
 // handleBulkTables truncates or drops the named tables in one call.
 func (s *apiServer) handleBulkTables(w http.ResponseWriter, r *http.Request) {
+	sess, _ := session.FromContext(r.Context())
+	applySchemaParam(r, sess)
 	var req bulkTablesRequest
 	if !decodeJSONBody(w, r, &req) {
 		return
 	}
-	sess, _ := session.FromContext(r.Context())
 
 	var err error
 	switch req.Action {
@@ -191,6 +198,7 @@ type pkResponse struct {
 // key order; an empty result marshals as [].
 func (s *apiServer) handlePrimaryKey(w http.ResponseWriter, r *http.Request) {
 	sess, _ := session.FromContext(r.Context())
+	applySchemaParam(r, sess)
 
 	cols, err := sess.Driver.PrimaryKey(r.Context(), chi.URLParam(r, "db"), chi.URLParam(r, "table"))
 	if err != nil {
