@@ -93,7 +93,7 @@ func (s *apiServer) handleExport(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 
 	flusher, _ := w.(http.Flusher)
-	_ = sess.Driver.Export(r.Context(), req, flushWriter{w: w, f: flusher})
+	_ = sess.Driver.Export(r.Context(), sess.Database, req, flushWriter{w: w, f: flusher})
 }
 
 // importProgressLine is one JSON-lines record of the import stream: the

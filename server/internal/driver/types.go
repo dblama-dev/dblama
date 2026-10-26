@@ -317,8 +317,7 @@ type Driver interface {
 	// An unknown queryID (the query already finished, or never ran) is
 	// not an error: nil is returned.
 	CancelQuery(ctx context.Context, queryID string) error
-	// Export streams a dump of the driver's login database to w in
-	// req.Format ("sql", "csv", "csv_semicolon", "tsv" — anything else
+	// Export streams a dump of database db to w in req.Format ("sql", "csv", "csv_semicolon", "tsv" — anything else
 	// fails before any byte is written). The sql format writes one
 	// section per table: an optional DROP TABLE IF EXISTS, the server's
 	// CREATE statement (rewritten with IF NOT EXISTS when requested)
@@ -334,7 +333,7 @@ type Driver interface {
 	// csv/tsv require exactly one table. Gzip wraps the stream; the
 	// gzip footer is flushed when Export returns. Nothing but the
 	// current row and statement is ever buffered.
-	Export(ctx context.Context, req ExportRequest, w io.Writer) error
+	Export(ctx context.Context, db string, req ExportRequest, w io.Writer) error
 	// ImportSQL executes an SQL script read from r against database db
 	// on a dedicated connection (db other than the login database is
 	// selected via USE, mirroring ExecSQL). Statements are split by

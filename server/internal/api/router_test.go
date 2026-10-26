@@ -92,6 +92,7 @@ type execCall struct {
 // exportCall records one Export invocation: the request and the bytes the
 // fake wrote (or would have written).
 type exportCall struct {
+	db     string
 	req    driver.ExportRequest
 	output string
 }
@@ -269,8 +270,8 @@ func (d *stubDriver) ExecSQL(_ context.Context, db, query, queryID string, opts 
 	return d.execResults, nil
 }
 
-func (d *stubDriver) Export(_ context.Context, req driver.ExportRequest, w io.Writer) error {
-	d.exportCalls = append(d.exportCalls, exportCall{req: req, output: d.exportOutput})
+func (d *stubDriver) Export(_ context.Context, db string, req driver.ExportRequest, w io.Writer) error {
+	d.exportCalls = append(d.exportCalls, exportCall{db: db, req: req, output: d.exportOutput})
 	if d.exportErr != nil {
 		return d.exportErr
 	}

@@ -66,6 +66,9 @@ type PostgresDriver struct {
 	writeMu      sync.Mutex
 	lastInsertID int64
 
+	// console tracks running console queries for CancelQuery.
+	console consoleRegistry
+
 	// serialPK caches per table ("schema.table") the single-column
 	// server-generated primary key column ("" when there is none) — the
 	// RETURNING target of InsertRow, detected once per table (Ruling 2).

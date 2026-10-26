@@ -86,7 +86,7 @@ func (f *fakeDriver) ExecSQL(context.Context, string, string, string, driver.Exe
 	return nil, nil
 }
 
-func (f *fakeDriver) Export(context.Context, driver.ExportRequest, io.Writer) error {
+func (f *fakeDriver) Export(context.Context, string, driver.ExportRequest, io.Writer) error {
 	return nil
 }
 

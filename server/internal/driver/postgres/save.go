@@ -146,6 +146,13 @@ func buildCreateTable(schema string, d driver.TableDef) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create table: %w", err)
 	}
+	return buildCreateTableQualified(qual, d)
+}
+
+// buildCreateTableQualified renders the CREATE against an explicit
+// qualified table name — ShowCreateTable passes an unqualified name so
+// a dump can be imported into any schema the importer selects.
+func buildCreateTableQualified(qual string, d driver.TableDef) ([]string, error) {
 
 	parts := make([]string, 0, len(d.Columns)+len(d.Indexes)+len(d.ForeignKeys))
 	for _, c := range d.Columns {

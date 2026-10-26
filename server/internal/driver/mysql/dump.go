@@ -101,7 +101,7 @@ const exportBatchSize = 100
 // rows; any other shape (no PK, composite PK) pages by LIMIT/OFFSET,
 // which on a live table may skip or duplicate rows — a documented
 // caveat, the same one mysqldump has.
-func (d *MysqlDriver) Export(ctx context.Context, req driver.ExportRequest, w io.Writer) error {
+func (d *MysqlDriver) Export(ctx context.Context, db string, req driver.ExportRequest, w io.Writer) error {
 	// Validate the format before any byte is written: an unknown
 	// format fails without touching w.
 	var sep rune
@@ -115,9 +115,13 @@ func (d *MysqlDriver) Export(ctx context.Context, req driver.ExportRequest, w io
 		sep = s
 	}
 
-	db := d.loginDB
 	if db == "" {
-		return fmt.Errorf("export: the connection has no default database to dump")
+		return fmt.Errorf("export: no database to dump")
+	}
+	if db != d.loginDB {
+		// The pool is bound to the login database; the handler already
+		// validates this, the driver refuses rather than dump the wrong one.
+		return fmt.Errorf("export: database %s is not the login database %s", db, d.loginDB)
 	}
 
 	// Resolve the table list: sql with an empty list dumps the whole
