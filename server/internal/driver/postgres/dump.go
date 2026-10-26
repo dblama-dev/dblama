@@ -412,7 +412,7 @@ func writeExport(w io.Writer, s string) error {
 
 // TruncateTables truncates each table in the current schema; the first
 // error aborts.
-func (d *PostgresDriver) TruncateTables(ctx context.Context, db string, tables []string) error {
+func (d *PostgresDriver) TruncateTables(ctx context.Context, _ string, tables []string) error {
 	schema := d.CurrentSchema()
 	for _, table := range tables {
 		qual, err := qualify(schema, table)
@@ -428,7 +428,7 @@ func (d *PostgresDriver) TruncateTables(ctx context.Context, db string, tables [
 
 // DropTables drops each table in the current schema; the first error
 // aborts.
-func (d *PostgresDriver) DropTables(ctx context.Context, db string, tables []string) error {
+func (d *PostgresDriver) DropTables(ctx context.Context, _ string, tables []string) error {
 	schema := d.CurrentSchema()
 	for _, table := range tables {
 		qual, err := qualify(schema, table)
@@ -444,7 +444,7 @@ func (d *PostgresDriver) DropTables(ctx context.Context, db string, tables []str
 
 // DropViews drops each view in the current schema; the first error
 // aborts.
-func (d *PostgresDriver) DropViews(ctx context.Context, db string, views []string) error {
+func (d *PostgresDriver) DropViews(ctx context.Context, _ string, views []string) error {
 	schema := d.CurrentSchema()
 	for _, view := range views {
 		qual, err := qualify(schema, view)

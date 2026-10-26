@@ -256,7 +256,7 @@ func buildMultiInsertPg(qual string, cols []string, valueTuples int) (string, er
 				sb.WriteString(",")
 			}
 			n++
-			sb.WriteString(fmt.Sprintf("$%d", n))
+			fmt.Fprintf(&sb, "$%d", n)
 		}
 		sb.WriteString(")")
 	}
