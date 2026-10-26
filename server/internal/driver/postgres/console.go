@@ -60,11 +60,6 @@ func (r *consoleRegistry) lookup(id string) (consoleQuery, bool) {
 	return q, ok
 }
 
-func (r *consoleRegistry) len() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return len(r.registry)
-}
 
 // ExecSQL implements driver.Driver: one Result per statement, MaxRows
 // row caps with Truncated, per-statement Seconds, mid-error returns the
