@@ -7,14 +7,14 @@ User authorization: 2026-10-28 — автономная работа, комми
 
 ## Задачи
 
-- [ ] П5.1 API и UI SQL определения таблицы (отдельный согласованный план).
-- [ ] П5.2 Views, triggers, routines, MySQL events/partitions: драйверы, API, UI, capability gating и тесты.
-- [ ] П5.3 MySQL users/password/limits/grants и MySQL/PG monitoring: драйверы, API, UI и тесты.
-- [ ] П5.4 Database CRUD, collation, table move/copy, metadata; завершение sequences и отдельные замечания PG.
-- [ ] П5.5 FK editor, parent values, row copy/upsert/no-PK, export selection/views, BLOB preview, SQL formatter.
-- [ ] П5.6 Полная проверка матрицы mysql:8.4 / mariadb:11.4 / postgres:17, independent review, commit и merge П5.
-- [ ] П6.1 Dockerfile non-root, GoReleaser, multi-platform releases, документация и changelog.
-- [ ] П6.2 Проверка сборки/контейнера/дистрибутива, review, commit и merge П6.
+- [x] П5.1 API и UI SQL определения таблицы (отдельный согласованный план).
+- [x] П5.2 Views, triggers, routines, MySQL events/partitions: драйверы, API, UI, capability gating и тесты.
+- [x] П5.3 MySQL users/password/limits/grants и MySQL/PG monitoring: драйверы, API, UI и тесты.
+- [x] П5.4 Database CRUD, collation, table move/copy, metadata; завершение sequences и отдельные замечания PG.
+- [x] П5.5 FK editor, parent values, row copy/upsert/no-PK, export selection/views, BLOB preview, SQL formatter.
+- [x] П5.6 Полная проверка матрицы mysql:8.4 / mariadb:11.4 / postgres:17, independent review, commit и merge П5.
+- [x] П6.1 Dockerfile non-root, GoReleaser, multi-platform releases, документация и changelog.
+- [ ] П6.2 Проверка сборки/контейнера/дистрибутива, review, commit и merge П6 (сборка и review выполнены).
 
 ## Контракты интеграции
 
@@ -28,3 +28,5 @@ User authorization: 2026-10-28 — автономная работа, комми
 
 - Существующий чистый worktree П4 переиспользован с новой веткой `codex/p5-p6`, база `201bffa`.
 - Рабочее имя `db-manager` сохраняется для локальной подготовки релиза.
+- П5 commits: `7221bb1` (основной функционал), `1ec6672` (точные BIGINT), `04d225c` (исправления по ревью), `84d8e92` (обновление FK-теста). Полные API и PostgreSQL интеграции прошли. Все 117 тестов MySQL/MariaDB пакета выполнены в трёх непересекающихся группах с кодом выхода 0; третья группа повторена целиком после исправления устаревшего ожидания FK. Живые тесты ключа BIGINT и обновления view после исправлений прошли на всех нужных движках. Go unit/lint, 191 frontend test, ESLint, проверка типов и сборка прошли.
+- П6 проверен в отдельной копии с тестовым remote на исходниках после `04d225c`: шесть архивов, checksum, host HTTP, arm64 ELF и nonroot read-only Docker.
