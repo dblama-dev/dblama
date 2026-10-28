@@ -28,7 +28,7 @@ func TestForeignKeysLifecycle(t *testing.T) {
 			must(d.SaveForeignKeys(ctx, cfg.Database, "child", []driver.ForeignKey{fk}))
 			def, err := d.TableDef(ctx, cfg.Database, "child")
 			must(err)
-			if len(def.ForeignKeys) != 1 || len(def.ForeignKeys[0].Columns) != 2 || def.ForeignKeys[0].RefTable != "fk_other.parent" {
+			if len(def.ForeignKeys) != 1 || len(def.ForeignKeys[0].Columns) != 2 || def.ForeignKeys[0].RefSchema != "fk_other" || def.ForeignKeys[0].RefTable != "parent" {
 				t.Fatalf("FKs %#v", def.ForeignKeys)
 			}
 			fk.OnDelete = "SET NULL"
