@@ -144,6 +144,9 @@ func (s *apiServer) handleRowInsert(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSONBody(w, r, &vals) {
 		return
 	}
+	if !decodeBinaryValues(w, r, vals) {
+		return
+	}
 
 	if err := sess.Driver.InsertRow(r.Context(), chi.URLParam(r, "db"), chi.URLParam(r, "table"), vals); err != nil {
 		writeDriverErr(w, err)
@@ -171,6 +174,9 @@ func (s *apiServer) handleRowUpdate(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSONBody(w, r, &req) {
 		return
 	}
+	if !decodeBinaryValues(w, r, req.Values) {
+		return
+	}
 
 	if err := sess.Driver.UpdateRow(r.Context(), chi.URLParam(r, "db"),
 		chi.URLParam(r, "table"), req.Where, req.Values); err != nil {
@@ -195,6 +201,69 @@ func (s *apiServer) handleRowDelete(w http.ResponseWriter, r *http.Request) {
 
 	if err := sess.Driver.DeleteRows(r.Context(), chi.URLParam(r, "db"),
 		chi.URLParam(r, "table"), req.Where); err != nil {
+		writeDriverErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleRowsUpsert applies an explicit bulk upsert. Its distinct endpoint keeps
+// ordinary inserts from silently updating an existing row on a key conflict.
+func (s *apiServer) handleRowsUpsert(w http.ResponseWriter, r *http.Request) {
+	sess, _ := session.FromContext(r.Context())
+	if !sess.Driver.Caps().Upsert {
+		WriteErr(w, http.StatusNotFound, &Error{Code: "driver_not_supported", Message: "upsert is not supported"})
+		return
+	}
+	var req struct {
+		Rows []driver.RowValues `json:"rows"`
+	}
+	if !decodeJSONBody(w, r, &req) {
+		return
+	}
+	if len(req.Rows) == 0 || len(req.Rows) > 1000 {
+		WriteErr(w, 400, ErrBadRequest("upsert requires between 1 and 1000 rows"))
+		return
+	}
+	for _, row := range req.Rows {
+		if len(row) == 0 {
+			WriteErr(w, 400, ErrBadRequest("upsert rows must contain column values"))
+			return
+		}
+	}
+	if !decodeBinaryValues(w, r, req.Rows...) {
+		return
+	}
+	if err := sess.Driver.UpsertRows(r.Context(), chi.URLParam(r, "db"), chi.URLParam(r, "table"), req.Rows); err != nil {
+		writeDriverErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleRowsCopy duplicates selected original rows through a driver capability.
+func (s *apiServer) handleRowsCopy(w http.ResponseWriter, r *http.Request) {
+	sess, _ := session.FromContext(r.Context())
+	copier, ok := sess.Driver.(driver.RowCopier)
+	if !ok {
+		WriteErr(w, 404, &Error{Code: "driver_not_supported", Message: "row copy is unsupported"})
+		return
+	}
+	var req deleteRowsRequest
+	if !decodeJSONBody(w, r, &req) {
+		return
+	}
+	if len(req.Where) == 0 || len(req.Where) > 1000 {
+		WriteErr(w, 400, ErrBadRequest("copy requires between 1 and 1000 keys"))
+		return
+	}
+	for _, key := range req.Where {
+		if len(key) == 0 {
+			WriteErr(w, 400, ErrBadRequest("copy refuses an empty key"))
+			return
+		}
+	}
+	if err := copier.CopyRows(r.Context(), chi.URLParam(r, "db"), chi.URLParam(r, "table"), req.Where); err != nil {
 		writeDriverErr(w, err)
 		return
 	}

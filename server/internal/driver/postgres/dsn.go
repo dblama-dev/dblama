@@ -1,6 +1,10 @@
 package postgres
 
 import (
+	"database/sql"
+	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 	"strings"
 
 	"github.com/hitslab/db-manager/server/internal/driver"
@@ -38,4 +42,14 @@ func quoteDSNValue(v string) string {
 	escaped := strings.ReplaceAll(v, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `'`, `\'`)
 	return "'" + escaped + "'"
+}
+
+// openDatabase parses credentials before opening the pool and deliberately
+// omits the parser's error text: pgx includes the original DSN in that error.
+func openDatabase(cfg driver.ConnConfig) (*sql.DB, error) {
+	parsed, err := pgx.ParseConfig(DSN(cfg, cfg.Password))
+	if err != nil {
+		return nil, fmt.Errorf("invalid postgres connection configuration")
+	}
+	return stdlib.OpenDB(*parsed), nil
 }

@@ -318,7 +318,7 @@ describe('RowModal', () => {
     })
   })
 
-  it('sends a decimal the user actually changed, as a number', async () => {
+  it('sends a decimal the user actually changed without rounding it', async () => {
     mockedApi.mockResolvedValue(undefined)
     const cols: ColumnDef[] = [
       { name: 'amount', type: 'decimal', nullable: true },
@@ -331,7 +331,7 @@ describe('RowModal', () => {
       rowPk: { id: 1 },
     })
 
-    setNumber(wrapper, 'amount', 9.99)
+    setString(wrapper, 'amount', '9.99')
     await flushPromises()
 
     await saveButton(wrapper)?.trigger('click')
@@ -339,7 +339,7 @@ describe('RowModal', () => {
 
     expect(mockedApi).toHaveBeenCalledWith('PATCH', rowsPath, {
       where: { id: 1 },
-      values: { amount: 9.99 },
+      values: { amount: '9.99' },
     })
   })
 
@@ -611,4 +611,33 @@ describe('TableView row modal and stale-response guard', () => {
     expect(grid.props('loading')).toBe(false)
     wrapper.unmount()
   })
+})
+
+it('prefills an insert from copied values while leaving identity empty', async () => {
+ const wrapper = mountModal({row:{name:'copied',email:'x@y.z'}})
+ await flushPromises()
+ expect(fieldOf(wrapper,'name').findComponent(NInput).props('value')).toBe('copied')
+ expect(fieldOf(wrapper,'id').findComponent(NInputNumber).props('value')).toBe(null)
+ wrapper.unmount()
+})
+
+it('loads parent key choices using the referenced schema and preserves numeric keys', async () => {
+ mockedApi.mockResolvedValue({columns:[{name:'parent_id',type:'int',nullable:false}],rows:[[7],[9]],totalRows:2})
+ const pinia=createPinia()
+ const wrapper=mount(defineComponent({setup:()=>()=>h(NNotificationProvider,null,{default:()=>h(RowModal,{show:true,mode:'insert',rowsPath:'/api/databases/mydb/tables/child/rows',columns:[{name:'parent_id',type:'int',nullable:false}],row:null,rowPk:null,foreignKeys:[{name:'fk',columns:['parent_id'],refTable:'parents',refColumns:['parent_id']}]})})}),{global:{plugins:[pinia,i18n],stubs:{teleport:true}}})
+ await flushPromises()
+ expect(mockedApi).toHaveBeenCalledWith('GET','/api/databases/mydb/tables/parents/rows?limit=200&offset=0')
+ const select=wrapper.findComponent(NSelect)
+ expect(select.props('options')).toEqual([{label:'7',value:7},{label:'9',value:9}])
+ wrapper.unmount()
+})
+
+it('copies exact decimal and binary values without numeric rounding or text reinterpretation', async () => {
+ mockedApi.mockResolvedValue({lastInsertId:2})
+ const wrapper=mountModal({columns:[{name:'amount',type:'decimal',nullable:false},{name:'data',type:'blob',nullable:false}],row:{amount:'9007199254740993.12',data:'0x00ff'}})
+ await flushPromises()
+ expect(fieldOf(wrapper,'amount').findComponent(NInput).props('value')).toBe('9007199254740993.12')
+ await saveButton(wrapper)?.trigger('click');await flushPromises()
+ expect(mockedApi).toHaveBeenCalledWith('POST',rowsPath,{amount:'9007199254740993.12',data:{$binaryHex:'00ff'}})
+ wrapper.unmount()
 })

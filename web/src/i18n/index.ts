@@ -1,6 +1,10 @@
 import { watch } from 'vue'
 import { createI18n } from 'vue-i18n'
 
+import { adminMessages } from './admin'
+import { objectMessages } from './objects'
+import { foreignKeyMessages } from './foreignKeys'
+import { databaseMessages } from './databases'
 import ru from './locales/ru'
 import en from './locales/en'
 
@@ -14,7 +18,7 @@ const i18n = createI18n({
   legacy: false,
   locale: stored === 'en' ? 'en' : 'ru',
   fallbackLocale: 'en',
-  messages: { ru, en },
+  messages: { ru: { ...ru, ...adminMessages.ru, ...objectMessages.ru, ...databaseMessages.ru, ...foreignKeyMessages.ru }, en: { ...en, ...adminMessages.en, ...objectMessages.en, ...databaseMessages.en, ...foreignKeyMessages.en } },
 })
 
 watch(

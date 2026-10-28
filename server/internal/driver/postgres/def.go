@@ -36,7 +36,8 @@ const defColumnsQuery = `
 SELECT column_name, data_type, udt_name,
        character_maximum_length, numeric_precision, numeric_scale,
        is_nullable, column_default, collation_name,
-       is_identity, is_generated, generation_expression
+       is_identity, is_generated, generation_expression,
+       COALESCE(col_description(format('%I.%I', table_schema, table_name)::regclass::oid, ordinal_position), '')
 FROM information_schema.columns
 WHERE table_schema = $1 AND table_name = $2
 ORDER BY ordinal_position`
@@ -162,9 +163,10 @@ func (d *PostgresDriver) tableColumns(ctx context.Context, schema, table string)
 			isIdentity string
 			isGen      string
 			genExpr    sql.NullString
+			comment    string
 		)
 		if err := rows.Scan(&name, &dataType, &udtName, &charLen, &numPrec, &numScale,
-			&nullable, &defRaw, &collation, &isIdentity, &isGen, &genExpr); err != nil {
+			&nullable, &defRaw, &collation, &isIdentity, &isGen, &genExpr, &comment); err != nil {
 			return nil, fmt.Errorf("scan column row of %s: %w", table, err)
 		}
 		colType, length := pgColumnType(dataType, udtName, charLen, numPrec, numScale)
@@ -195,6 +197,7 @@ func (d *PostgresDriver) tableColumns(ctx context.Context, schema, table string)
 			AutoIncrement: isIdentity == "YES" || strings.HasPrefix(defRaw.String, "nextval("),
 			Generated:     generated,
 			Collation:     collation.String,
+			Comment:       comment,
 			// Position stays "": PostgreSQL has no FIRST/AFTER.
 		})
 	}

@@ -124,6 +124,7 @@ func (d *PostgresDriver) execDDL(ctx context.Context, stmts []string) error {
 	if err != nil {
 		return fmt.Errorf("begin ddl transaction: %w", err)
 	}
+	defer func() { _ = tx.Rollback() }()
 	for i, stmt := range stmts {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			_ = tx.Rollback() // best-effort; the step error is the real failure
@@ -166,6 +167,9 @@ func buildCreateTable(schema string, d driver.TableDef) ([]string, error) {
 // qualified table name — ShowCreateTable passes an unqualified name so
 // a dump can be imported into any schema the importer selects.
 func buildCreateTableQualified(qual string, d driver.TableDef) ([]string, error) {
+	if err := driver.ValidateForeignKeys(d.ForeignKeys, false); err != nil {
+		return nil, err
+	}
 
 	parts := make([]string, 0, len(d.Columns)+len(d.Indexes)+len(d.ForeignKeys))
 	for _, c := range d.Columns {
@@ -174,6 +178,23 @@ func buildCreateTableQualified(qual string, d driver.TableDef) ([]string, error)
 			return nil, fmt.Errorf("create table %s: %w", d.NewName, err)
 		}
 		parts = append(parts, frag)
+	}
+
+	// Validate the entire desired index set before rendering any CREATE.
+	seenIndexes := map[string]bool{}
+	primarySeen := false
+	for _, idx := range d.Indexes {
+		if strings.EqualFold(idx.Type, "PRIMARY") {
+			if primarySeen {
+				return nil, fmt.Errorf("more than one PRIMARY index")
+			}
+			primarySeen = true
+			continue
+		}
+		if seenIndexes[idx.Name] {
+			return nil, fmt.Errorf("duplicate index name %q", idx.Name)
+		}
+		seenIndexes[idx.Name] = true
 	}
 
 	var indexStmts []string
@@ -495,6 +516,23 @@ func foreignKeyFragmentPg(fk driver.ForeignKey) (string, error) {
 	if fk.RefTable == "" {
 		return "", fmt.Errorf("foreign key %s has no referenced table", fk.Name)
 	}
+	if len(fk.Columns) != len(fk.RefColumns) {
+		return "", fmt.Errorf("foreign key %s column counts differ", fk.Name)
+	}
+	for _, name := range append(slices.Clone(fk.Columns), fk.RefColumns...) {
+		if name == "" {
+			return "", fmt.Errorf("foreign key %s has an empty column", fk.Name)
+		}
+	}
+	for _, action := range []*string{&fk.OnDelete, &fk.OnUpdate} {
+		*action = strings.ToUpper(strings.TrimSpace(*action))
+		switch *action {
+		case "", "NO ACTION", "RESTRICT", "CASCADE", "SET NULL", "SET DEFAULT":
+		default:
+			return "", fmt.Errorf("foreign key %s has invalid action %q", fk.Name, *action)
+		}
+	}
+
 	cols := make([]string, len(fk.Columns))
 	for i, c := range fk.Columns {
 		cols[i] = sqlgen.QuoteIdentPg(c)

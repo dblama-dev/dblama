@@ -1,5 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
+import { adminRoutes } from '../lib/adminRoutes'
+import { objectRoutes } from '../lib/objectRoutes'
 import BasicLayout from '../layouts/BasicLayout.vue'
 import { useCatalogStore } from '../stores/catalog'
 import { useSessionStore } from '../stores/session'
@@ -14,6 +16,8 @@ import TableView from '../views/TableView.vue'
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    ...adminRoutes,
+    ...objectRoutes,
     { path: '/', redirect: '/server' },
     { path: '/login', name: 'login', component: LoginView },
     {

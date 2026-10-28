@@ -11,8 +11,14 @@
       <div v-for="col in columns" :key="col.name" class="row-modal__field">
         <span class="row-modal__label">{{ col.name }}</span>
         <div class="row-modal__control">
+          <n-select
+            v-if="parentOptions[col.name]?.length"
+            :value="values[col.name] ?? null" :options="parentOptions[col.name]" filterable tag
+            :disabled="isNulled(col)" size="small" class="row-modal__input"
+            @update:value="(v: string | number | null) => setValue(col.name, v)"
+          />
           <n-input-number
-            v-if="isNumeric(col.type)"
+            v-else-if="isNumeric(col.type)"
             :value="numericValue(col.name)"
             :disabled="isNulled(col)"
             size="small"
@@ -74,7 +80,8 @@ import { useNotification } from 'naive-ui'
 import { NButton, NCheckbox, NInput, NInputNumber, NModal, NSelect } from 'naive-ui'
 
 import { api, ApiError } from '../api/client'
-import type { ColumnDef } from '../api/types'
+import { useCatalogStore } from '../stores/catalog'
+import type { ColumnDef, ForeignKey, Page } from '../api/types'
 
 // One field per column: numeric types -> n-input-number, enums -> n-select,
 // everything else -> n-input (textarea for long text). Each nullable column
@@ -89,6 +96,7 @@ const props = defineProps<{
   row: Record<string, unknown> | null
   /** Exact-match key of the edited row for the PATCH where clause. */
   rowPk: Record<string, unknown> | null
+  foreignKeys?: ForeignKey[]
 }>()
 
 const emit = defineEmits<{
@@ -99,16 +107,40 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const notification = useNotification()
 
+const catalog = useCatalogStore()
+const parentOptions = ref<Record<string, {label:string;value:string|number}[]>>({})
+let parentRequest = 0
+watch(() => [props.show, props.foreignKeys, props.rowsPath] as const, async () => {
+  const request = ++parentRequest
+  parentOptions.value = {}
+  if (!props.show) return
+  for (const fk of props.foreignKeys ?? []) {
+    if (fk.columns.length !== 1 || fk.refColumns.length !== 1) continue
+    const [base, query = ''] = props.rowsPath.split('?')
+    const prefix = base!.slice(0, base!.indexOf('/tables/'))
+    let targetPrefix = prefix
+    const params = new URLSearchParams(query)
+    if (catalog.schemaAware && fk.refSchema) params.set('schema', fk.refSchema)
+    else if (!catalog.schemaAware && fk.refSchema) targetPrefix = `/api/databases/${encodeURIComponent(fk.refSchema)}`
+    const path = `${targetPrefix}/tables/${encodeURIComponent(fk.refTable)}/rows?limit=200&offset=0${params.toString() ? '&'+params.toString() : ''}`
+    try {
+      const page = await api<Page>('GET', path)
+      if (request !== parentRequest) return
+      const index = page.columns.findIndex(col => col.name === fk.refColumns[0])
+      if (index < 0) continue
+      const values = page.rows.map(row => row[index]).filter(value => value !== null && value !== undefined)
+      parentOptions.value[fk.columns[0]!] = values.map(value => ({label:String(value),value:typeof value==='number'?value:String(value)}))
+    } catch { /* Parent values may be private; manual input remains available. */ }
+  }
+}, { immediate:true, deep:true })
+
 // --- Input type helpers -------------------------------------------------
 
 const NUMERIC_PREFIXES = [
   'int',
-  'bigint',
   'smallint',
   'tinyint',
   'mediumint',
-  'decimal',
-  'numeric',
   'float',
   'double',
 ]
@@ -121,6 +153,11 @@ function isNumeric(type: string): boolean {
 
 function isLongText(type: string): boolean {
   return LONG_TEXT_RE.test(type)
+}
+
+function isBinary(type: string): boolean {
+  const normalized = type.toLowerCase()
+  return normalized.includes('binary') || normalized.includes('blob') || normalized === 'bytea'
 }
 
 function enumOptions(col: ColumnDef): { label: string; value: string }[] {
@@ -161,10 +198,8 @@ function setNulled(col: ColumnDef, checked: boolean): void {
 
 // Snapshot of the values the form was prefilled with (post coercion, with
 // a checked NULL toggle recorded as null). The edit diff runs against this
-// snapshot, NOT against props.row: the backend serializes DECIMAL (and
-// other string-serialized numerics) as strings while the form coerces them
-// to numbers, and comparing coerced-vs-raw would flag every untouched
-// decimal as changed — writing a precision-lost Number back on a plain save.
+// snapshot, NOT against props.row. Exact numeric types stay strings so a
+// DECIMAL or BIGINT round-trips without JavaScript number conversion.
 const prefill: Record<string, string | number | null> = {}
 
 // PINNED: the form is initialized exactly once per modal OPEN (plus
@@ -186,7 +221,7 @@ function initForm(): void {
   for (const key of Object.keys(nulls)) delete nulls[key]
   for (const key of Object.keys(prefill)) delete prefill[key]
   for (const col of props.columns) {
-    if (props.mode === 'edit' && props.row !== null) {
+    if (props.row !== null) {
       initFromRow(col)
     } else {
       initFromDefault(col)
@@ -234,7 +269,8 @@ function initFromDefault(col: ColumnDef): void {
 // PINNED RULE (insert): the RowValues map contains EVERY column of the
 // table — null when the NULL toggle is checked, the numeric control value
 // (null when empty) for numeric types, and the raw string (possibly '')
-// for everything else.
+// for everything else. A hex preview for a binary column uses an explicit
+// wrapper so the API never mistakes ordinary text for bytes.
 function buildValues(): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const col of props.columns) {
@@ -242,6 +278,8 @@ function buildValues(): Record<string, unknown> {
       out[col.name] = null
     } else if (isNumeric(col.type)) {
       out[col.name] = numericValue(col.name)
+    } else if (isBinary(col.type) && /^0x(?:[0-9a-f]{2})*$/i.test(stringValue(col.name))) {
+      out[col.name] = { $binaryHex: stringValue(col.name).slice(2) }
     } else {
       out[col.name] = stringValue(col.name)
     }
@@ -250,16 +288,16 @@ function buildValues(): Record<string, unknown> {
 }
 
 // PINNED RULE (edit): only the fields whose built value differs from the
-// prefilled snapshot are sent. Comparing coerced-vs-coerced keeps untouched
-// string-serialized numerics (DECIMAL, BIGINT UNSIGNED > 2^63, ...) out of
-// the payload; a NULL toggle state counts as part of the snapshot.
+// prefilled snapshot are sent. Compare raw control values before binary
+// transport encoding; an untouched hex preview must not trigger a PATCH.
 function buildChangedValues(): Record<string, unknown> {
   const built = buildValues()
   const changed: Record<string, unknown> = {}
-  for (const [name, value] of Object.entries(built)) {
-    const orig = nulls[name] === true ? null : (prefill[name] ?? null)
-    if (value !== orig) {
-      changed[name] = value
+  for (const col of props.columns) {
+    const name = col.name
+    const current = nulls[name] === true ? null : (isNumeric(col.type) ? numericValue(name) : stringValue(name))
+    if (current !== (prefill[name] ?? null)) {
+      changed[name] = built[name]
     }
   }
   return changed

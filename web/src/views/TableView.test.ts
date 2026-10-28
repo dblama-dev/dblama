@@ -71,3 +71,32 @@ it('reads fresh SQL after returning from the structure section', async () => {
  expect(wrapper.get('pre code').text()).toContain('name text')
  wrapper.unmount()
 })
+
+it('opens a copied row as a new insert with generated identity cleared', async () => {
+ const wrapper = openTable(); await flushPromises()
+ vi.mocked(api).mockResolvedValueOnce({ columns: [{name:'id',type:'int',nullable:false,autoIncrement:true},{name:'name',type:'text',nullable:false}], indexes:[],foreignKeys:[],options:{} })
+ wrapper.findComponent(DataGrid).vm.$emit('copy-row',{id:1,name:'copied',__pk:{id:1}})
+ await flushPromises()
+ expect(wrapper.findComponent(RowModal).props('mode')).toBe('insert')
+ expect(wrapper.findComponent(RowModal).props('row')).toEqual({name:'copied'})
+ wrapper.unmount()
+})
+
+it('ignores an old table definition failure after switching schemas during copy', async () => {
+ const wrapper = openTable(); await flushPromises()
+ const catalog = useCatalogStore()
+ catalog.schemaAware = true; catalog.schema = 'old'
+ let rejectOld!: (error: Error) => void
+ vi.mocked(api).mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectOld = reject }))
+ wrapper.findComponent(DataGrid).vm.$emit('copy-row',{id:1,name:'old',__pk:{id:1}})
+ await flushPromises()
+ catalog.schema = 'new'
+ rejectOld(new Error('old schema no longer available'))
+ await flushPromises()
+ expect(wrapper.findComponent(RowModal).props('show')).toBe(false)
+ vi.mocked(api).mockResolvedValueOnce({ columns:[{name:'name',type:'text',nullable:false}],indexes:[],foreignKeys:[],options:{} })
+ wrapper.findComponent(DataGrid).vm.$emit('copy-row',{id:2,name:'new',__pk:{id:2}})
+ await flushPromises()
+ expect(wrapper.findComponent(RowModal).props('row')).toEqual({name:'new'})
+ wrapper.unmount()
+})

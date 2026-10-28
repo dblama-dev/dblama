@@ -54,6 +54,10 @@ func NewRouter(cfg config.Config, sessions *session.Store, drivers *driver.Regis
 			authed.Get("/session", s.handleGetSession)
 			authed.Delete("/session", s.handleLogout)
 			authed.Get("/databases", s.handleDatabases)
+			s.registerDatabaseRoutes(authed)
+			s.registerAdminRoutes(authed)
+			s.registerObjectRoutes(authed)
+			s.registerForeignKeyRoutes(authed)
 
 			// Console: raw SQL execution, cancel and EXPLAIN. Every
 			// route is a POST and already covered by the group's
@@ -89,6 +93,8 @@ func NewRouter(cfg config.Config, sessions *session.Store, drivers *driver.Regis
 					t.Post("/indexes", s.handleSaveIndexes)
 					t.Get("/rows", s.handleRowsSelect)
 					t.Post("/rows", s.handleRowInsert)
+					t.Post("/upsert", s.handleRowsUpsert)
+					t.Post("/copy-rows", s.handleRowsCopy)
 					t.Patch("/rows", s.handleRowUpdate)
 					t.Delete("/rows", s.handleRowDelete)
 					t.Get("/pk", s.handlePrimaryKey)

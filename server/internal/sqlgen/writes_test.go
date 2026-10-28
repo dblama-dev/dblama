@@ -103,3 +103,20 @@ func TestBuildDelete_EmptyWhere(t *testing.T) {
 		t.Errorf("BuildDelete() args = %v, want empty", args)
 	}
 }
+
+func TestWriteWhereNullUsesISNULLAndCorrectPlaceholders(t *testing.T) {
+	query, args, err := BuildUpdatePg("t", []string{"changed"}, map[string]any{"a": nil, "b": 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if query != `UPDATE "t" SET "changed"=$1 WHERE "a" IS NULL AND "b"=$2` || len(args) != 1 || args[0] != 2 {
+		t.Fatalf("query %s args %#v", query, args)
+	}
+	query, args, err = BuildDelete("t", map[string]any{"a": nil, "b": 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if query != "DELETE FROM `t` WHERE `a` IS NULL AND `b`=?" || len(args) != 1 || args[0] != 2 {
+		t.Fatalf("query %s args %#v", query, args)
+	}
+}

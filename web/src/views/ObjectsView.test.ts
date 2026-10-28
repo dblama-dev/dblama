@@ -1,0 +1,31 @@
+import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
+import { createI18n } from 'vue-i18n'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { useSessionStore } from '../stores/session'
+import { useCatalogStore } from '../stores/catalog'
+import { objectMessages } from '../i18n/objects'
+import ObjectsView from './ObjectsView.vue'
+const state = vi.hoisted(() => ({ kind: 'views' }))
+vi.mock('vue-router', () => ({ useRoute: () => ({ params: { db: 'my db', get kind() { return state.kind } }, query: {} }) }))
+function response(body: unknown, status = 200) { return { ok: status < 400, status, json: async () => body } as Response }
+beforeEach(() => { setActivePinia(createPinia()); state.kind = 'views'; const s = useSessionStore(); s.sessionInfo = { database: 'my db', driver: { name: 'PostgreSQL', flavor: 'postgres', version: '17', user: 'root', host: 'localhost' }, caps: { views: true, triggers: true, routines: true, procedures: true, events: false, partitions: true, schemas: true, users: false, monitor: false, moveCopy: false, comments: true, upsert: true, descendingIndexes: true, sequences: true } }; const c = useCatalogStore(); c.schemaAware = true; c.schema = 'Odd Schema' })
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
+function view() { return mount(ObjectsView, { global: { plugins: [createI18n({ legacy: false, locale: 'en', messages: objectMessages })] } }) }
+it('opens server source and saves through the schema-qualified object endpoint', async () => {
+ const fetch = vi.fn(async (_url: string, options: RequestInit) => options.method === 'GET' ? response({ objects: [{ name: 'active', kind: 'VIEW', source: 'CREATE VIEW active AS SELECT 1' }] }) : response({}, 204)); vi.stubGlobal('fetch', fetch)
+ const w = view(); await flushPromises(); await w.get('[data-object="active"]').trigger('click')
+ expect((w.get('[data-source]').element as HTMLTextAreaElement).value).toBe('CREATE VIEW active AS SELECT 1')
+ await w.get('[data-source]').setValue('CREATE OR REPLACE VIEW active AS SELECT 2'); await w.get('[data-save]').trigger('click'); await flushPromises()
+ expect(fetch).toHaveBeenCalledWith('/api/databases/my%20db/views/active?schema=Odd%20Schema', expect.objectContaining({ method: 'PUT', body: expect.stringContaining('SELECT 2') }))
+})
+it('does not fetch unsupported events and shows the reason', async () => { state.kind = 'events'; const fetch = vi.fn(); vi.stubGlobal('fetch', fetch); const w = view(); await flushPromises(); expect(w.text()).toContain('not supported'); expect(fetch).not.toHaveBeenCalled() })
+it('calls a selected procedure with JSON parameters and renders returned rows', async () => {
+ state.kind = 'routines'; vi.stubGlobal('fetch', vi.fn(async (_url: string, opts: RequestInit) => opts.method === 'GET' ? response({ objects: [{ name: 'echo', kind: 'PROCEDURE', identity: 'IN x text', source: 'CREATE PROCEDURE echo(IN x text)' }] }) : response({ results: [{ columns: [{ name: 'value', type: 'text', nullable: true }], rows: [['hello']], seconds: 0 }] })))
+ const w = view(); await flushPromises(); await w.get('[data-object="echo"]').trigger('click'); await w.get('[data-arguments]').setValue('["hello"]'); await w.get('[data-call]').trigger('click'); await flushPromises(); expect(w.text()).toContain('hello')
+})
+it('requires confirmation before dropping a partition', async () => {
+ state.kind = 'partitions'; useCatalogStore().tables = [{ name: 'items', rows: 1, sizeBytes: 1, engine: '', comment: '', isView: false }]
+ const fetch = vi.fn(async () => response({ partitions: [{ name: 'p0', method: 'RANGE', expression: 'id', description: '10', rows: 1 }] })); vi.stubGlobal('fetch', fetch)
+ const w = view(); await flushPromises(); await w.get('[data-partition-drop="p0"]').trigger('click'); expect(w.find('[role="alertdialog"]').exists()).toBe(true); expect(fetch.mock.calls).toHaveLength(1)
+})

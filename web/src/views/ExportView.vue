@@ -19,6 +19,7 @@
       </label>
 
       <div v-if="isSql" class="export-view__field">
+        <n-checkbox v-model:checked="includeViews">{{ t('export.includeViews') }}</n-checkbox>
         <n-checkbox v-model:checked="dropIfExists">{{ t('export.dropIfExists') }}</n-checkbox>
         <n-checkbox v-model:checked="ifNotExists">{{ t('export.ifNotExists') }}</n-checkbox>
       </div>
@@ -56,7 +57,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { NAlert, NButton, NCheckbox, NSelect, useNotification, type SelectOption } from 'naive-ui'
@@ -80,6 +81,7 @@ const selected = ref<string[]>([])
 const exporting = ref(false)
 
 const db = computed(() => String(route.params.db ?? ''))
+const includeViews = ref(true)
 const isSql = computed(() => format.value === 'sql')
 // The export endpoint dumps the driver's login database; the {db} URL
 // parameter is ignored there (unlike import), so a mismatch means the
@@ -94,7 +96,12 @@ const submitDisabled = computed(
   () => dbMismatch.value || exporting.value || (!isSql.value && selected.value.length !== 1),
 )
 
-const tableOptions = computed(() => catalog.tables.filter((table) => !table.isView))
+const tableOptions = computed(() => catalog.tables.filter((table) => !table.isView || (isSql.value && includeViews.value)))
+
+watch([format, includeViews, tableOptions], () => {
+  const valid = new Set(tableOptions.value.map(table => table.name))
+  selected.value = selected.value.filter(name => valid.has(name))
+})
 
 const formatOptions = computed<SelectOption[]>(() => [
   { label: t('export.formatSql'), value: 'sql' },
@@ -103,9 +110,10 @@ const formatOptions = computed<SelectOption[]>(() => [
   { label: t('export.formatTsv'), value: 'tsv' },
 ])
 
-onMounted(() => {
+watch([db, () => catalog.schema], () => {
+  selected.value = []
   void catalog.fetchTables(db.value)
-})
+}, { immediate: true })
 
 function toggleTable(name: string, checked: boolean): void {
   if (checked) {
@@ -124,6 +132,7 @@ async function submit(): Promise<void> {
       tables: selected.value,
       // The sql-only flags stay false for delimited formats (their
       // checkboxes are hidden); the server ignores them there anyway.
+      includeViews: isSql.value && includeViews.value,
       dropIfExists: isSql.value && dropIfExists.value,
       ifNotExists: isSql.value && ifNotExists.value,
       gzip: gzip.value,

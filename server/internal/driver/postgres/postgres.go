@@ -26,7 +26,7 @@ const defaultSchema = "public"
 // listDatabasesQuery returns every connectable database except the
 // templates, with its total on-disk size and its collation.
 const listDatabasesQuery = `
-SELECT datname, pg_database_size(datname), datcollate
+SELECT datname, CASE WHEN has_database_privilege(oid, 'CONNECT') THEN pg_database_size(oid) ELSE 0 END, datcollate
 FROM pg_database
 WHERE datallowconn AND datname NOT IN ('template0', 'template1')
 ORDER BY datname`
@@ -83,7 +83,7 @@ var _ driver.Driver = (*PostgresDriver)(nil)
 // with a ping, and reads the server version. Connection errors never
 // contain the DSN or the password.
 func Connect(ctx context.Context, cfg driver.ConnConfig) (driver.Driver, error) {
-	db, err := sql.Open("pgx", DSN(cfg, cfg.Password))
+	db, err := openDatabase(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("open postgres connection to %s:%s: %w", cfg.Host, cfg.Port, err)
 	}

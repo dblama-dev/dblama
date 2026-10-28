@@ -228,7 +228,7 @@ func convertValue(v any, binary bool) any {
 	case nil:
 		return nil
 	case time.Time:
-		return val.Format(time.RFC3339)
+		return val.Format(time.RFC3339Nano)
 	case []byte:
 		if binary {
 			return "0x" + hex.EncodeToString(val)
@@ -305,11 +305,21 @@ func (d *MysqlDriver) UpdateRow(ctx context.Context, db, table string, where dri
 		setArgs[i] = vals[c]
 	}
 
+	keys, err := d.normalizeOriginalKeys(ctx, db, table, []driver.PK{where})
+	if err != nil {
+		return fmt.Errorf("update row: %w", err)
+	}
+	where = keys[0]
 	query, whereArgs, err := sqlgen.BuildUpdate(table, cols, map[string]any(where))
 	if err != nil {
 		return fmt.Errorf("update row in %s.%s: %w", db, table, err)
 	}
 	args := slices.Concat(setArgs, whereArgs)
+	query, args, err = bindOriginalJSONKeys(query, args)
+	if err != nil {
+		return err
+	}
+
 	qualified, err := qualifyWrite("UPDATE ", query, db, table)
 	if err != nil {
 		return fmt.Errorf("update row in %s.%s: %w", db, table, err)
@@ -343,6 +353,11 @@ func (d *MysqlDriver) DeleteRows(ctx context.Context, db, table string, where []
 		}
 	}
 
+	normalized, err := d.normalizeOriginalKeys(ctx, db, table, where)
+	if err != nil {
+		return fmt.Errorf("delete rows: %w", err)
+	}
+	where = normalized
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("delete rows from %s.%s: begin transaction: %w", db, table, err)
@@ -352,6 +367,11 @@ func (d *MysqlDriver) DeleteRows(ctx context.Context, db, table string, where []
 		if err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("delete rows from %s.%s: key %d: %w", db, table, i+1, err)
+		}
+		query, args, err = bindOriginalJSONKeys(query, args)
+		if err != nil {
+			_ = tx.Rollback()
+			return err
 		}
 		qualified, err := qualifyWrite("DELETE FROM ", query, db, table)
 		if err != nil {

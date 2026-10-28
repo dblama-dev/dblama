@@ -228,7 +228,13 @@ func (d *MysqlDriver) tableForeignKeys(ctx context.Context, db, table string) ([
 		if len(fks) == 0 || fks[len(fks)-1].Name != name {
 			fks = append(fks, driver.ForeignKey{
 				Name:     name,
-				RefTable: qualifyRefTable(refSchema, refTable, db),
+				RefTable: refTable,
+				RefSchema: func() string {
+					if refSchema.Valid && refSchema.String != db {
+						return refSchema.String
+					}
+					return ""
+				}(),
 				OnUpdate: updateRule.String,
 				OnDelete: deleteRule.String,
 			})
@@ -441,13 +447,4 @@ func indexKind(name string, nonUnique int, indexType string) string {
 	default:
 		return "INDEX"
 	}
-}
-
-// qualifyRefTable prefixes the referenced table with its schema when it
-// lives in another database.
-func qualifyRefTable(refSchema sql.NullString, refTable, db string) string {
-	if refSchema.Valid && refSchema.String != "" && refSchema.String != db {
-		return refSchema.String + "." + refTable
-	}
-	return refTable
 }

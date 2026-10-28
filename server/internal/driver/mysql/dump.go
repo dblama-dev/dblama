@@ -93,8 +93,7 @@ const exportBatchSize = 100
 // is ever buffered. With Gzip the stream is wrapped in a gzip writer
 // whose footer is flushed when Export returns.
 //
-// Views are not exported in v0.1 (spec §7 narrowing): the dump covers
-// base tables only, in both the sql and the delimited formats.
+// IncludeViews opts SQL dumps into dependency-ordered view definitions.
 //
 // Paging pins: a single-column primary key pages by keyset (WHERE pk >
 // lastPK ORDER BY pk LIMIT 100) so a live table cannot skip or repeat
@@ -153,6 +152,31 @@ func (d *MysqlDriver) Export(ctx context.Context, db string, req driver.ExportRe
 		}
 	}
 
+	var views []dump.View
+	if isSQL && req.Query == nil && req.IncludeViews {
+		var err error
+		tables, views, err = d.prepareViewExport(ctx, db, req.Tables)
+		if err != nil {
+			return fmt.Errorf("export views: %w", err)
+		}
+	}
+	if isSQL && req.Query == nil {
+		var err error
+		tables, _, err = d.prepareTableExport(ctx, db, tables)
+		if err != nil {
+			return err
+		}
+	}
+
+	var generated map[string]bool
+	if isSQL && req.Query != nil && len(tables) == 1 {
+		var err error
+		generated, err = d.generatedExportColumns(ctx, db, tables[0])
+		if err != nil {
+			return err
+		}
+	}
+
 	out := w
 	closeOut := func() error { return nil }
 	if req.Gzip {
@@ -170,8 +194,43 @@ func (d *MysqlDriver) Export(ctx context.Context, db string, req driver.ExportRe
 	}
 
 	var err error
-	if isSQL {
-		err = d.exportSQL(ctx, db, tables, req, out)
+	if req.Query != nil {
+		if len(tables) != 1 {
+			return fmt.Errorf("selection export requires exactly one table")
+		}
+		if isSQL {
+			err = writeExport(out, "SET @DBM_OLD_SQL_MODE=@@SESSION.sql_mode;\nSET SESSION sql_mode='NO_AUTO_VALUE_ON_ZERO';\n")
+		}
+		if err == nil {
+
+			err = dump.WriteSelection(ctx, tables[0], req.Format, *req.Query, out,
+				func(ctx context.Context, q driver.SelectQuery) (driver.Page, error) {
+					page, err := d.SelectRows(ctx, db, tables[0], q)
+					if err != nil {
+						return page, err
+					}
+					if isSQL {
+						return dump.WritablePage(page, generated)
+					}
+					return page, nil
+				}, sqlgen.QuoteIdent, sqlLiteral, false)
+		}
+		if err == nil && isSQL {
+			err = writeExport(out, "SET SESSION sql_mode=@DBM_OLD_SQL_MODE;\n")
+		}
+	} else if isSQL {
+		if req.DropIfExists {
+			err = dropViewsSQL(out, views)
+		}
+		if err == nil {
+			err = d.exportSQL(ctx, db, tables, req, out)
+		}
+		if err == nil {
+			err = writeViewsSQL(out, views, req)
+		}
+		if err == nil {
+			err = writeExport(out, "SET SESSION foreign_key_checks=@DBM_OLD_FOREIGN_KEY_CHECKS;\nSET SESSION sql_mode=@DBM_OLD_SQL_MODE;\n")
+		}
 	} else {
 		err = d.exportDelimited(ctx, db, tables[0], sep, out)
 	}
@@ -185,11 +244,21 @@ func (d *MysqlDriver) Export(ctx context.Context, db string, req driver.ExportRe
 // per table with the server's own SHOW CREATE TABLE statement and the
 // table's data as INSERT batches.
 func (d *MysqlDriver) exportSQL(ctx context.Context, db string, tables []string, req driver.ExportRequest, out io.Writer) error {
-	header := "SET NAMES utf8mb4;\n" +
+	header := "SET NAMES utf8mb4;\nSET @DBM_OLD_FOREIGN_KEY_CHECKS=@@SESSION.foreign_key_checks;\nSET SESSION foreign_key_checks=0;\nSET @DBM_OLD_SQL_MODE=@@SESSION.sql_mode;\nSET SESSION sql_mode='NO_AUTO_VALUE_ON_ZERO';\n" +
 		"-- db-manager dump\n" +
 		"-- Database: " + sqlgen.QuoteIdent(db) + "\n\n"
 	if err := writeExport(out, header); err != nil {
 		return err
+	}
+
+	if req.DropIfExists && len(tables) > 0 {
+		names := make([]string, len(tables))
+		for i, name := range tables {
+			names[i] = sqlgen.QuoteIdent(name)
+		}
+		if err := writeExport(out, "DROP TABLE IF EXISTS "+strings.Join(names, ", ")+";\n"); err != nil {
+			return err
+		}
 	}
 
 	for _, table := range tables {
@@ -205,9 +274,6 @@ func (d *MysqlDriver) exportSQL(ctx context.Context, db string, tables []string,
 		}
 
 		section := "-- Table: " + sqlgen.QuoteIdent(table) + "\n"
-		if req.DropIfExists {
-			section += "DROP TABLE IF EXISTS " + sqlgen.QuoteIdent(table) + ";\n"
-		}
 		section += create + ";\n\n"
 		if err := writeExport(out, section); err != nil {
 			return err
@@ -231,10 +297,19 @@ func (d *MysqlDriver) exportTableSQLRows(ctx context.Context, db, table string, 
 		return fmt.Errorf("export: %w", err)
 	}
 
+	generated, err := d.generatedExportColumns(ctx, db, table)
+	if err != nil {
+		return err
+	}
+
 	first := true
 	var insertPrefix string
 	var meta []driver.ColumnMeta
 	err = d.exportPages(ctx, db, table, pk, func(page driver.Page) error {
+		page, err = dump.WritablePage(page, generated)
+		if err != nil {
+			return err
+		}
 		if first {
 			names := make([]string, len(page.Columns))
 			meta = make([]driver.ColumnMeta, len(page.Columns))
@@ -380,8 +455,8 @@ func keysetText(v any, colType string) string {
 		return "" // a key column is never NULL
 	case string:
 		if isDateTimeTypeName(colType) {
-			if t, err := time.Parse(time.RFC3339, val); err == nil {
-				return t.Format("2006-01-02 15:04:05")
+			if t, err := time.Parse(time.RFC3339Nano, val); err == nil {
+				return t.Format("2006-01-02 15:04:05.999999999")
 			}
 		}
 		return val
@@ -395,7 +470,7 @@ func keysetText(v any, colType string) string {
 		}
 		return "0"
 	case time.Time:
-		return val.Format("2006-01-02 15:04:05")
+		return val.Format("2006-01-02 15:04:05.999999999")
 	default:
 		return fmt.Sprint(v)
 	}
@@ -421,8 +496,8 @@ func sqlLiteral(v any, colType string) string {
 			return "X''"
 		}
 		if isDateTimeTypeName(colType) {
-			if t, err := time.Parse(time.RFC3339, val); err == nil {
-				return sqlQuoteString(t.Format("2006-01-02 15:04:05"))
+			if t, err := time.Parse(time.RFC3339Nano, val); err == nil {
+				return sqlQuoteString(t.Format("2006-01-02 15:04:05.999999999"))
 			}
 		}
 		return sqlQuoteString(val)
@@ -436,7 +511,7 @@ func sqlLiteral(v any, colType string) string {
 		}
 		return "0"
 	case time.Time:
-		return sqlQuoteString(val.Format("2006-01-02 15:04:05"))
+		return sqlQuoteString(val.Format("2006-01-02 15:04:05.999999999"))
 	default:
 		return sqlQuoteString(fmt.Sprint(val))
 	}

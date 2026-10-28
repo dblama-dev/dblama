@@ -42,7 +42,7 @@ func (d *PostgresDriver) ShowCreateTable(ctx context.Context, db, table string) 
 
 // Export streams a dump of database db (the pool's login database; the
 // handler validates the requested db equals it) to w in req.Format.
-// Views are not exported in v0.1 (spec §7 narrowing): base tables only.
+// IncludeViews adds dependency-ordered portable view definitions to SQL dumps.
 // A single-column primary key pages by keyset; any other shape pages by
 // LIMIT/OFFSET (documented caveat). Nothing but the current row and
 // statement is ever buffered.
@@ -89,6 +89,32 @@ func (d *PostgresDriver) Export(ctx context.Context, db string, req driver.Expor
 		}
 	}
 
+	var views []dump.View
+	if isSQL && req.Query == nil && req.IncludeViews {
+		var err error
+		tables, views, err = d.prepareViewExport(ctx, req.Tables)
+		if err != nil {
+			return fmt.Errorf("export views: %w", err)
+		}
+	}
+	var definitions map[string]driver.TableDef
+	if isSQL && req.Query == nil {
+		var err error
+		tables, definitions, err = d.prepareTableExport(ctx, tables)
+		if err != nil {
+			return err
+		}
+	}
+
+	var generated map[string]bool
+	if isSQL && req.Query != nil && len(tables) == 1 {
+		var err error
+		generated, err = d.generatedExportColumns(ctx, tables[0])
+		if err != nil {
+			return err
+		}
+	}
+
 	out := w
 	closeOut := func() error { return nil }
 	if req.Gzip {
@@ -103,8 +129,31 @@ func (d *PostgresDriver) Export(ctx context.Context, db string, req driver.Expor
 	}
 
 	var err error
-	if isSQL {
-		err = d.exportSQL(ctx, tables, req, out)
+	if req.Query != nil {
+		if len(tables) != 1 {
+			return fmt.Errorf("selection export requires exactly one table")
+		}
+		err = dump.WriteSelection(ctx, tables[0], req.Format, *req.Query, out,
+			func(ctx context.Context, q driver.SelectQuery) (driver.Page, error) {
+				page, err := d.SelectRows(ctx, db, tables[0], q)
+				if err != nil {
+					return page, err
+				}
+				if isSQL {
+					return dump.WritablePage(page, generated)
+				}
+				return page, nil
+			}, sqlgen.QuoteIdentPg, sqlLiteralPg, true)
+	} else if isSQL {
+		if req.DropIfExists {
+			err = dropViewsSQL(out, views)
+		}
+		if err == nil {
+			err = d.exportSQL(ctx, tables, definitions, req, out)
+		}
+		if err == nil {
+			err = writeViewsSQL(out, views, req)
+		}
 	} else {
 		err = d.exportDelimited(ctx, tables[0], sep, out)
 	}
@@ -117,7 +166,7 @@ func (d *PostgresDriver) Export(ctx context.Context, db string, req driver.Expor
 // exportSQL writes the SQL dialect: a file header, then one section per
 // table — optional DROP, the generated CREATE (rewritten with IF NOT
 // EXISTS when requested) and the data as INSERT batches.
-func (d *PostgresDriver) exportSQL(ctx context.Context, tables []string, req driver.ExportRequest, out io.Writer) error {
+func (d *PostgresDriver) exportSQL(ctx context.Context, tables []string, definitions map[string]driver.TableDef, req driver.ExportRequest, out io.Writer) error {
 	schema := d.schemaFor(ctx)
 	header := "-- db-manager dump\n" +
 		"-- Database: " + sqlgen.QuoteIdentPg(d.loginDB) + "\n" +
@@ -126,8 +175,17 @@ func (d *PostgresDriver) exportSQL(ctx context.Context, tables []string, req dri
 		return err
 	}
 
+	if req.DropIfExists && len(tables) > 0 {
+		names := make([]string, len(tables))
+		for i, name := range tables {
+			names[i] = sqlgen.QuoteIdentPg(name)
+		}
+		if err := writeExport(out, "DROP TABLE IF EXISTS "+strings.Join(names, ", ")+";\n"); err != nil {
+			return err
+		}
+	}
 	for _, table := range tables {
-		create, err := d.ShowCreateTable(ctx, d.loginDB, table)
+		create, err := portableTableCreate(table, definitions[table])
 		if err != nil {
 			return fmt.Errorf("export: %w", err)
 		}
@@ -143,9 +201,6 @@ func (d *PostgresDriver) exportSQL(ctx context.Context, tables []string, req dri
 			return fmt.Errorf("export: %w", err)
 		}
 		section := "-- Table: " + qual + "\n"
-		if req.DropIfExists {
-			section += "DROP TABLE IF EXISTS " + sqlgen.QuoteIdentPg(table) + ";\n"
-		}
 		section += create + ";\n\n"
 		if err := writeExport(out, section); err != nil {
 			return err
@@ -158,7 +213,7 @@ func (d *PostgresDriver) exportSQL(ctx context.Context, tables []string, req dri
 			return err
 		}
 	}
-	return nil
+	return writeForeignKeysSQL(out, tables, definitions, req)
 }
 
 // addIfNotExists rewrites the generated CREATE TABLE into CREATE TABLE
@@ -180,10 +235,19 @@ func (d *PostgresDriver) exportTableSQLRows(ctx context.Context, table string, o
 		return fmt.Errorf("export: %w", err)
 	}
 
+	generated, err := d.generatedExportColumns(ctx, table)
+	if err != nil {
+		return err
+	}
+
 	first := true
 	var insertPrefix string
 	var meta []driver.ColumnMeta
 	err = d.exportPages(ctx, table, pk, func(page driver.Page) error {
+		page, err = dump.WritablePage(page, generated)
+		if err != nil {
+			return err
+		}
 		if first {
 			names := make([]string, len(page.Columns))
 			meta = make([]driver.ColumnMeta, len(page.Columns))

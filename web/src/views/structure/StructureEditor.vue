@@ -8,6 +8,8 @@ import { api, ApiError } from '../../api/client'
 import { useCatalogStore } from '../../stores/catalog'
 import type { ColumnDef, ForeignKey, Index, TableDef, TableOptions } from '../../api/types'
 import IndexEditor from './IndexEditor.vue'
+import { useMetadataStore } from '../../stores/metadata'
+import ForeignKeyEditor from './ForeignKeyEditor.vue'
 import OptionsEditor from './OptionsEditor.vue'
 
 // Table structure editor: columns, indexes and table options. Columns and
@@ -89,7 +91,9 @@ const NUMERIC_TYPES = new Set([
 
 const ENUM_TYPES = new Set(['enum', 'set'])
 
-const typeOptions = COMMON_TYPES.map((type) => ({ label: type, value: type }))
+const metadata = useMetadataStore()
+void metadata.load()
+const typeOptions = computed(() => metadata.data?.columnTypes.map(type => ({label:type.name,value:type.name})) ?? COMMON_TYPES.map(type => ({label:type,value:type})))
 const generatedOptions = [
   { label: t('structure.generatedNone'), value: '' },
   { label: 'VIRTUAL', value: 'VIRTUAL' },
@@ -649,24 +653,10 @@ async function save(): Promise<void> {
         v-model:options="options"
       />
 
-      <template v-if="foreignKeys.length > 0">
-        <h3 class="structure-editor__title">
-          {{ t('structure.foreignKeys') }}
-        </h3>
-        <div class="structure-editor__fks">
-          <div
-            v-for="fk in foreignKeys"
-            :key="fk.name"
-            class="structure-editor__fk"
-          >
-            {{ fk.name }}: ({{ fk.columns.join(', ') }}) → {{ fk.refTable }}
-            ({{ fk.refColumns.join(', ') }})
-          </div>
-          <div class="structure-editor__fk-hint">
-            {{ t('structure.foreignKeysReadonly') }}
-          </div>
-        </div>
-      </template>
+      <h3 class="structure-editor__title">{{ t('structure.foreignKeys') }}</h3>
+      <ForeignKeyEditor v-model="foreignKeys" :db="db" :table="table"
+        :column-names="rows.filter(r => !r.markedForDeletion).map(r => r.name)" @saved="load" />
+
     </template>
   </section>
 </template>

@@ -31,6 +31,9 @@
       @refresh="refetch"
       @add-row="onAddRow"
       @edit-row="onEditRow"
+      @copy-row="onCopyRow"
+      @copy-rows="copyRows"
+      @export-selection="exportSelection"
       @delete-row="deleteRows([$event])"
       @delete-rows="deleteRows"
     />
@@ -42,6 +45,7 @@
       @created="onTableCreated"
     />
     <TableSQL v-else-if="view === 'sql'" :db="db" :table="table" />
+    <BulkUpsert v-if="!isNewTable && view === 'data' && session.sessionInfo?.caps.upsert" :path="catalog.path(rowsPath + '/upsert')" @saved="refetch" />
     <RowModal
       v-if="!isNewTable"
       :show="rowModal.show"
@@ -50,6 +54,7 @@
       :columns="modalColumns"
       :row="rowModal.row"
       :row-pk="rowModal.pk"
+      :foreign-keys="defForeignKeys"
       @update:show="rowModal.show = $event"
       @saved="onRowSaved"
     />
@@ -64,12 +69,15 @@ import { useNotification } from 'naive-ui'
 import { NBreadcrumb, NBreadcrumbItem, NTab, NTabs } from 'naive-ui'
 
 import { api, ApiError } from '../api/client'
-import type { ColumnDef, Page, TableDef } from '../api/types'
+import type { ColumnDef, ForeignKey, Page, TableDef } from '../api/types'
 import { useCatalogStore } from '../stores/catalog'
+import BulkUpsert from '../components/BulkUpsert.vue'
+import { useSessionStore } from '../stores/session'
 import DataGrid from '../components/DataGrid.vue'
 import RowModal from '../components/RowModal.vue'
 import StructureEditor from './structure/StructureEditor.vue'
 import TableSQL from './structure/TableSQL.vue'
+import { downloadExport } from '../lib/download'
 import { buildRowsQuery, type RowsFilter, type RowsSort } from '../lib/tableQuery'
 
 const { t } = useI18n()
@@ -77,6 +85,7 @@ const route = useRoute()
 const router = useRouter()
 const notification = useNotification()
 const catalog = useCatalogStore()
+const session = useSessionStore()
 
 // vue-router hands the path params over already decoded; re-encode them
 // for the api path (identifiers may contain %, spaces, ...).
@@ -257,15 +266,25 @@ const rowModal = ref<RowModalState>({ show: false, mode: 'insert', row: null, pk
 // Richer column definitions (enum values, defaults) come from the TableDef
 // endpoint; on failure the modal falls back to the page's ColumnMeta list.
 const defColumns = ref<ColumnDef[] | null>(null)
-const modalColumns = computed<ColumnDef[]>(() => defColumns.value ?? page.value?.columns ?? [])
+const defForeignKeys = ref<ForeignKey[]>([])
+const modalColumns = computed<ColumnDef[]>(() => (defColumns.value ?? page.value?.columns ?? []).filter(col => !('generated' in col && col.generated)))
+let defRequest = 0
 
-async function fetchDef(): Promise<void> {
+async function fetchDef(): Promise<boolean> {
+  const request = ++defRequest
+  const path = catalog.path(rowsPath.value)
   try {
-    const def = await api<TableDef>('GET', catalog.path(rowsPath.value))
+    const def = await api<TableDef>('GET', path)
+    if (request !== defRequest || path !== catalog.path(rowsPath.value)) return false
     defColumns.value = def.columns
+    defForeignKeys.value = def.foreignKeys ?? []
+    return true
   } catch {
+    if (request !== defRequest || path !== catalog.path(rowsPath.value)) return false
     // Definition unavailable: ColumnMeta-only rendering is good enough.
     defColumns.value = null
+    defForeignKeys.value = []
+    return true
   }
 }
 
@@ -283,6 +302,32 @@ function onEditRow(row: EditableRow): void {
   defColumns.value = null
   void fetchDef()
   rowModal.value = { show: true, mode: 'edit', row: values, pk: row.__pk }
+}
+
+async function onCopyRow(row: EditableRow): Promise<void> {
+  const sourcePath = catalog.path(rowsPath.value)
+  if (!await fetchDef() || catalog.path(rowsPath.value) !== sourcePath) return
+  const columns = defColumns.value ?? page.value?.columns ?? []
+  const values: Record<string, unknown> = {}
+  for (const col of columns) {
+    if (('autoIncrement' in col && col.autoIncrement) || ('generated' in col && col.generated)) continue
+    values[col.name] = row[col.name]
+  }
+  rowModal.value = { show: true, mode: 'insert', row: values, pk: null }
+}
+
+async function copyRows(where: Record<string,unknown>[]): Promise<void> {
+  try { await api('POST',catalog.path(`${rowsPath.value}/copy-rows`),{where});await refetch() }
+  catch(err) {notifyError(err)}
+}
+
+async function exportSelection(): Promise<void> {
+  try {
+    await downloadExport(db.value, {
+      format: 'csv', tables: [table.value],
+      query: { filters: filters.value.map(f => ({column:f.column,operator:f.op,value:f.value})), sorts: sort.value ? [sort.value] : [] },
+    }, catalog.schemaAware ? catalog.schema : null)
+  } catch (err) { notifyError(err) }
 }
 
 function onRowSaved(): void {

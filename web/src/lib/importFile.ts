@@ -57,9 +57,8 @@ export function buildImportFormData(type: 'sql' | 'csv', file: File, csv: Import
  * POSTs the import form and consumes the application/x-ndjson response:
  * every {"done":N,"total":M} line calls onProgress, an error line
  * throws (the stream stops there) and the final {"ok":true} resolves.
- * The read phase of an SQL import produces no progress lines — the
- * server reports execution position only — so the caller shows an
- * indeterminate state until the first line arrives.
+ * SQL import reports consumed bytes after each executed statement with
+ * total=0 until EOF; the caller shows an indeterminate state until then.
  */
 export async function runImport(
   db: string,

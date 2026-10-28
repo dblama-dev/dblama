@@ -8,7 +8,7 @@
       <n-button size="small" type="primary" @click="emit('add-row')">
         {{ t('grid.addRow') }}
       </n-button>
-      <n-popconfirm v-if="hasPk && checkedKeys.length > 0" @positive-click="onDeleteSelected">
+      <n-popconfirm v-if="checkedKeys.length > 0" @positive-click="onDeleteSelected">
         <template #trigger>
           <n-button size="small" type="error">
             {{ t('grid.deleteSelected') }} ({{ checkedKeys.length }})
@@ -16,9 +16,14 @@
         </template>
         {{ t('grid.confirmDelete') }}
       </n-popconfirm>
+      <n-popconfirm v-if="checkedKeys.length > 0" @positive-click="copySelected">
+        <template #trigger><n-button size="small">{{ t('grid.copySelected') }} ({{ checkedKeys.length }})</n-button></template>
+        {{ t('grid.copyConfirm') }}
+      </n-popconfirm>
       <n-button size="small" quaternary @click="emit('refresh')">
         {{ t('grid.refresh') }}
       </n-button>
+      <n-button size="small" data-testid="grid-export" @click="emit('export-selection')">{{ t('grid.exportSelection') }}</n-button>
     </div>
 
     <div class="datagrid__filters">
@@ -83,6 +88,8 @@ import {
   NSelect,
 } from 'naive-ui'
 
+import { useMetadataStore } from '../stores/metadata'
+import BlobValue from './BlobValue.vue'
 import type { ColumnMeta } from '../api/types'
 import { isNullOperator, ROW_FILTER_OPERATORS, type RowsFilter, type RowsSort } from '../lib/tableQuery'
 
@@ -121,11 +128,16 @@ const emit = defineEmits<{
   refresh: []
   'add-row': []
   'edit-row': [row: GridRow]
+  'copy-row': [row: GridRow]
+  'copy-rows': [keys: Record<string,unknown>[]]
+  'export-selection': []
   'delete-row': [pk: Record<string, unknown>]
   'delete-rows': [pks: Record<string, unknown>[]]
 }>()
 
 const { t } = useI18n()
+const metadata = useMetadataStore()
+void metadata.load()
 
 const hasPk = computed(() => props.pkColumns.length > 0)
 
@@ -148,6 +160,7 @@ const tableData = computed<GridRow[]>(() => {
       record.__key = props.pkColumns.map((name) => String(pk[name])).join(' | ')
     } else {
       record.__key = `__idx_${offset + i}`
+      record.__pk = Object.fromEntries(props.columns.map((meta, j) => [meta.name, row[j]]))
     }
     return record
   })
@@ -168,16 +181,14 @@ function renderCell(value: unknown): ReturnType<typeof h> {
     return h('span', { class: 'datagrid__null', style: 'font-style: italic' }, t('grid.null'))
   }
   if (typeof value === 'string' && HEX_RE.test(value)) {
-    return h('code', { class: 'datagrid__hex', title: value }, value)
+    return h(BlobValue, { hex: value })
   }
   return String(value)
 }
 
 const gridColumns = computed<DataTableColumns<GridRow>>(() => {
   const cols: DataTableColumns<GridRow> = []
-  if (hasPk.value) {
-    cols.push({ type: 'selection' })
-  }
+  cols.push({ type: 'selection' })
   for (const meta of props.columns) {
     cols.push({
       title: meta.name,
@@ -188,12 +199,13 @@ const gridColumns = computed<DataTableColumns<GridRow>>(() => {
       render: (row) => renderCell(row[meta.name]),
     })
   }
-  if (hasPk.value) {
+  {
     cols.push({
       title: t('grid.actions'),
       key: '__actions',
       render: (row) =>
         h('span', { class: 'datagrid__row-actions' }, [
+          h(NButton, { size: 'tiny', quaternary: true, 'data-testid': 'copy-row', onClick: () => emit('copy-row', row) }, { default: () => t('grid.copy') }),
           h(
             NButton,
             { size: 'tiny', quaternary: true, onClick: () => emit('edit-row', row) },
@@ -246,6 +258,13 @@ function onDeleteSelected(): void {
   checkedKeys.value = []
 }
 
+function copySelected(): void {
+  const selected = new Set(checkedKeys.value)
+  const keys = tableData.value.filter(row => selected.has(row.__key)).map(row => row.__pk).filter((key): key is Record<string,unknown> => key !== null)
+  if (keys.length) emit('copy-rows', keys)
+  checkedKeys.value=[]
+}
+
 // --- Pagination and sorting --------------------------------------------
 
 const pagination = computed(() => ({
@@ -291,7 +310,7 @@ const columnOptions = computed<SelectOption[]>(() =>
 )
 
 const operatorOptions = computed<SelectOption[]>(() =>
-  ROW_FILTER_OPERATORS.map((op) => ({ label: op, value: op })),
+  metadata.data?.operators.map(op => ({ label:op.label,value:op.value })) ?? ROW_FILTER_OPERATORS.map(op => ({label:op,value:op})),
 )
 
 function addDraft(): void {

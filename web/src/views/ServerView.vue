@@ -2,6 +2,7 @@
   <section class="server-view">
     <n-h2>{{ t('server.title') }}</n-h2>
     <n-alert v-if="error" type="error" :title="t('server.loadFailed')">{{ error }}</n-alert>
+    <DatabaseActions @changed="onDatabaseChanged" />
     <DatabaseTable :databases="databases" :loading="loading" @refresh="load" @open="openDb" />
   </section>
 </template>
@@ -14,6 +15,8 @@ import { NAlert, NH2 } from 'naive-ui'
 
 import { api } from '../api/client'
 import type { DatabaseInfo } from '../api/types'
+import DatabaseActions from '../components/DatabaseActions.vue'
+import { useCatalogStore } from '../stores/catalog'
 import DatabaseTable from '../components/DatabaseTable.vue'
 
 const { t } = useI18n()
@@ -37,6 +40,10 @@ async function load(): Promise<void> {
   }
 }
 
+async function onDatabaseChanged(): Promise<void> {
+  useCatalogStore().databaseRevision++
+  await load()
+}
 onMounted(load)
 
 /** Opens the database tree view for the clicked row. */

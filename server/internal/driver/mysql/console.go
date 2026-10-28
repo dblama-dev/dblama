@@ -3,6 +3,7 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	sqldriver "database/sql/driver"
 	"errors"
 	"fmt"
 	"strconv"
@@ -132,13 +133,13 @@ func (d *MysqlDriver) ExecSQL(ctx context.Context, db, query string, queryID str
 	// switch to another database.
 	var connID uint32
 	if err := conn.QueryRowContext(ctx, "SELECT CONNECTION_ID()").Scan(&connID); err != nil {
-		_ = conn.Close() // best-effort; the scan error is the real failure
+		discardConnection(conn) // the scan error is the real failure
 		return nil, fmt.Errorf("exec sql: read connection id: %w", err)
 	}
 	d.queries.add(queryID, conn, connID)
 	defer func() {
 		d.queries.remove(queryID)
-		_ = conn.Close()
+		discardConnection(conn)
 	}()
 
 	if db != d.loginDB {
@@ -361,4 +362,11 @@ func isRowStatement(stmt string) bool {
 			return false
 		}
 	}
+}
+
+// discardConnection prevents SQL console/import session state (USE, SET,
+// temporary tables and transactions) from leaking into later pooled requests.
+func discardConnection(conn *sql.Conn) {
+	_ = conn.Raw(func(any) error { return sqldriver.ErrBadConn })
+	_ = conn.Close()
 }

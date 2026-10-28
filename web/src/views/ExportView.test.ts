@@ -7,6 +7,7 @@ import { NAlert, NButton, NCheckbox, NNotificationProvider, NSelect } from 'naiv
 import type { TableInfo } from '../api/types'
 import i18n from '../i18n'
 import { useSessionStore } from '../stores/session'
+import { useCatalogStore } from '../stores/catalog'
 import ExportView from './ExportView.vue'
 
 // The view reads the :db route param only.
@@ -106,23 +107,38 @@ describe('ExportView', () => {
     document.body.innerHTML = ''
   })
 
-  it('renders format options, sql checkboxes and non-view table checkboxes', async () => {
+  it('renders SQL options and views alongside base tables', async () => {
     const wrapper = mountView(pinia)
     await flushPromises()
 
     const view = wrapper.findComponent(ExportView)
     expect(view.findComponent(NSelect).exists()).toBe(true)
-    // sql format: DROP IF EXISTS, IF NOT EXISTS, gzip — then one checkbox
-    // per non-view table (users, orders).
+    // Include views, DROP/IF NOT EXISTS, gzip and all three objects.
     const checkboxes = view.findAllComponents(NCheckbox)
-    expect(checkboxes).toHaveLength(5)
+    expect(checkboxes).toHaveLength(7)
     expect(view.text()).toContain('DROP IF EXISTS')
     expect(view.text()).toContain('IF NOT EXISTS')
     expect(view.text()).toContain('Сжимать (gzip)')
-    // Tables only, no views.
+    // SQL includes views and their dependencies.
     expect(view.text()).toContain('users')
     expect(view.text()).toContain('orders')
-    expect(view.text()).not.toContain('v_active')
+    expect(view.text()).toContain('v_active')
+  })
+
+  it('clears selected tables when the active schema changes', async () => {
+    const wrapper = mountView(pinia)
+    await flushPromises()
+    const view = wrapper.findComponent(ExportView)
+    view.findAllComponents(NCheckbox)[4]!.vm.$emit('update:checked', true)
+    await flushPromises()
+    expect(view.findAllComponents(NCheckbox)[4]!.props('checked')).toBe(true)
+    const catalog = useCatalogStore()
+    catalog.schemaAware = true
+    catalog.schema = 'other'
+    await flushPromises()
+    expect(view.findAllComponents(NCheckbox)[4]!.props('checked')).toBe(false)
+    expect(fetchMock).toHaveBeenCalledWith('/api/databases/mydb/tables?schema=other', expect.anything())
+    wrapper.unmount()
   })
 
   it('hides the sql-only checkboxes for a delimited format', async () => {
@@ -176,7 +192,7 @@ describe('ExportView', () => {
       }),
     )
     const body = JSON.parse(String(fetchMock.mock.calls[1][1].body))
-    expect(body).toEqual({ format: 'csv', tables: ['users'], dropIfExists: false, ifNotExists: false, gzip: false })
+    expect(body).toEqual({ format: 'csv', tables: ['users'], includeViews: false, dropIfExists: false, ifNotExists: false, gzip: false })
     // The dump reaches the browser as a download and the UI confirms it.
     expect(URL.createObjectURL).toHaveBeenCalled()
     // Notifications render into a document.body portal.
@@ -188,14 +204,14 @@ describe('ExportView', () => {
     await flushPromises()
 
     const view = wrapper.findComponent(ExportView)
-    view.findAllComponents(NCheckbox)[0].vm.$emit('update:checked', true) // dropIfExists
-    view.findAllComponents(NCheckbox)[2].vm.$emit('update:checked', true) // gzip
+    view.findAllComponents(NCheckbox)[1].vm.$emit('update:checked', true) // dropIfExists
+    view.findAllComponents(NCheckbox)[3].vm.$emit('update:checked', true) // gzip
     await nextTick()
     await view.find('[data-testid="export-submit"]').trigger('click')
     await flushPromises()
 
     const body = JSON.parse(String(fetchMock.mock.calls[1][1].body))
-    expect(body).toEqual({ format: 'sql', tables: [], dropIfExists: true, ifNotExists: false, gzip: true })
+    expect(body).toEqual({ format: 'sql', tables: [], includeViews: true, dropIfExists: true, ifNotExists: false, gzip: true })
   })
 
   it('warns and disables submit when the selected db differs from the login db', async () => {

@@ -1,11 +1,9 @@
 package postgres
 
 import (
-	"bufio"
-	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -14,23 +12,16 @@ import (
 	"github.com/hitslab/db-manager/server/internal/sqlgen"
 )
 
-// The PG importer mirrors the MySQL one (mysql/import.go): the script is
-// fully buffered (documented v0.1 limitation — a 512 MiB API cap bounds
-// it; a chunk-safe streaming splitter is a recorded follow-up), gzip is
-// detected by magic bytes, statements are split by sqlgen.SplitStatements
-// and executed in order on a dedicated connection with the current schema
-// set via search_path (allowed there — the connection is one-shot).
-
 // errExcerptLen caps the failing statement's text in an import error.
 const errExcerptLen = 100
 
-// maxDecompressedInputMB is the decompressed-size cap (same 512 MiB the
-// API layer caps the upload body at) — a decompression-bomb guard.
+// maxDecompressedInputMB bounds plain and decompressed SQL input.
 const maxDecompressedInputMB = 512
 
-// ImportSQL executes an SQL script read from r against database db on a
-// dedicated connection. PG dumps carry no DELIMITER directives, but the
-// splitter is mysql-client compatible and handles any that appear.
+// ImportSQL incrementally executes SQL statements on one dedicated connection.
+// Dollar-quoted functions and nested comments are kept intact. The current
+// schema is selected only on that connection, which is discarded afterwards.
+// Progress total stays unknown (0) until the final (N,N) callback.
 func (d *PostgresDriver) ImportSQL(ctx context.Context, db string, r io.Reader, progress func(done, total int64)) error {
 	if db == "" {
 		return fmt.Errorf("import sql: %w", sqlgen.ErrEmptyIdentifier)
@@ -38,15 +29,12 @@ func (d *PostgresDriver) ImportSQL(ctx context.Context, db string, r io.Reader, 
 	if db != d.loginDB {
 		return fmt.Errorf("import sql: database %s is not the login database %s", db, d.loginDB)
 	}
-	script, err := readImportInput(r)
+	input, err := sqlgen.OpenSQLImport(r, int64(maxDecompressedInputMB)<<20, true)
 	if err != nil {
-		return fmt.Errorf("import sql: %w", err)
+		return fmt.Errorf("import sql: read input: %w", err)
 	}
-	stmts := sqlgen.SplitStatements(script)
-	if len(stmts) == 0 {
-		return fmt.Errorf("import sql: no statements in the input")
-	}
-
+	defer func() { _ = input.Close() }()
+	scanner := sqlgen.NewPostgresStatementStream(input)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	conn, err := d.db.Conn(ctx)
@@ -54,69 +42,39 @@ func (d *PostgresDriver) ImportSQL(ctx context.Context, db string, r io.Reader, 
 		return fmt.Errorf("import sql: conn: %w", err)
 	}
 	defer discardConnection(conn)
-
-	schema := d.schemaFor(ctx)
-	if _, err := conn.ExecContext(ctx, "SET search_path TO "+sqlgen.QuoteIdentPg(schema)); err != nil {
+	if _, err := conn.ExecContext(ctx, "SET search_path TO "+sqlgen.QuoteIdentPg(d.schemaFor(ctx))); err != nil {
 		return fmt.Errorf("import sql: set search_path: %w", err)
 	}
-
-	pos := 0
-	for i, stmt := range stmts {
+	count := 0
+	for {
 		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("import sql: cancelled after %d statements: %w", i, err)
+			return fmt.Errorf("import sql: cancelled after %d statements: %w", count, err)
 		}
+		stmt, err := scanner.Next()
+		if err == io.EOF {
+			break
+		}
+		if errors.Is(err, sqlgen.ErrSQLImportTooLarge) {
+			return fmt.Errorf("import sql: decompressed dump exceeds %dMB: %w", maxDecompressedInputMB, err)
+		}
+		if err != nil {
+			return fmt.Errorf("import sql: read statement %d: %w", count+1, err)
+		}
+		count++
 		if _, err := conn.ExecContext(ctx, stmt); err != nil {
-			return fmt.Errorf("import sql: statement %d (%s): %w",
-				i+1, excerptAt(script, pos), err)
+			return fmt.Errorf("import sql: statement %d (%s): %w", count, strings.TrimSpace(stmt[:min(len(stmt), errExcerptLen)]), err)
 		}
-		if idx := strings.Index(script[pos:], stmt); idx >= 0 {
-			pos += idx + len(stmt)
-		} else {
-			pos = len(script)
-		}
-		pos = min(pos, len(script))
 		if progress != nil {
-			progress(int64(pos), int64(len(script)))
+			progress(scanner.Offset(), 0)
 		}
+	}
+	if count == 0 {
+		return fmt.Errorf("import sql: no statements in the input")
 	}
 	if progress != nil {
-		progress(int64(len(script)), int64(len(script)))
+		progress(scanner.Offset(), scanner.Offset())
 	}
 	return nil
-}
-
-// readImportInput buffers the whole script, decompressing gzip (magic
-// 0x1f 0x8b) through a decompressed-size cap.
-func readImportInput(r io.Reader) (string, error) {
-	br := bufio.NewReader(r)
-	magic, err := br.Peek(2)
-	if err != nil && err != io.EOF {
-		return "", fmt.Errorf("read input: %w", err)
-	}
-	var src io.Reader = br
-	if len(magic) == 2 && magic[0] == 0x1f && magic[1] == 0x8b {
-		gz, gerr := gzip.NewReader(br)
-		if gerr != nil {
-			return "", fmt.Errorf("read input: gzip: %w", gerr)
-		}
-		defer func() { _ = gz.Close() }()
-		src = io.LimitReader(gz, int64(maxDecompressedInputMB)*1024*1024+1)
-	}
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, src); err != nil {
-		return "", fmt.Errorf("read input: %w", err)
-	}
-	script := buf.String()
-	if int64(len(script)) > int64(maxDecompressedInputMB)*1024*1024 {
-		return "", fmt.Errorf("read input: decompressed dump exceeds %dMB", maxDecompressedInputMB)
-	}
-	return script, nil
-}
-
-// excerptAt returns up to errExcerptLen bytes of script starting at pos.
-func excerptAt(script string, pos int) string {
-	end := min(pos+errExcerptLen, len(script))
-	return strings.TrimSpace(script[pos:end])
 }
 
 // ImportCSV loads a delimited file into table in the current schema:

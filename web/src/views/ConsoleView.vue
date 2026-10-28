@@ -13,8 +13,7 @@
       <n-button v-if="c.executing.value" size="small" type="error" @click="cancelRun">
         {{ t('console.cancel') }}
       </n-button>
-      <!-- TODO(P5): SQL formatter button; the i18n key console.format is
-           already reserved (no external formatter library in П3). -->
+      <n-button size="small" :disabled="c.executing.value" @click="formatEditor">{{ t('console.format') }}</n-button>
       <n-select
         class="console__history"
         size="small"
@@ -58,6 +57,7 @@ import { basicSetup } from 'codemirror'
 import type { SelectOption } from 'naive-ui'
 import { NAlert, NButton, NSelect } from 'naive-ui'
 
+import { formatSQL } from '../lib/formatSQL'
 import ResultGrid from '../components/ResultGrid.vue'
 import { useConsole } from '../lib/useConsole'
 import { useCatalogStore } from '../stores/catalog'
@@ -81,6 +81,15 @@ const c = useConsole({
   serverKey: serverKey.value,
   schema: () => catalog.schemaAware ? catalog.schema : null,
 })
+
+function formatEditor(): void {
+  if (!editor) return
+  try {
+    replaceDoc(editor, formatSQL(editor.state.doc.toString(), session.sessionInfo?.driver.flavor ?? 'mysql'))
+  } catch (err) {
+    c.error.value = err instanceof Error ? err.message : String(err)
+  }
+}
 
 // --- CodeMirror editor -------------------------------------------------
 

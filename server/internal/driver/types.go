@@ -199,11 +199,13 @@ type ExecOpts struct {
 // IfNotExists only apply to the sql format; Gzip wraps the output in a
 // gzip stream. The dump targets the driver's own login database.
 type ExportRequest struct {
-	Format       string   `json:"format"`
-	Tables       []string `json:"tables"`
-	DropIfExists bool     `json:"dropIfExists,omitempty"`
-	IfNotExists  bool     `json:"ifNotExists,omitempty"`
-	Gzip         bool     `json:"gzip,omitempty"`
+	Query        *SelectQuery `json:"query,omitempty"`
+	IncludeViews bool         `json:"includeViews,omitempty"`
+	Format       string       `json:"format"`
+	Tables       []string     `json:"tables"`
+	DropIfExists bool         `json:"dropIfExists,omitempty"`
+	IfNotExists  bool         `json:"ifNotExists,omitempty"`
+	Gzip         bool         `json:"gzip,omitempty"`
 }
 
 // Result is one statement's outcome inside an ExecSQL batch. A
@@ -338,19 +340,16 @@ type Driver interface {
 	Export(ctx context.Context, db string, req ExportRequest, w io.Writer) error
 	// ImportSQL executes an SQL script read from r against database db
 	// on a dedicated connection (db other than the login database is
-	// selected via USE, mirroring ExecSQL). Statements are split by
-	// sqlgen.SplitStatements — mysql-client semantics with DELIMITER
-	// support, so DELIMITER-wrapped trigger/routine blocks are executed
-	// each as a single statement — and run in order through ExecContext;
+	// selected via USE, mirroring ExecSQL). A streaming SQL scanner keeps
+	// one statement in memory at a time. MySQL DELIMITER blocks and
+	// PostgreSQL dollar-quoted bodies remain intact and are executed in
+	// order through ExecContext;
 	// result rows, if any, are discarded. A gzip stream (magic 1f 8b) is
 	// decompressed transparently, so .gz dumps import directly.
 	//
-	// progress reports bytes consumed. PIN: the input is a stream of
-	// unknown total size, so it is consumed before execution and done
-	// tracks executed bytes only: progress(done, total) is called at
-	// every statement boundary (done = byte span consumed by the
-	// statements executed so far, total = full script size) and the
-	// final call reports done == total. A nil progress is allowed. The
+	// progress reports source bytes consumed. The input size is unknown,
+	// so total is 0 at each statement boundary and becomes done in the
+	// final successful callback. A nil progress is allowed. The
 	// first failing statement aborts the import: the error carries the
 	// statement's 1-based index and its first 100 characters as context,
 	// and the progress reported at that point reflects the position —

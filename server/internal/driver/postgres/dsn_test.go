@@ -1,6 +1,8 @@
 package postgres
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -63,5 +65,16 @@ func TestDSNRedactable(t *testing.T) {
 	}
 	if connCfg.Password != "****" {
 		t.Errorf("parsed Password = %q, want %q", connCfg.Password, "****")
+	}
+}
+
+func TestConnectMalformedConfigDoesNotLeakPassword(t *testing.T) {
+	const password = "secret-DSN-token"
+	_, err := Connect(context.Background(), driver.ConnConfig{Host: "localhost", Port: "not-a-port", User: "postgres", Password: password, Database: "app"})
+	if err == nil {
+		t.Fatal("malformed port accepted")
+	}
+	if strings.Contains(err.Error(), password) {
+		t.Fatalf("password leaked in malformed connection error: %v", err)
 	}
 }

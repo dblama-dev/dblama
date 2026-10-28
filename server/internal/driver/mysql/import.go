@@ -1,9 +1,6 @@
 package mysql
 
 import (
-	"bufio"
-	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/csv"
 	"errors"
@@ -16,159 +13,69 @@ import (
 	"github.com/hitslab/db-manager/server/internal/sqlgen"
 )
 
-// progressChunk is the read quantum of the input-consuming loop (the
-// script is buffered in chunks of this size; progress is reported per
-// executed statement, not per read chunk — see ImportSQL).
-const progressChunk = 64 * 1024
-
-// errExcerptLen caps the failing statement's text embedded in an import
-// error.
+// errExcerptLen caps SQL text embedded in an import error.
 const errExcerptLen = 100
 
-// gzip magic bytes (RFC 1952): every gzip stream starts with 0x1f 0x8b.
-const (
-	gzipMagic0 = 0x1f
-	gzipMagic1 = 0x8b
-)
-
-// maxDecompressedInputMB is the decompressed-size cap in megabytes —
-// the same 512 MiB the API layer caps the upload body at. A small .gz
-// can decompress to gigabytes (a decompression bomb), and the script is
-// fully buffered, so the gzip stream is read through a LimitReader of
-// cap+1 and an input that exceeds the cap is rejected.
+// maxDecompressedInputMB bounds gzip output to the API upload size.
 const maxDecompressedInputMB = 512
 
-// maxDecompressedInput is maxDecompressedInputMB in bytes. A var only so
-// the cap logic can be unit-tested with a tiny value (the error text
-// stays pinned to the production cap); production code must not write it.
+// maxDecompressedInput is replaceable by the existing small-limit unit tests.
 var maxDecompressedInput int64 = maxDecompressedInputMB << 20
 
-// ImportSQL executes an SQL script read from r against database db on a
-// dedicated connection and reports byte progress. See the driver.Driver
-// contract for the full semantics; the implementation pins are:
-//
-//   - the whole stream is read into memory once (an SQL script is not
-//     chunk-executable: a statement may straddle any read boundary), so
-//     the memory footprint is the script size; the gzip magic 1f 8b is
-//     detected before reading, so .gz dumps decompress transparently;
-//   - statements are split by sqlgen.SplitStatements — mysql-client
-//     semantics with DELIMITER support, so a DELIMITER-wrapped
-//     trigger/routine block runs as the single statement it must be —
-//     and executed in order through ExecContext on one dedicated
-//     connection; db other than the login database is selected via USE
-//     on that connection (the ExecSQL mechanics). Result rows, if any,
-//     are discarded;
-//   - progress: done is the byte span of the script consumed by
-//     executed statements, total is the full script size. The stream is
-//     consumed before execution (its size is unknown until it ends, and
-//     a read-phase done would regress to 0 when execution starts, so
-//     progress reports execution position only); progress(done=pos,
-//     total=N) is called at every statement boundary and the final call
-//     reports done == total. A nil progress is allowed;
-//   - the first failing statement aborts the import: statements before
-//     it have been applied and are not rolled back, the error carries
-//     the statement's 1-based index and its first errExcerptLen
-//     characters, and the progress position stands at the failing
-//     statement's start.
+// ImportSQL reads and executes one statement at a time, including DELIMITER
+// bodies. Memory is bounded by the largest statement. Progress reports source
+// bytes with total=0 until EOF, followed by (N,N). Earlier statements remain
+// applied if input parsing, decompression or execution later fails.
 func (d *MysqlDriver) ImportSQL(ctx context.Context, db string, r io.Reader, progress func(done, total int64)) error {
 	if db == "" {
 		return fmt.Errorf("import sql: %w: database name", sqlgen.ErrEmptyIdentifier)
 	}
-	if r == nil {
-		return fmt.Errorf("import sql: nil reader")
-	}
-
-	script, err := readImportInput(r)
+	input, err := sqlgen.OpenSQLImport(r, maxDecompressedInput, false)
 	if err != nil {
 		return fmt.Errorf("import sql: read input: %w", err)
 	}
-	if strings.TrimSpace(script) == "" {
-		return fmt.Errorf("import sql: empty script")
-	}
-
+	defer func() { _ = input.Close() }()
+	scanner := sqlgen.NewStatementStream(input)
 	conn, err := d.db.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("import sql: acquire connection: %w", err)
 	}
-	defer func() { _ = conn.Close() }()
-
+	defer discardConnection(conn)
 	if db != d.loginDB {
-		// The pool is bound to the login database; point the dedicated
-		// connection at the target database first (the ExecSQL
-		// mechanics), so the dump's unqualified statements land there.
 		if _, err := conn.ExecContext(ctx, "USE "+sqlgen.QuoteIdent(db)); err != nil {
 			return fmt.Errorf("import sql: switch to database %s: %w", db, err)
 		}
 	}
-
-	statements := sqlgen.SplitStatements(script)
-	pos := 0 // bytes of script consumed by executed statements
-	for i, stmt := range statements {
-		if progress != nil {
-			progress(int64(pos), int64(len(script)))
-		}
-		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("import sql: statement %d: %w", i+1, err)
-		}
-		if _, err := conn.ExecContext(ctx, stmt); err != nil {
-			return fmt.Errorf("import sql: statement %d: %s: %w", i+1, excerpt(stmt), err)
-		}
-		// Locate the executed statement's span so done tracks the
-		// script position, not just a statement counter. Splitting
-		// never alters statement text, so the text is always found;
-		// the fallback keeps progress monotonic even then.
-		if j := strings.Index(script[pos:], stmt); j >= 0 {
-			pos += j + len(stmt)
-		} else {
-			pos += len(stmt)
-		}
-	}
-	if progress != nil {
-		progress(int64(len(script)), int64(len(script)))
-	}
-	return nil
-}
-
-// readImportInput consumes r once and returns the script text. A gzip
-// stream (magic 1f 8b) is decompressed transparently, capped at
-// maxDecompressedInput so a decompression bomb cannot exhaust memory.
-// No progress is reported here: the stream's size is unknown until it
-// ends and a read-phase done would regress to 0 when execution starts
-// (see ImportSQL).
-func readImportInput(r io.Reader) (string, error) {
-	br := bufio.NewReader(r)
-	src := io.Reader(br)
-	gzipped := false
-	if magic, err := br.Peek(2); err == nil && magic[0] == gzipMagic0 && magic[1] == gzipMagic1 {
-		gz, err := gzip.NewReader(br)
-		if err != nil {
-			return "", err
-		}
-		defer func() { _ = gz.Close() }()
-		// cap+1: reading one byte past the cap is what tells "over the
-		// limit" apart from "exactly at it".
-		src = io.LimitReader(gz, maxDecompressedInput+1)
-		gzipped = true
-	}
-
-	var buf bytes.Buffer
-	chunk := make([]byte, progressChunk)
+	count := 0
 	for {
-		n, rerr := src.Read(chunk)
-		if n > 0 {
-			buf.Write(chunk[:n])
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("import sql: after %d statements: %w", count, err)
 		}
-		if rerr == io.EOF {
+		stmt, err := scanner.Next()
+		if err == io.EOF {
 			break
 		}
-		if rerr != nil {
-			return "", rerr
+		if errors.Is(err, sqlgen.ErrSQLImportTooLarge) {
+			return fmt.Errorf("import sql: decompressed dump exceeds %dMB: %w", maxDecompressedInputMB, err)
+		}
+		if err != nil {
+			return fmt.Errorf("import sql: read statement %d: %w", count+1, err)
+		}
+		count++
+		if _, err := conn.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("import sql: statement %d: %s: %w", count, excerpt(stmt), err)
+		}
+		if progress != nil {
+			progress(scanner.Offset(), 0)
 		}
 	}
-	if gzipped && int64(buf.Len()) > maxDecompressedInput {
-		return "", fmt.Errorf("decompressed dump exceeds %dMB", maxDecompressedInputMB)
+	if count == 0 {
+		return fmt.Errorf("import sql: empty script")
 	}
-	return buf.String(), nil
+	if progress != nil {
+		progress(scanner.Offset(), scanner.Offset())
+	}
+	return nil
 }
 
 // excerpt returns s's first errExcerptLen characters for error context.

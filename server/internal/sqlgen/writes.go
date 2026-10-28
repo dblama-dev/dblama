@@ -93,8 +93,12 @@ func buildUpdate(d Dialect, table string, cols []string, where map[string]any) (
 			if k == "" {
 				return "", nil, fmt.Errorf("%w: where column", ErrEmptyIdentifier)
 			}
-			conds[i] = d.QuoteIdent(k) + "=" + ph.next()
-			args = append(args, where[k])
+			if where[k] == nil {
+				conds[i] = d.QuoteIdent(k) + " IS NULL"
+			} else {
+				conds[i] = d.QuoteIdent(k) + "=" + ph.next()
+				args = append(args, where[k])
+			}
 		}
 		query += " WHERE " + strings.Join(conds, " AND ")
 	}
@@ -136,8 +140,12 @@ func buildDelete(d Dialect, table string, where map[string]any) (query string, a
 			if k == "" {
 				return "", nil, fmt.Errorf("%w: where column", ErrEmptyIdentifier)
 			}
-			conds[i] = d.QuoteIdent(k) + "=" + ph.next()
-			args = append(args, where[k])
+			if where[k] == nil {
+				conds[i] = d.QuoteIdent(k) + " IS NULL"
+			} else {
+				conds[i] = d.QuoteIdent(k) + "=" + ph.next()
+				args = append(args, where[k])
+			}
 		}
 		query += " WHERE " + strings.Join(conds, " AND ")
 	}

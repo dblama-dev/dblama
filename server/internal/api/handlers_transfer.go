@@ -10,11 +10,11 @@ import (
 
 	"github.com/hitslab/db-manager/server/internal/driver"
 	"github.com/hitslab/db-manager/server/internal/session"
+	"github.com/hitslab/db-manager/server/internal/sqlgen"
 )
 
 // importBodyLimit caps the whole multipart import request at 512 MiB
-// (file plus form fields); ImportSQL buffers internally, so an unbounded
-// body would let a client exhaust server memory.
+// (file plus form fields); it also limits the input read by streaming imports.
 const importBodyLimit = 512 << 20
 
 // exportFormats maps an ExportRequest.Format to its response content type
@@ -84,6 +84,16 @@ func (s *apiServer) handleExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Query != nil {
+		if len(req.Tables) != 1 || req.Query.Offset < 0 || req.Query.Limit < 0 {
+			WriteErr(w, 400, ErrBadRequest("selection export requires one table and nonnegative paging"))
+			return
+		}
+		if _, _, err := sqlgen.BuildSelect(req.Tables[0], *req.Query); err != nil {
+			WriteErr(w, 400, ErrBadRequest(err.Error()))
+			return
+		}
+	}
 	filename := meta.filename
 	if req.Gzip {
 		filename += ".gz"
@@ -180,6 +190,11 @@ func (s *apiServer) handleImport(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, ErrBadRequest("file is required"))
 		return
 	}
+
+	// HTTP/1 normally drains and closes the unread request body when the
+	// response is flushed. SQL imports read and acknowledge one statement at
+	// a time, so keep both directions open until the file part reaches EOF.
+	_ = http.NewResponseController(w).EnableFullDuplex()
 
 	sess, _ := session.FromContext(r.Context())
 	w.Header().Set("Content-Type", "application/x-ndjson")

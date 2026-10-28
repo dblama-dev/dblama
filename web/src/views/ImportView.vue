@@ -54,8 +54,8 @@
         <n-progress
           type="line"
           :percentage="percentage"
-          :indeterminate="importing && !progressStarted"
-          :show-indicator="progressStarted"
+          :indeterminate="importing && total === 0"
+          :show-indicator="progressStarted && total > 0"
         />
       </div>
 

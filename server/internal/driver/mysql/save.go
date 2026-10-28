@@ -63,6 +63,9 @@ func (d *MysqlDriver) SaveTable(ctx context.Context, db, table string, desired d
 // backtick-quoted and every string literal is SQL-escaped from
 // structured values.
 func buildCreateTable(db string, d driver.TableDef) (string, error) {
+	if err := driver.ValidateForeignKeys(d.ForeignKeys, false); err != nil {
+		return "", err
+	}
 	if d.NewName == "" {
 		return "", fmt.Errorf("create table: table name is empty")
 	}
@@ -480,6 +483,19 @@ func indexColumnsFragment(cols []driver.IndexColumn) (string, error) {
 
 // foreignKeyFragment renders one inline CONSTRAINT ... FOREIGN KEY.
 func foreignKeyFragment(fk driver.ForeignKey) (string, error) {
+	if err := driver.ValidateForeignKeys([]driver.ForeignKey{fk}, false); err != nil {
+		return "", err
+	}
+	fk.OnDelete = strings.ToUpper(strings.TrimSpace(fk.OnDelete))
+	fk.OnUpdate = strings.ToUpper(strings.TrimSpace(fk.OnUpdate))
+	if fk.OnDelete == "SET DEFAULT" || fk.OnUpdate == "SET DEFAULT" {
+		return "", fmt.Errorf("%w: MySQL does not support SET DEFAULT foreign key actions", driver.ErrObjectValidation)
+	}
+	ref := sqlgen.QuoteIdent(fk.RefTable)
+	if fk.RefSchema != "" {
+		ref = qualifiedIdent(fk.RefSchema, fk.RefTable)
+	}
+
 	if len(fk.Columns) == 0 || len(fk.RefColumns) == 0 {
 		return "", fmt.Errorf("foreign key %s needs columns on both sides", fk.Name)
 	}
@@ -500,7 +516,7 @@ func foreignKeyFragment(fk driver.ForeignKey) (string, error) {
 		sb.WriteString("CONSTRAINT " + sqlgen.QuoteIdent(fk.Name) + " ")
 	}
 	sb.WriteString("FOREIGN KEY (" + strings.Join(cols, ", ") + ") REFERENCES " +
-		quoteQualifiedIdent(fk.RefTable) + " (" + strings.Join(refs, ", ") + ")")
+		ref + " (" + strings.Join(refs, ", ") + ")")
 	if fk.OnDelete != "" {
 		sb.WriteString(" ON DELETE " + fk.OnDelete)
 	}
@@ -508,17 +524,6 @@ func foreignKeyFragment(fk driver.ForeignKey) (string, error) {
 		sb.WriteString(" ON UPDATE " + fk.OnUpdate)
 	}
 	return sb.String(), nil
-}
-
-// quoteQualifiedIdent backtick-quotes each dot-separated part of a
-// possibly schema-qualified identifier.
-func quoteQualifiedIdent(name string) string {
-	parts := strings.Split(name, ".")
-	quoted := make([]string, len(parts))
-	for i, p := range parts {
-		quoted[i] = sqlgen.QuoteIdent(p)
-	}
-	return strings.Join(quoted, ".")
 }
 
 // charsetFromCollation derives the character set of a collation name:

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NInput, NInputNumber } from 'naive-ui'
+import { NAutoComplete, NInput, NInputNumber } from 'naive-ui'
 
+import { useMetadataStore } from '../../stores/metadata'
 import type { TableOptions } from '../../api/types'
 
 // Table options editor: engine, collation, comment and the AUTO_INCREMENT
@@ -13,6 +14,8 @@ const props = defineProps<{ options: TableOptions }>()
 const emit = defineEmits<{ 'update:options': [value: TableOptions] }>()
 
 const { t } = useI18n()
+const metadata = useMetadataStore()
+void metadata.load()
 
 // Local writable mirror so naive-ui inputs can bind directly; every change
 // is re-emitted to the parent.
@@ -34,7 +37,8 @@ function update(patch: Partial<TableOptions>): void {
     </label>
     <label class="struct-field struct-field--collation">
       <span class="struct-field__label">{{ t('structure.collation') }}</span>
-      <NInput
+      <NAutoComplete
+        :options="metadata.data?.collations.map(c => c.name) ?? []"
         :value="model.collation ?? ''"
         @update:value="update({ collation: $event })"
       />

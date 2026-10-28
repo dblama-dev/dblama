@@ -13,6 +13,7 @@ export const useCatalogStore = defineStore('catalog', {
     loading: false,
     error: null as string | null,
     requestID: 0,
+    databaseRevision: 0,
     // Schema support (PostgreSQL): the current schema (null = driver
     // default "public") and whether the driver is schema-aware at all.
     schema: null as string | null,

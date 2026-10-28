@@ -200,17 +200,24 @@ describe('DataGrid', () => {
     expect(filtersEl.findComponent(NInput).props('disabled')).toBe(true)
   })
 
-  it('hides selection, row actions and shows a warning when the table has no pk', async () => {
+  it('uses all original values for row actions when there is no primary key', async () => {
     const wrapper = mountGrid({ pkColumns: [] })
-
     expect(wrapper.text()).toContain('У таблицы нет первичного ключа')
-    expect(wrapper.findComponent(NDataTable).props('rowKey')).toBeDefined()
-    // No checkbox column: no checkbox rendered anywhere in the grid.
-    expect(wrapper.findAll('.n-checkbox')).toHaveLength(0)
-    // No edit/delete buttons in rows.
-    const buttons = wrapper.findAll('button').map((b) => b.text())
-    expect(buttons).not.toContain('Изменить')
-    expect(buttons).not.toContain('Удалить')
+    const edits = wrapper.findAll('button').filter(b => b.text() === 'Изменить')
+    await edits[1]!.trigger('click')
+    expect(wrapper.emitted('edit-row')?.[0]?.[0]).toMatchObject({ __pk: {id:2,name:null} })
+    const deletes = wrapper.findAll('button').filter(b => b.text() === 'Удалить')
+    await deletes[1]!.trigger('click')
+    expect(wrapper.emitted('delete-row')).toEqual([[{id:2,name:null}]])
+    wrapper.unmount()
+  })
+  it('offers copying a row and exporting the current query', async () => {
+    const wrapper = mountGrid()
+    await wrapper.get('[data-testid=grid-export]').trigger('click')
+    expect(wrapper.emitted('export-selection')).toHaveLength(1)
+    await wrapper.findAll('[data-testid=copy-row]')[0]!.trigger('click')
+    expect(wrapper.emitted('copy-row')?.[0]?.[0]).toMatchObject({id:1,name:'alice'})
+    wrapper.unmount()
   })
 })
 

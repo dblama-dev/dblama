@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 
 import { useCatalogStore } from './catalog'
+import { useMetadataStore } from './metadata'
 import { api } from '../api/client'
 import type { DriverMeta, LoginForm, SessionInfo } from '../api/types'
 
@@ -19,6 +20,7 @@ export const useSessionStore = defineStore('session', {
     async login(form: LoginForm): Promise<void> {
       await api('POST', '/api/session', form)
       useCatalogStore().$reset()
+      useMetadataStore().clear()
       this.authChecked = false
       await this.fetchSession()
     },
@@ -29,6 +31,7 @@ export const useSessionStore = defineStore('session', {
         await api('DELETE', '/api/session')
       } finally {
         useCatalogStore().$reset()
+        useMetadataStore().clear()
         this.sessionInfo = null
         this.authChecked = false
       }

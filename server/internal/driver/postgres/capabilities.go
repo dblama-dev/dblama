@@ -63,7 +63,7 @@ func (d *PostgresDriver) CreateSequence(ctx context.Context, name string, increm
 		return fmt.Errorf("create sequence: %w", err)
 	}
 	inc := ""
-	if increment > 1 {
+	if increment != 0 && increment != 1 {
 		inc = fmt.Sprintf(" INCREMENT BY %d", increment)
 	}
 	if _, err := d.db.ExecContext(ctx, "CREATE SEQUENCE "+qual+inc); err != nil {

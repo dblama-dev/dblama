@@ -1,0 +1,28 @@
+export const databaseMessages = {
+  en: { databaseOps: {
+    createDatabase: 'Create database', renameDatabase: 'Rename database', dropDatabase: 'Drop database',
+    create: 'Create', rename: 'Rename', confirmDrop: 'Confirm drop', cancel: 'Cancel',
+    name: 'Database name', collation: 'Default collation', serverDefault: 'Server default',
+    confirmName: 'Type the database name to confirm deletion: {name}',
+    dropWarning: 'All objects and data in this database will be permanently deleted.',
+    renameWarning: 'MySQL rename requires a maintenance window: stop concurrent schema changes. Tables are copied before the source is removed. Databases with views, triggers, routines, events or foreign keys must be transferred through SQL export/import.',
+    connectedWarning: 'Before dropping or renaming the connected database, reconnect to another database (PostgreSQL) or without a default database (MySQL).',
+    copyTables: 'Copy tables', moveTables: 'Move tables', copy: 'Copy', move: 'Move',
+    target: 'Target database', selected: 'Selected tables: {count}', openTarget: 'Open target database',
+    transferWarning: 'Existing target tables are never overwritten. Copying tables with foreign keys or triggers requires SQL export/import.',
+    moveWarning: 'Moving removes the selected tables from this database.',
+  } },
+  ru: { databaseOps: {
+    createDatabase: 'Создать БД', renameDatabase: 'Переименовать БД', dropDatabase: 'Удалить БД',
+    create: 'Создать', rename: 'Переименовать', confirmDrop: 'Подтвердить удаление', cancel: 'Отмена',
+    name: 'Имя базы данных', collation: 'Сортировка по умолчанию', serverDefault: 'По умолчанию на сервере',
+    confirmName: 'Введите имя БД для подтверждения удаления: {name}',
+    dropWarning: 'Все объекты и данные этой базы будут удалены без возможности восстановления.',
+    renameWarning: 'Переименование MySQL требует окна обслуживания: остановите изменения структуры. Таблицы копируются перед удалением исходной БД. Базы с представлениями, триггерами, процедурами, событиями или внешними ключами переносите через экспорт и импорт SQL.',
+    connectedWarning: 'Перед удалением или переименованием текущей БД подключитесь к другой базе (PostgreSQL) или без базы по умолчанию (MySQL).',
+    copyTables: 'Копировать таблицы', moveTables: 'Перенести таблицы', copy: 'Копировать', move: 'Перенести',
+    target: 'Целевая база', selected: 'Выбрано таблиц: {count}', openTarget: 'Открыть целевую базу',
+    transferWarning: 'Существующие таблицы не перезаписываются. Для копирования таблиц с внешними ключами или триггерами используйте экспорт и импорт SQL.',
+    moveWarning: 'Перенос удалит выбранные таблицы из текущей базы.',
+  } },
+}

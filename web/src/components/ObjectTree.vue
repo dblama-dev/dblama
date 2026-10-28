@@ -12,11 +12,13 @@
       :value="catalog.schema" :options="schemas.map(name => ({ label: name, value: name }))"
       :placeholder="t('tree.schemas')" size="small" @update:value="selectSchema" />
     <n-alert v-if="schemaError" type="error">{{ schemaError }}</n-alert>
-    <n-modal v-model:show="sequenceDialog" preset="card" :title="t('tree.newSequence')" style="width: 380px">
-      <n-input v-model:value="sequenceName" :placeholder="t('tree.sequenceName')" data-testid="sequence-name" />
-      <n-input-number v-model:value="sequenceIncrement" :min="1" :precision="0" />
-      <n-button :disabled="!sequenceName.trim() || sequenceBusy" :loading="sequenceBusy"
-        data-testid="sequence-create" @click="addSequence">{{ t('tree.newSequence') }}</n-button>
+    <n-modal v-model:show="sequenceDialog" preset="card" :title="t(sequenceEditName ? 'tree.editSequence' : 'tree.newSequence')" style="width: 380px">
+      <n-input v-model:value="sequenceName" :disabled="sequenceEditName !== null" :placeholder="t('tree.sequenceName')" data-testid="sequence-name" />
+      <label>{{ t('tree.sequenceIncrement') }}</label>
+      <n-input-number v-model:value="sequenceIncrement" :min="-Number.MAX_SAFE_INTEGER" :max="Number.MAX_SAFE_INTEGER" :precision="0" />
+      <template v-if="sequenceEditName"><label>{{ t('tree.sequenceRestart') }}</label><n-input-number v-model:value="sequenceRestart" :min="-Number.MAX_SAFE_INTEGER" :max="Number.MAX_SAFE_INTEGER" :precision="0" clearable /></template>
+      <n-button :disabled="!sequenceName.trim() || sequenceIncrement === 0 || sequenceBusy" :loading="sequenceBusy"
+        data-testid="sequence-create" @click="addSequence">{{ t(sequenceEditName ? 'row.save' : 'tree.newSequence') }}</n-button>
     </n-modal>
     <n-input
       v-model:value="search"
@@ -49,7 +51,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { NAlert, NButton, NInput, NSelect, NTree, NModal, NInputNumber, NPopconfirm, type TreeOption } from 'naive-ui'
 
-import { fetchSchemas, fetchSequences, createSequence, dropSequence } from '../lib/schema'
+import { fetchSchemas, fetchSequences, createSequence, dropSequence, alterSequence } from '../lib/schema'
 import type { SequenceInfo } from '../api/types'
 import { api } from '../api/client'
 import { useCatalogStore } from '../stores/catalog'
@@ -69,6 +71,8 @@ const sequences = ref<SequenceInfo[]>([])
 const schemaError = ref('')
 const sequenceDialog = ref(false)
 const sequenceName = ref('')
+const sequenceEditName = ref<string | null>(null)
+const sequenceRestart = ref<number | null>(null)
 const sequenceIncrement = ref<number | null>(1)
 const sequenceBusy = ref(false)
 let schemaLoadID = 0
@@ -92,7 +96,9 @@ async function addSequence(): Promise<void> {
   sequenceBusy.value = true
   schemaError.value = ''
   try {
-    await createSequence(sequenceName.value, sequenceIncrement.value ?? 1, catalog.schema ?? 'public')
+    if (sequenceEditName.value) {
+      await alterSequence(sequenceEditName.value, {increment: sequenceIncrement.value ?? 1, ...(sequenceRestart.value === null ? {} : {restartWith: sequenceRestart.value})}, catalog.schema ?? 'public')
+    } else await createSequence(sequenceName.value, sequenceIncrement.value ?? 1, catalog.schema ?? 'public')
     sequenceDialog.value = false
     sequenceName.value = ''
     await loadSequences()
@@ -116,7 +122,7 @@ const dbOptions = computed(() => dbs.value.map((name) => ({ label: name, value: 
 /** Loads the database list and preselects the session database, falling
  * back to the first listed database. Tables of the selection are fetched
  * through the catalog store. */
-onMounted(async () => {
+async function loadDatabases(): Promise<void> {
   catalog.schemaAware = session.sessionInfo?.caps.schemas ?? false
   if (catalog.schemaAware) {
     catalog.schema ??= 'public'
@@ -135,11 +141,13 @@ onMounted(async () => {
   } finally {
     dbsLoading.value = false
   }
-  const initial = session.sessionInfo?.database
+  const initial = db.value ?? session.sessionInfo?.database
   db.value = initial && dbs.value.includes(initial) ? initial : (dbs.value[0] ?? null)
   expandedKeys.value = defaultExpandedKeys(db.value)
   if (db.value !== null) await catalog.fetchTables(db.value)
-})
+}
+onMounted(loadDatabases)
+watch(() => catalog.databaseRevision, loadDatabases)
 
 
 watch(() => catalog.schema, async () => {
@@ -223,12 +231,12 @@ const treeData = computed<TreeOption[]>(() => {
   }
   if (session.sessionInfo?.caps.sequences) {
     children.push({ key: 'group:sequences', label: t('tree.sequences'),
-      suffix: () => h(NButton, { size: 'tiny', quaternary: true, 'data-testid': 'tree-add-sequence', title: t('tree.newSequence'), onClick: (e: MouseEvent) => { e.stopPropagation(); sequenceDialog.value = true } }, { default: () => '+' }),
+      suffix: () => h(NButton, { size: 'tiny', quaternary: true, 'data-testid': 'tree-add-sequence', title: t('tree.newSequence'), onClick: (e: MouseEvent) => { e.stopPropagation(); sequenceEditName.value = null; sequenceName.value = ''; sequenceIncrement.value = 1; sequenceRestart.value = null; sequenceDialog.value = true } }, { default: () => '+' }),
       children: sequences.value.filter(seq => matches(seq.name)).map(seq => ({ key: `sequence:${seq.name}`, label: seq.name, isLeaf: true,
-        suffix: () => h(NPopconfirm, { onPositiveClick: () => removeSequence(seq.name) }, {
+        suffix: () => h('span', [h(NButton, {size:'tiny',quaternary:true,title:t('tree.editSequence'),onClick:(e:MouseEvent)=>{e.stopPropagation();sequenceEditName.value=seq.name;sequenceName.value=seq.name;sequenceIncrement.value=seq.increment;sequenceRestart.value=null;sequenceDialog.value=true}}, {default:()=> '↺'}), h(NPopconfirm, { onPositiveClick: () => removeSequence(seq.name) }, {
           default: () => t('tree.dropSequenceConfirm', { name: seq.name }),
           trigger: () => h(NButton, { size: 'tiny', quaternary: true, title: t('tree.dropSequence'), onClick: (e: MouseEvent) => e.stopPropagation() }, { default: () => '×' }),
-        }),
+        })]),
       })),
     })
   }

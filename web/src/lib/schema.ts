@@ -18,3 +18,8 @@ export function withSchema(path: string, schema: string | null, aware: boolean):
   if (!aware || !schema) return path
   return `${path}${path.includes('?') ? '&' : '?'}schema=${encodeURIComponent(schema)}`
 }
+
+export async function alterSequence(name: string, changes: {restartWith?: number; increment?: number}, schema: string): Promise<void> {
+  if (changes.increment === 0 || Object.values(changes).some(value => !Number.isSafeInteger(value))) throw new Error('Sequence values must be safe nonzero integers')
+  await api('PATCH', withSchema(`/api/sequences/${encodeURIComponent(name)}`, schema, true), changes)
+}
