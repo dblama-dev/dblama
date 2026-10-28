@@ -252,8 +252,11 @@ func objectKeywordAt(source string, index int, word string) bool {
 	if end == len(source) {
 		return true
 	}
-	next := source[end]
-	return !((next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z') || (next >= '0' && next <= '9') || next == '_' || next >= 128)
+	return !objectWordByte(source[end])
+}
+
+func objectWordByte(next byte) bool {
+	return (next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z') || (next >= '0' && next <= '9') || next == '_' || next >= 128
 }
 
 // CreateTrigger creates or replaces a trigger from SQL source.
