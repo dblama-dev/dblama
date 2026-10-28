@@ -1,0 +1,15 @@
+.git
+.github
+.agents
+.worktrees
+.superpowers
+**/node_modules
+**/coverage
+**/*.log
+**/.env
+**/.env.*
+dist
+server/dbmanager
+server/web
+!server/web/index.html
+docs

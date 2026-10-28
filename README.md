@@ -1,0 +1,113 @@
+# db-manager
+
+A self-hosted database administration interface for MySQL, MariaDB and PostgreSQL. The Vue frontend is embedded in one Go executable. No application database or persistent password store is required.
+
+The integration matrix targets MySQL 8.4, MariaDB 11.4 and PostgreSQL 17. Features are shown according to the connected server's capabilities and account permissions.
+
+## Run a binary
+
+Extract the archive for your OS and architecture, verify it against `checksums.txt`, then run:
+
+```sh
+LISTEN=127.0.0.1:8080 ./dbmanager
+```
+
+On Windows, run `dbmanager.exe` and set environment variables through PowerShell or system settings. Release archives cover Linux, macOS and Windows on amd64 and arm64. They contain the executable, this README and the changelog. No public release has been published from this checkout.
+
+Open the server URL and log in with your database credentials. PostgreSQL requires the database name when connecting. Database connections originate from the db-manager server, so `localhost` names the server or container running db-manager.
+
+Session cookies are always `Secure`, `HttpOnly` and `SameSite=Strict`. Deploy behind an HTTPS reverse proxy for ordinary remote access. Browsers can treat HTTP localhost as a secure cookie exception for local development. The process serves HTTP; TLS termination belongs at the proxy. Current database connectors use unencrypted database connections, so place db-manager and its database servers on a trusted private network.
+
+## Run with Docker
+
+Build the image locally:
+
+```sh
+docker build -t db-manager:local .
+docker run --rm --read-only --cap-drop=ALL --security-opt=no-new-privileges \
+  -p 127.0.0.1:8080:8080 \
+  -e TRUSTED_SERVERS=db.example.internal:5432,mysql.example.internal:3306 \
+  db-manager:local
+```
+
+The final image uses `gcr.io/distroless/static-debian13:nonroot`, runs as UID/GID 65532, and has no shell. The frontend and Go compiler exist only in build stages. No writable application volume is needed. Connect the container to the database network, and expose its HTTP endpoint through your HTTPS proxy.
+
+For multi-architecture images, use a configured Buildx builder:
+
+```sh
+docker buildx build --platform linux/amd64,linux/arm64 -t db-manager:local --output type=oci,dest=db-manager.oci.tar .
+```
+
+This writes a local OCI archive. Registry upload is a separate operator action.
+
+## Configuration
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `LISTEN` | `:8080` | HTTP listen address. Use `127.0.0.1:8080` for a local binary. |
+| `SESSION_TTL` | `30m` | Idle session lifetime, using Go duration syntax. Sessions expire or disappear when the process restarts. |
+| `LOGIN_RATE_LIMIT` | `10/min` | Failed login limit per client IP; supports `N/min` or `N/s`. |
+| `TRUSTED_SERVERS` | empty | Comma-separated allowed database `host:port` targets. Empty permits arbitrary targets reachable by the server. |
+
+The database account determines SQL permissions. db-manager does not introduce a read-only mode or a second authorization system. Restrict network access and allowed connection targets for the users of your deployment.
+
+## Features and operational limits
+
+- Browse tables and views, filter and sort rows, edit data, and change table columns, indexes, options and foreign keys. Without a primary key, row changes match all column values; duplicate matching rows can all be updated or deleted. The UI warns before these operations.
+- PostgreSQL connections stay bound to the login database. Switch databases by logging out and reconnecting. Rename or drop of the current login database is refused until you reconnect to another database. Schema selection is scoped to each request.
+- MySQL database rename is a maintenance operation implemented as copy then drop with source write locks. Views, routines, events, triggers and foreign-key references that cannot be preserved are refused. Copy/rename may require substantial temporary disk space and locks; failed operations can leave a new target or earlier successful steps while retaining the source. Renaming or dropping the login database requires reconnecting without a default database.
+- PostgreSQL structure/FK changes use transactions. MySQL DDL commits each step; FK replacement attempts to restore its previous definition on error, and reports if restoration fails. Earlier successful steps can remain applied.
+- Object editors accept full SQL CREATE source. SQL console, imports and source editors execute with the connected database account's privileges. Source-header validation checks the selected kind/name; it does not sandbox stored SQL bodies. MySQL routine/trigger/event updates recreate the object and attempt restoration on failure; connection loss can prevent restoration, and object-specific grants may need to be reapplied.
+- Procedure calls accept a JSON array of scalar parameters; include `null` for OUT parameters. OUT/INOUT values are shown with the result sets. PostgreSQL overloads are selected by their catalog signatures.
+- PostgreSQL CSV/TSV uses `\N` for NULL, preserves empty strings, and escapes leading backslashes. MySQL CSV/TSV maps empty fields to NULL, so it cannot distinguish NULL and an empty string on round-trip. Headers are exported; choose the corresponding header-skip option on import.
+- SQL imports execute statements incrementally. On error, already applied statements remain; CSV imports commit batches. Plain/decompressed SQL import input is limited to 512 MiB. Cancellation stops future work but does not undo committed changes.
+- SQL table dumps are not a complete server backup: inspect database-specific objects, users, grants, extensions and external dependencies separately. Keep a database-native backup for recovery.
+- MySQL/MariaDB account management and privilege editing require administrative privileges. PostgreSQL role management, SSO, charts and a read-only application mode are outside v0.1.
+
+## Build and develop
+
+Use Go 1.26.8 or newer, Node.js 24 and npm. From the repository root:
+
+```sh
+npm --prefix web ci
+make build
+```
+
+`make build` builds the Vue SPA into `server/web` before compiling `server/cmd/dbmanager`. A bare `go build` can embed stale frontend assets and is not the supported release build path.
+
+Run backend and frontend development servers in separate terminals:
+
+```sh
+make dev-backend
+make dev-web
+```
+
+Vite proxies `/api` to port 8080. The backend supports graceful shutdown on SIGINT/SIGTERM.
+
+## Checks
+
+```sh
+make backend-test
+make web-test
+make lint
+make backend-integration
+```
+
+Integration tests use testcontainers and require Docker, with the MySQL/MariaDB/PostgreSQL images above. `make lint` also requires `golangci-lint` v2. Frontend tests use two workers to keep resource usage predictable.
+
+## Release preparation
+
+Install [GoReleaser v2.19.0](https://goreleaser.com/install/). From a checkout with its GitHub remote configured, run:
+
+```sh
+./scripts/check-release.sh
+./scripts/check-release.sh --docker
+```
+
+Each run builds a snapshot locally without publishing. GoReleaser configuration validation requires a repository remote even for a snapshot; a checkout without one can be tested in a disposable local clone with a test-only remote. The second command also builds and starts the nonroot read-only Docker image. The script verifies all six target executables, archive checksums, embedded SPA/assets, driver discovery and authenticated endpoint protection. It needs Bash, Node/npm, Go and GoReleaser; the Docker check additionally needs Docker and curl.
+
+`.goreleaser.yaml` always installs the locked frontend dependencies and builds the SPA before cross-compiling with `CGO_ENABLED=0`. Linux/macOS archives use tar.gz, Windows uses zip, and every archive has a SHA-256 checksum.
+
+The release workflow runs the test matrix. Manual workflow dispatch produces snapshot artifacts. An operator-pushed semantic version tag such as `v0.1.0` creates a draft GitHub release and publishes a nonroot multi-architecture image to `ghcr.io/OWNER/REPOSITORY` using the repository token. An operator reviews and publishes the draft release. Manual workflow dispatch creates snapshot artifacts and performs a local Docker smoke check without publishing. This checkout has no configured remote; no release or image has been published here. Configure a GitHub remote and package permissions before pushing a release tag.
+
+A project license has not been selected in this checkout; no distribution license is asserted here.
