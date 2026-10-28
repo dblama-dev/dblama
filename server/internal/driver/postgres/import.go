@@ -53,9 +53,9 @@ func (d *PostgresDriver) ImportSQL(ctx context.Context, db string, r io.Reader, 
 	if err != nil {
 		return fmt.Errorf("import sql: conn: %w", err)
 	}
-	defer func() { _ = conn.Close() }()
+	defer discardConnection(conn)
 
-	schema := d.CurrentSchema()
+	schema := d.schemaFor(ctx)
 	if _, err := conn.ExecContext(ctx, "SET search_path TO "+sqlgen.QuoteIdentPg(schema)); err != nil {
 		return fmt.Errorf("import sql: set search_path: %w", err)
 	}
@@ -121,8 +121,8 @@ func excerptAt(script string, pos int) string {
 
 // ImportCSV loads a delimited file into table in the current schema:
 // batches of csvBatchSize rows inserted as one multi-row INSERT; an
-// empty field becomes SQL NULL (the documented CSV convention — an
-// empty string is not expressible); the first failing batch aborts with
+// \N field becomes SQL NULL, empty stays empty, leading backslashes
+// are escaped. The first failing batch aborts with
 // its row range, earlier batches stay applied (one statement each).
 func (d *PostgresDriver) ImportCSV(ctx context.Context, db, table string, r io.Reader, opts driver.CSVImportOpts, progress func(done, total int64)) error {
 	if db == "" || table == "" {
@@ -136,7 +136,7 @@ func (d *PostgresDriver) ImportCSV(ctx context.Context, db, table string, r io.R
 		return fmt.Errorf("import csv: %w", err)
 	}
 
-	schema := d.CurrentSchema()
+	schema := d.schemaFor(ctx)
 	columns, err := d.selectColumns(ctx, schema, table, nil)
 	if err != nil {
 		return fmt.Errorf("import csv: %w", err)
@@ -191,12 +191,23 @@ func (d *PostgresDriver) ImportCSV(ctx context.Context, db, table string, r io.R
 		if batchFirst == 0 {
 			batchFirst = nrows
 		}
-		for _, field := range record {
-			if field == "" {
+		for i, field := range record {
+			if field == `\N` {
 				args = append(args, nil)
-			} else {
-				args = append(args, field)
+				continue
 			}
+			if strings.HasPrefix(field, `\\`) {
+				field = field[1:]
+			}
+			if strings.HasSuffix(columns[i].Type, "[]") {
+				if literal, ok := jsonToPgArray(field); ok {
+					field = literal
+				}
+			}
+			if columns[i].Type == "bytea" && strings.HasPrefix(field, "0x") {
+				field = `\x` + field[2:]
+			}
+			args = append(args, field)
 		}
 		if progress != nil {
 			progress(int64(nrows), int64(nrows))

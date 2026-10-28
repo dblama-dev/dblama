@@ -79,7 +79,7 @@ func seedBrowseTable(t *testing.T, drv driver.Driver) {
 
 // seedWriteTable creates the row-write playground table write_t4 (id
 // serial PRIMARY KEY, name varchar(50), note varchar(50)). note is
-// nullable with no default, so NULL and '' can be told apart after a
+// nullable with no default, so NULL and ” can be told apart after a
 // write; the serial id exercises the RETURNING-based LastInsertID.
 func seedWriteTable(t *testing.T, drv driver.Driver) {
 	t.Helper()

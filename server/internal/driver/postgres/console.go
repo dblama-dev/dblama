@@ -2,6 +2,8 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
+	sqldriver "database/sql/driver"
 	"fmt"
 	"strings"
 	"sync"
@@ -60,7 +62,6 @@ func (r *consoleRegistry) lookup(id string) (consoleQuery, bool) {
 	return q, ok
 }
 
-
 // ExecSQL implements driver.Driver: one Result per statement, MaxRows
 // row caps with Truncated, per-statement Seconds, mid-error returns the
 // accumulated Results together with the error.
@@ -85,13 +86,13 @@ func (d *PostgresDriver) ExecSQL(ctx context.Context, db, query, queryID string,
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	schema := d.CurrentSchema()
+	schema := d.schemaFor(ctx)
 
 	conn, err := d.db.Conn(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("exec sql: conn: %w", err)
 	}
-	defer func() { _ = conn.Close() }()
+	defer discardConnection(conn)
 
 	if queryID != "" {
 		var pid int64
@@ -206,4 +207,11 @@ func (d *PostgresDriver) CancelQuery(ctx context.Context, queryID string) error 
 		return fmt.Errorf("cancel query: %w", err)
 	}
 	return nil
+}
+
+// Returning ErrBadConn from Raw tells database/sql to discard the physical
+// connection rather than reuse arbitrary SET/search_path state from SQL.
+func discardConnection(conn *sql.Conn) {
+	_ = conn.Raw(func(any) error { return sqldriver.ErrBadConn })
+	_ = conn.Close()
 }

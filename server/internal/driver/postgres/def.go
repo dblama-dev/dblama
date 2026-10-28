@@ -47,11 +47,12 @@ ORDER BY ordinal_position`
 // INDEX text, whose column list the driver parses (see
 // indexColumnsFromDef).
 const defIndexesQuery = `
-SELECT i.relname, ix.indisunique, ix.indisprimary, pg_get_indexdef(ix.indexrelid)
+SELECT i.relname, ix.indisunique, ix.indisprimary, pg_get_indexdef(ix.indexrelid), COALESCE(con.conname, '')
 FROM pg_index ix
 JOIN pg_class t ON t.oid = ix.indrelid
 JOIN pg_namespace n ON n.oid = t.relnamespace
 JOIN pg_class i ON i.oid = ix.indexrelid
+LEFT JOIN pg_constraint con ON con.conindid = ix.indexrelid AND con.contype IN ('p','u')
 WHERE n.nspname = $1 AND t.relname = $2
 ORDER BY i.relname`
 
@@ -83,13 +84,16 @@ ORDER BY con.conname, lk.ord`
 // columns in ordinal order, its indexes, its foreign keys and its table
 // options. A missing table yields an error containing "not found".
 func (d *PostgresDriver) TableDef(ctx context.Context, db, table string) (driver.TableDef, error) {
+	if err := d.checkDatabase(db); err != nil {
+		return driver.TableDef{}, err
+	}
 	if db == "" {
 		return driver.TableDef{}, fmt.Errorf("read table definition: %w: database name", sqlgen.ErrEmptyIdentifier)
 	}
 	if table == "" {
 		return driver.TableDef{}, fmt.Errorf("read table definition: %w: table name", sqlgen.ErrEmptyIdentifier)
 	}
-	schema := d.CurrentSchema()
+	schema := d.schemaFor(ctx)
 
 	options, err := d.tableOptions(ctx, schema, table)
 	if err != nil {
@@ -294,7 +298,7 @@ func pgColumnDefault(raw sql.NullString) *driver.DefaultValue {
 }
 
 // unquoteLiteralDefault recognizes the printed form of a string-literal
-// default: 'x' or 'x'::type, with '' escaping inside the literal. It
+// default: 'x' or 'x'::type, with ” escaping inside the literal. It
 // reports the unquoted literal; any other shape (nextval(...), now(),
 // bare numbers) is not a simple quoted string.
 func unquoteLiteralDefault(raw string) (string, bool) {
@@ -331,12 +335,13 @@ func (d *PostgresDriver) tableIndexes(ctx context.Context, schema, table string)
 	var indexes []driver.Index
 	for rows.Next() {
 		var (
-			name    string
-			unique  bool
-			primary bool
-			def     string
+			name       string
+			unique     bool
+			primary    bool
+			def        string
+			constraint string
 		)
-		if err := rows.Scan(&name, &unique, &primary, &def); err != nil {
+		if err := rows.Scan(&name, &unique, &primary, &def, &constraint); err != nil {
 			return nil, fmt.Errorf("scan index row of %s: %w", table, err)
 		}
 		kind := "INDEX"
@@ -347,9 +352,10 @@ func (d *PostgresDriver) tableIndexes(ctx context.Context, schema, table string)
 			kind = "UNIQUE"
 		}
 		indexes = append(indexes, driver.Index{
-			Name:    name,
-			Type:    kind,
-			Columns: indexColumnsFromDef(def),
+			Name:       name,
+			Constraint: constraint,
+			Type:       kind,
+			Columns:    indexColumnsFromDef(def),
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -522,10 +528,11 @@ func (d *PostgresDriver) tableForeignKeys(ctx context.Context, schema, table str
 		}
 		if len(fks) == 0 || fks[len(fks)-1].Name != name {
 			fks = append(fks, driver.ForeignKey{
-				Name:     name,
-				RefTable: qualifyRefTable(refSchema, refTable, schema),
-				OnUpdate: fkRule(updateRule),
-				OnDelete: fkRule(deleteRule),
+				Name:      name,
+				RefTable:  refTable,
+				RefSchema: referenceSchema(refSchema, schema),
+				OnUpdate:  fkRule(updateRule),
+				OnDelete:  fkRule(deleteRule),
 			})
 		}
 		last := &fks[len(fks)-1]
@@ -556,11 +563,9 @@ func fkRule(code string) string {
 	}
 }
 
-// qualifyRefTable prefixes the referenced table with its schema when it
-// lives in another one; a same-schema reference stays a bare name.
-func qualifyRefTable(refSchema, refTable, schema string) string {
-	if refSchema != "" && refSchema != schema {
-		return refSchema + "." + refTable
+func referenceSchema(ref, current string) string {
+	if ref == current {
+		return ""
 	}
-	return refTable
+	return ref
 }

@@ -58,7 +58,7 @@ func (d *PostgresDriver) ListSequences(ctx context.Context, schema string) ([]dr
 
 // CreateSequence creates a sequence in the current schema.
 func (d *PostgresDriver) CreateSequence(ctx context.Context, name string, increment int64) error {
-	qual, err := qualify(d.CurrentSchema(), name)
+	qual, err := qualify(d.schemaFor(ctx), name)
 	if err != nil {
 		return fmt.Errorf("create sequence: %w", err)
 	}
@@ -74,7 +74,7 @@ func (d *PostgresDriver) CreateSequence(ctx context.Context, name string, increm
 
 // DropSequence drops a sequence in the current schema.
 func (d *PostgresDriver) DropSequence(ctx context.Context, name string) error {
-	qual, err := qualify(d.CurrentSchema(), name)
+	qual, err := qualify(d.schemaFor(ctx), name)
 	if err != nil {
 		return fmt.Errorf("drop sequence: %w", err)
 	}
@@ -86,7 +86,7 @@ func (d *PostgresDriver) DropSequence(ctx context.Context, name string) error {
 
 // AlterSequence restarts a sequence and/or changes its increment.
 func (d *PostgresDriver) AlterSequence(ctx context.Context, name string, restartWith *int64, increment *int64) error {
-	qual, err := qualify(d.CurrentSchema(), name)
+	qual, err := qualify(d.schemaFor(ctx), name)
 	if err != nil {
 		return fmt.Errorf("alter sequence: %w", err)
 	}

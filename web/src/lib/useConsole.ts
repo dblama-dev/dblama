@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 
+import { withSchema } from './schema'
 import { api } from '../api/client'
 import type { QueryResult } from '../api/types'
 import { loadHistory, pushHistory } from './consoleHistory'
@@ -8,6 +9,7 @@ import { loadHistory, pushHistory } from './consoleHistory'
 export interface ConsoleScope {
   db: () => string
   serverKey: string
+  schema?: () => string | null
 }
 
 /** All state and actions of the SQL console except the CodeMirror
@@ -51,7 +53,7 @@ export function useConsole(scope: ConsoleScope) {
     try {
       const payload = await api<{ results: QueryResult[] }>(
         'POST',
-        `/api/databases/${encodeURIComponent(scope.db())}/query`,
+        withSchema(`/api/databases/${encodeURIComponent(scope.db())}/query`, scope.schema?.() ?? null, true),
         { sql: trimmed, queryID: queryID.value },
       )
       results.value = payload.results ?? []
@@ -83,7 +85,7 @@ export function useConsole(scope: ConsoleScope) {
     results.value = null
     resetHistoryCycle()
     try {
-      const payload = await api<{ result: QueryResult | null }>('POST', '/api/query', {
+      const payload = await api<{ result: QueryResult | null }>('POST', withSchema('/api/query', scope.schema?.() ?? null, true), {
         db: scope.db(),
         sql: trimmed,
       })

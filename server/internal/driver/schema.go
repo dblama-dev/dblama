@@ -2,18 +2,9 @@ package driver
 
 import "context"
 
-// SchemaAware is the optional driver extension for servers that organize
-// tables into schemas inside one database (PostgreSQL): drivers that
-// implement it keep a current-schema selection the API layer sets from
-// the ?schema= parameter before calling the table/structure methods
-// (spec §4.3). Handlers reach it by type assertion against the Driver
-// interface — drivers without schemas (MySQL) simply do not implement it.
-//
-// The schema is instance state guarded by the driver's own mutex: one
-// driver instance serves one API session, so one schema is current at a
-// time. Implementations must qualify the current schema inside their SQL
-// text (never via SET search_path on a shared pool) and reject an empty
-// schema name.
+// SchemaAware exposes schema metadata and a default for direct driver callers.
+// HTTP requests must pass their selection through WithSchema rather than
+// mutate this shared default; requests in one session can run concurrently.
 type SchemaAware interface {
 	// SetSchema makes schema the current schema of this driver instance.
 	// An empty schema name is an error; the current selection is left
@@ -25,4 +16,20 @@ type SchemaAware interface {
 	// ListSchemas returns the user-visible schema names of the login
 	// database (system schemas excluded).
 	ListSchemas(ctx context.Context) ([]string, error)
+}
+
+type schemaContextKey struct{}
+
+// WithSchema binds a selection to a single operation. Empty means public.
+func WithSchema(ctx context.Context, schema string) context.Context {
+	if schema == "" {
+		schema = "public"
+	}
+	return context.WithValue(ctx, schemaContextKey{}, schema)
+}
+
+// SchemaFromContext returns the request selection, or empty for direct callers.
+func SchemaFromContext(ctx context.Context) string {
+	schema, _ := ctx.Value(schemaContextKey{}).(string)
+	return schema
 }

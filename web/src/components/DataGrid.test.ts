@@ -1,3 +1,4 @@
+import { createPinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import {
@@ -61,7 +62,7 @@ function mountGrid(props: Record<string, unknown> = {}) {
       sort: null,
       ...props,
     },
-    global: { plugins: [i18n] },
+    global: { plugins: [createPinia(), i18n] },
   })
 }
 
@@ -248,7 +249,7 @@ describe('TableView data view', () => {
   })
 
   async function mountView(): ReturnType<typeof mount> {
-    const wrapper = mount(TableViewInProvider, { global: { plugins: [i18n] } })
+    const wrapper = mount(TableViewInProvider, { global: { plugins: [createPinia(), i18n] } })
     await flushPromises()
     await flushPromises()
     return wrapper

@@ -104,14 +104,16 @@ type IndexColumn struct {
 // Index describes one index of a table. Type is one of PRIMARY, UNIQUE,
 // INDEX, FULLTEXT, SPATIAL.
 type Index struct {
-	Name    string        `json:"name"`
-	Type    string        `json:"type"`
-	Columns []IndexColumn `json:"columns"`
+	Constraint string        `json:"constraint,omitempty"`
+	Name       string        `json:"name"`
+	Type       string        `json:"type"`
+	Columns    []IndexColumn `json:"columns"`
 }
 
 // ForeignKey describes one foreign key of a table. OnDelete and OnUpdate
 // hold the referential actions (CASCADE, SET NULL, NO ACTION, RESTRICT).
 type ForeignKey struct {
+	RefSchema  string   `json:"refSchema,omitempty"`
 	Name       string   `json:"name"`
 	Columns    []string `json:"columns"`
 	RefTable   string   `json:"refTable"`

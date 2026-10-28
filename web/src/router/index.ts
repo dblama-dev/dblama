@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import BasicLayout from '../layouts/BasicLayout.vue'
+import { useCatalogStore } from '../stores/catalog'
 import { useSessionStore } from '../stores/session'
 import ConsoleView from '../views/ConsoleView.vue'
 import DbView from '../views/DbView.vue'
@@ -54,6 +55,9 @@ router.beforeEach(async (to) => {
   if (store.sessionInfo === null) {
     return to.path === '/login' ? true : '/login'
   }
+  const catalog = useCatalogStore()
+  catalog.schemaAware = store.sessionInfo.caps.schemas
+  catalog.schema = catalog.schemaAware ? (typeof to.query.schema === 'string' ? to.query.schema : 'public') : null
   return to.path === '/login' ? '/server' : true
 })
 

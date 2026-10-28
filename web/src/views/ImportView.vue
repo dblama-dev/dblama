@@ -156,7 +156,7 @@ async function submit(): Promise<void> {
       progressStarted.value = true
       done.value = lineDone
       total.value = lineTotal
-    })
+    }, catalog.schemaAware ? catalog.schema : undefined)
     notification.success({ content: t('import.success'), duration: 4000 })
     // The imported tables (and their sizes) may have changed.
     await catalog.invalidate(db.value)

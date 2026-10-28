@@ -98,7 +98,7 @@ const generatedOptions = [
 
 const path = computed(
   () =>
-    `/api/databases/${encodeURIComponent(props.db)}/tables/${encodeURIComponent(props.table)}`,
+    catalog.path(`/api/databases/${encodeURIComponent(props.db)}/tables/${encodeURIComponent(props.table)}`),
 )
 
 // Create mode: the route addresses the literal "_new" placeholder, no
@@ -183,7 +183,7 @@ function resetEditor(): void {
 }
 
 watch(
-  () => [props.db, props.table],
+  () => [props.db, props.table, catalog.schema],
   () => void load(),
   { immediate: true },
 )
@@ -317,7 +317,7 @@ function toColumnDef(row: EditableColumn, after: string): ColumnDef {
   // harmless, idempotent no-op; for a moved column it is what makes the
   // reorder reach the server at all (buildAlterTable takes the placement
   // from the position field, not from the array order).
-  col.position = after || 'FIRST'
+  if (!catalog.schemaAware) col.position = after || 'FIRST'
   return col
 }
 
@@ -580,6 +580,7 @@ async function save(): Promise<void> {
               size="small"
               quaternary
               :disabled="index === 0"
+              v-if="!catalog.schemaAware"
               data-testid="col-up"
               :title="t('structure.moveUp')"
               @click="moveRow(index, -1)"
@@ -590,6 +591,7 @@ async function save(): Promise<void> {
               size="small"
               quaternary
               :disabled="index === rows.length - 1"
+              v-if="!catalog.schemaAware"
               data-testid="col-down"
               :title="t('structure.moveDown')"
               @click="moveRow(index, 1)"

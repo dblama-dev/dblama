@@ -38,8 +38,7 @@ var versionPattern = regexp.MustCompile(`PostgreSQL (\d+\.\d+)`)
 
 // PostgresDriver is a connection-bound PostgreSQL driver instance.
 // Outside this package it is consumed only as a driver.Driver (and as a
-// driver.SchemaAware — handlers select the schema via SetSchema before
-// calling the table methods).
+// driver.SchemaAware — HTTP handlers bind schema to request context).
 //
 //nolint:revive // name mirrors the package, "Driver" would collide with the driver contract type
 type PostgresDriver struct {
@@ -56,7 +55,7 @@ type PostgresDriver struct {
 	// schema is the current schema every catalog and data query qualifies
 	// inside its SQL text (spec §13.5 — a shared pool must not SET
 	// search_path). schemaMu guards it; one driver instance serves one
-	// API session, so one schema is current at a time.
+	// API session. HTTP requests override this default through their context.
 	schema   string
 	schemaMu sync.RWMutex
 
@@ -174,4 +173,12 @@ func postgresCaps() driver.Caps {
 		// Events, Partitions, Users, MoveCopy and DescendingIndexes stay
 		// false.
 	}
+}
+
+// PostgreSQL pools cannot switch databases.
+func (d *PostgresDriver) checkDatabase(db string) error {
+	if db != "" && db != d.loginDB {
+		return fmt.Errorf("database %s is not the login database %s; reconnect to select another database", db, d.loginDB)
+	}
+	return nil
 }

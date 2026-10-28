@@ -3,6 +3,7 @@
 // is multipart and the response is a JSON-lines stream, not one JSON
 // document.
 
+import { withSchema } from './schema'
 import { ApiError } from '../api/client'
 
 /** Shape of the server error envelope: {"error": {...}}. */
@@ -64,10 +65,11 @@ export async function runImport(
   db: string,
   form: FormData,
   onProgress: (done: number, total: number) => void,
+  schema: string | null = null,
 ): Promise<void> {
   let res: Response
   try {
-    res = await fetch(`/api/databases/${encodeURIComponent(db)}/import`, {
+    res = await fetch(withSchema(`/api/databases/${encodeURIComponent(db)}/import`, schema, true), {
       method: 'POST',
       headers: { 'X-Requested-With': 'XMLHttpRequest' },
       credentials: 'same-origin',

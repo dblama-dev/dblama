@@ -10,6 +10,12 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-23-db-manager-design.md` (§4.1–4.6, §5, §6 `?schema=`, §7 дампы, §9, §13.5). Дорожная карта: П4 = PostgreSQL; П5 = views/triggers/routines/users/monitoring; П6 = релиз.
 
+## Статус выполнения (2026-10-28)
+
+Задачи 1–8 завершены в ветке `p4-postgresql`. Итог, проверки, решения и ограничения: [отчёт П4](2026-10-28-p4-completion.md).
+
+Уточнение контракта: HTTP schema передаётся через request context, а не изменением общего SetSchema. PostgreSQL работает только с БД входа; другие БД требуют нового входа. ForeignKey.refSchema отделён от refTable. CSV/TSV использует `\N` для NULL и сохраняет пустые строки. Эти решения заменяют противоречащие им исходные указания ниже.
+
 ## Global Constraints
 
 - Все запросы к системным каталогам — через information_schema/pg_catalog с квалификацией схемы (не `SET search_path`; спека §13.5).
@@ -46,8 +52,8 @@
 - Produces: `Connect(ctx, cfg) (driver.Driver, error)` — sql.Open("pgx", dsn: `host=... port=... user=... password=... dbname=... sslmode=disable`, MaxOpenConns=4, ping); Info{Flavor:"postgres", Version из SELECT version()}; Caps: Sequences/Schemas/Upsert/Monitor/Comments true, остальные false кроме базовых; ListDatabases (pg_database, datname ≠ template0/1, size pg_database_size); Close.
 - identifier.go: `qualify(schema, table string) (string, error)` через QuoteIdentPg.
 
-- [ ] **Step 1: golden-тест QuoteIdentPg** (FAIL → реализовать → PASS).
-- [ ] **Step 2: интеграционные тесты** — TestConnect_OK (flavor postgres, version строка), TestConnect_WrongPassword, TestListDatabases (содержит postgres), TestClose. FAIL → реализовать → PASS → lint → Commit `feat(postgres): connect, caps, list databases`.
+- [x] **Step 1: golden-тест QuoteIdentPg** (FAIL → реализовать → PASS).
+- [x] **Step 2: интеграционные тесты** — TestConnect_OK (flavor postgres, version строка), TestConnect_WrongPassword, TestListDatabases (содержит postgres), TestClose. FAIL → реализовать → PASS → lint → Commit `feat(postgres): connect, caps, list databases`.
 
 ### Task 2: Таблицы и структура — ListTables, TableDef, PrimaryKey
 
@@ -126,9 +132,9 @@
 
 ### Task 8: Верификация
 
-- [ ] **Step 1:** make lint/backend-test/web-build/build + ПОЛНАЯ integration матрица (mysql+mariadb+postgres) — зелёные.
-- [ ] **Step 2:** браузерный сценарий контроллера: логин postgres → дерево со схемами/sequences → таблица с jsonb → данные → консоль EXPLAIN → экспорт/импорт round-trip.
-- [ ] **Step 3:** Commit `chore: p4 verification fixes` при необходимости.
+- [x] **Step 1:** make lint/backend-test/web-build/build + ПОЛНАЯ integration матрица (mysql+mariadb+postgres) — зелёные.
+- [x] **Step 2:** браузерный сценарий контроллера: логин postgres → дерево со схемами/sequences → таблица с jsonb → данные → консоль EXPLAIN → экспорт/импорт round-trip.
+- [x] **Step 3:** Commit `chore: p4 verification fixes` при необходимости.
 
 ---
 

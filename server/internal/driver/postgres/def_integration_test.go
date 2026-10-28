@@ -232,7 +232,7 @@ func TestTableDef_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TableDef(xref) error: %v", err)
 	}
-	if len(xref.ForeignKeys) != 1 || xref.ForeignKeys[0].RefTable != "public.t3" {
+	if len(xref.ForeignKeys) != 1 || xref.ForeignKeys[0].RefTable != "t3" || xref.ForeignKeys[0].RefSchema != "public" {
 		t.Errorf("xref ForeignKeys = %+v, want one FK into public.t3", xref.ForeignKeys)
 	}
 

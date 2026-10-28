@@ -83,7 +83,6 @@ func parsePaging(query url.Values) (limit, offset int, msg string) {
 // malformed parameters are rejected with bad_request and never sent on.
 func (s *apiServer) handleRowsSelect(w http.ResponseWriter, r *http.Request) {
 	sess, _ := session.FromContext(r.Context())
-	applySchemaParam(r, sess)
 
 	query := r.URL.Query()
 	q := sqlgen.SelectQuery{}
@@ -141,7 +140,6 @@ type lastInsertIDResponse struct {
 // and the read back below.
 func (s *apiServer) handleRowInsert(w http.ResponseWriter, r *http.Request) {
 	sess, _ := session.FromContext(r.Context())
-	applySchemaParam(r, sess)
 	var vals driver.RowValues
 	if !decodeJSONBody(w, r, &vals) {
 		return
@@ -169,7 +167,6 @@ type updateRowRequest struct {
 // handleRowUpdate updates every row matching the where key exactly.
 func (s *apiServer) handleRowUpdate(w http.ResponseWriter, r *http.Request) {
 	sess, _ := session.FromContext(r.Context())
-	applySchemaParam(r, sess)
 	var req updateRowRequest
 	if !decodeJSONBody(w, r, &req) {
 		return
@@ -191,7 +188,6 @@ type deleteRowsRequest struct {
 // handleRowDelete deletes one row per key in a single driver transaction.
 func (s *apiServer) handleRowDelete(w http.ResponseWriter, r *http.Request) {
 	sess, _ := session.FromContext(r.Context())
-	applySchemaParam(r, sess)
 	var req deleteRowsRequest
 	if !decodeJSONBody(w, r, &req) {
 		return

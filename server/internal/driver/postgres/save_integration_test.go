@@ -190,11 +190,11 @@ func TestSaveTable_AlterColumns(t *testing.T) {
 	desired := driver.TableDef{
 		NewName: "t3_alter",
 		Columns: []driver.ColumnDef{
-			byName["id"],                                                            // MODIFY (serial keeps its default)
-			{Name: "full_name", OldName: "name", Type: "varchar", Length: "64"},    // CHANGE
-			{Name: "extra", OldName: "extra", Nullable: true},                      // DROP
-			{Name: "score", Type: "numeric", Length: "8,2", Nullable: true},        // ADD
-			flag,                                                                    // MODIFY (DROP NOT NULL)
+			byName["id"], // MODIFY (serial keeps its default)
+			{Name: "full_name", OldName: "name", Type: "varchar", Length: "64"}, // CHANGE
+			{Name: "extra", OldName: "extra", Nullable: true},                   // DROP
+			{Name: "score", Type: "numeric", Length: "8,2", Nullable: true},     // ADD
+			flag, // MODIFY (DROP NOT NULL)
 		},
 		Options: driver.TableOptions{Comment: "altered"},
 	}
@@ -292,8 +292,8 @@ func TestSaveTable_TransactionRollback(t *testing.T) {
 	desired := driver.TableDef{
 		NewName: "t3_rb",
 		Columns: []driver.ColumnDef{
-			{Name: "c", Type: "text", Nullable: true},         // step 1: applies inside the tx
-			{Name: "a", OldName: "a", Type: "integer"},        // step 2: varchar→integer fails server-side
+			{Name: "c", Type: "text", Nullable: true},  // step 1: applies inside the tx
+			{Name: "a", OldName: "a", Type: "integer"}, // step 2: varchar→integer fails server-side
 		},
 	}
 	err = drv.SaveTable(ctx, testDatabase, "t3_rb", desired)
@@ -410,7 +410,7 @@ func TestSaveIndexes_RoundTrip(t *testing.T) {
 	}
 	dup := []driver.Index{
 		{Name: "t3_dup", Type: "INDEX", Columns: []driver.IndexColumn{{Name: "name"}}},
-		{Name: "T3_DUP", Type: "INDEX", Columns: []driver.IndexColumn{{Name: "kind"}}},
+		{Name: "t3_dup", Type: "INDEX", Columns: []driver.IndexColumn{{Name: "kind"}}},
 	}
 	if err := drv.SaveIndexes(ctx, testDatabase, "t3_idx", dup); err == nil {
 		t.Error("SaveIndexes(duplicate names) error: expected error, got nil")

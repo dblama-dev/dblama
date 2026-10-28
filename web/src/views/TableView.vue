@@ -44,7 +44,7 @@
       v-if="!isNewTable"
       :show="rowModal.show"
       :mode="rowModal.mode"
-      :rows-path="rowsPath + '/rows'"
+      :rows-path="catalog.path(rowsPath + '/rows')"
       :columns="modalColumns"
       :row="rowModal.row"
       :row-pk="rowModal.pk"
@@ -73,6 +73,7 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const notification = useNotification()
+const catalog = useCatalogStore()
 
 // vue-router hands the path params over already decoded; re-encode them
 // for the api path (identifiers may contain %, spaces, ...).
@@ -110,7 +111,7 @@ async function onTableCreated(next: string): Promise<void> {
 const rowsPath = computed(
   () => `/api/databases/${encodeURIComponent(db.value)}/tables/${encodeURIComponent(table.value)}`,
 )
-const pkPath = computed(() => `${rowsPath.value}/pk`)
+const pkPath = computed(() => catalog.path(`${rowsPath.value}/pk`))
 
 // All fetch logic for the data view lives here: DataGrid is presentational
 // and reports query-state changes back as events.
@@ -159,7 +160,7 @@ async function refetch(): Promise<void> {
   const seq = ++fetchSeq
   loading.value = true
   try {
-    const next = await api<Page>('GET', `${rowsPath.value}/rows?${buildRowsQuery(queryState())}`)
+    const next = await api<Page>('GET', catalog.path(`${rowsPath.value}/rows?${buildRowsQuery(queryState())}`))
     if (seq !== fetchSeq) return
     page.value = next
   } catch (err) {
@@ -175,6 +176,9 @@ async function refetch(): Promise<void> {
 async function reload(): Promise<void> {
   // The _new placeholder has no table behind it — no pk or rows fetch.
   if (isNewTable.value) return
+  rowModal.value.show = false
+  page.value = null
+  pkColumns.value = []
   pageIndex.value = 1
   sort.value = null
   filters.value = []
@@ -186,7 +190,7 @@ onMounted(() => {
   void reload()
 })
 
-watch([db, table], () => {
+watch([db, table, () => catalog.schema], () => {
   void reload()
 })
 
@@ -216,7 +220,7 @@ async function onFilters(next: RowsFilter[]): Promise<void> {
 async function deleteRows(pks: Record<string, unknown>[]): Promise<void> {
   if (pks.length === 0) return
   try {
-    await api('DELETE', `${rowsPath.value}/rows`, { where: pks })
+    await api('DELETE', catalog.path(`${rowsPath.value}/rows`), { where: pks })
   } catch (err) {
     notifyError(err)
     return
@@ -251,7 +255,7 @@ const modalColumns = computed<ColumnDef[]>(() => defColumns.value ?? page.value?
 
 async function fetchDef(): Promise<void> {
   try {
-    const def = await api<TableDef>('GET', rowsPath.value)
+    const def = await api<TableDef>('GET', catalog.path(rowsPath.value))
     defColumns.value = def.columns
   } catch {
     // Definition unavailable: ColumnMeta-only rendering is good enough.

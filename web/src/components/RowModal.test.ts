@@ -1,3 +1,4 @@
+import { createPinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import {
@@ -79,7 +80,7 @@ const ModalInProvider = defineComponent({
 function mountModal(props: Record<string, unknown> = {}) {
   return mount(ModalInProvider, {
     props,
-    global: { plugins: [i18n], stubs: { teleport: true } },
+    global: { plugins: [createPinia(), i18n], stubs: { teleport: true } },
   })
 }
 
@@ -438,7 +439,7 @@ describe('TableView row modal and stale-response guard', () => {
   })
 
   async function mountView() {
-    const wrapper = mount(TableViewInProvider, { global: { plugins: [i18n] } })
+    const wrapper = mount(TableViewInProvider, { global: { plugins: [createPinia(), i18n] } })
     await flushPromises()
     await flushPromises()
     return wrapper

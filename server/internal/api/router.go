@@ -50,7 +50,7 @@ func NewRouter(cfg config.Config, sessions *session.Store, drivers *driver.Regis
 
 		// Everything else requires an authenticated session.
 		api.Group(func(authed chi.Router) {
-			authed.Use(RequireCSRFHeader, Auth(sessions))
+			authed.Use(RequireCSRFHeader, Auth(sessions), requestSchema)
 			authed.Get("/session", s.handleGetSession)
 			authed.Delete("/session", s.handleLogout)
 			authed.Get("/databases", s.handleDatabases)

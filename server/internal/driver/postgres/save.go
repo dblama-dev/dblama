@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/hitslab/db-manager/server/internal/driver"
@@ -37,10 +38,13 @@ var (
 // duplicate the default. The db argument is validated non-empty to keep
 // the driver contract uniform; it selects nothing (the schema does).
 func (d *PostgresDriver) SaveTable(ctx context.Context, db, table string, desired driver.TableDef) error {
+	if err := d.checkDatabase(db); err != nil {
+		return err
+	}
 	if db == "" {
 		return fmt.Errorf("save table: %w: database name", sqlgen.ErrEmptyIdentifier)
 	}
-	schema := d.CurrentSchema()
+	schema := d.schemaFor(ctx)
 	name := table
 	var stmts []string
 	var err error
@@ -80,13 +84,16 @@ func (d *PostgresDriver) SaveTable(ctx context.Context, db, table string, desire
 // FULLTEXT and SPATIAL indexes do not exist on PostgreSQL and fail
 // with "not supported on postgres".
 func (d *PostgresDriver) SaveIndexes(ctx context.Context, db, table string, desired []driver.Index) error {
+	if err := d.checkDatabase(db); err != nil {
+		return err
+	}
 	if db == "" {
 		return fmt.Errorf("save indexes: %w: database name", sqlgen.ErrEmptyIdentifier)
 	}
 	if table == "" {
 		return fmt.Errorf("save indexes: %w: table name", sqlgen.ErrEmptyIdentifier)
 	}
-	schema := d.CurrentSchema()
+	schema := d.schemaFor(ctx)
 
 	current, err := d.tableIndexes(ctx, schema, table)
 	if err != nil {
@@ -145,6 +152,12 @@ func buildCreateTable(schema string, d driver.TableDef) ([]string, error) {
 	qual, err := qualify(schema, d.NewName)
 	if err != nil {
 		return nil, fmt.Errorf("create table: %w", err)
+	}
+	d.ForeignKeys = slices.Clone(d.ForeignKeys)
+	for i := range d.ForeignKeys {
+		if d.ForeignKeys[i].RefSchema == "" {
+			d.ForeignKeys[i].RefSchema = schema
+		}
 	}
 	return buildCreateTableQualified(qual, d)
 }
@@ -496,7 +509,7 @@ func foreignKeyFragmentPg(fk driver.ForeignKey) (string, error) {
 		sb.WriteString("CONSTRAINT " + sqlgen.QuoteIdentPg(fk.Name) + " ")
 	}
 	sb.WriteString("FOREIGN KEY (" + strings.Join(cols, ", ") + ") REFERENCES " +
-		quoteQualifiedRefPg(fk.RefTable) + " (" + strings.Join(refs, ", ") + ")")
+		quoteForeignRefPg(fk) + " (" + strings.Join(refs, ", ") + ")")
 	if fk.OnDelete != "" {
 		sb.WriteString(" ON DELETE " + fk.OnDelete)
 	}
@@ -506,23 +519,17 @@ func foreignKeyFragmentPg(fk driver.ForeignKey) (string, error) {
 	return sb.String(), nil
 }
 
-// quoteQualifiedRefPg quotes each dot-separated segment of a possibly
-// schema-qualified referenced table name, so a bare "t2" becomes "t2"
-// and "other schema.parent" becomes "other schema"."parent".
-func quoteQualifiedRefPg(refTable string) string {
-	parts := strings.Split(refTable, ".")
-	quoted := make([]string, len(parts))
-	for i, p := range parts {
-		quoted[i] = sqlgen.QuoteIdentPg(p)
+func quoteForeignRefPg(fk driver.ForeignKey) string {
+	if fk.RefSchema == "" {
+		return sqlgen.QuoteIdentPg(fk.RefTable)
 	}
-	return strings.Join(quoted, ".")
+	return sqlgen.QuoteIdentPg(fk.RefSchema) + "." + sqlgen.QuoteIdentPg(fk.RefTable)
 }
 
 // buildAlterIndexes renders the statements of one index diff — drops
 // first (current indexes absent or changed), then adds — or nil when
 // current and desired agree. The PRIMARY is matched by type on both
-// sides; every other index by name, case-insensitively, as PostgreSQL
-// folds unquoted identifiers.
+// sides; every other index by exact name, since all names are quoted.
 func buildAlterIndexes(schema, table string, current, desired []driver.Index) ([]string, error) {
 	qual, err := qualify(schema, table)
 	if err != nil {
@@ -555,7 +562,7 @@ func buildAlterIndexes(schema, table string, current, desired []driver.Index) ([
 		if idx.Name == "" {
 			return nil, fmt.Errorf("index %d: %w: index name", i+1, sqlgen.ErrEmptyIdentifier)
 		}
-		key := strings.ToLower(idx.Name)
+		key := idx.Name
 		if _, dup := seen[key]; dup {
 			return nil, fmt.Errorf("index %d: duplicate index name %q", i+1, idx.Name)
 		}
@@ -570,7 +577,7 @@ func buildAlterIndexes(schema, table string, current, desired []driver.Index) ([
 			currentPrimary = &current[i]
 			continue
 		}
-		currentByName[strings.ToLower(current[i].Name)] = current[i]
+		currentByName[current[i].Name] = current[i]
 	}
 
 	var stmts []string
@@ -584,10 +591,14 @@ func buildAlterIndexes(schema, table string, current, desired []driver.Index) ([
 			stmts = append(stmts, "ALTER TABLE "+qual+" DROP CONSTRAINT "+sqlgen.QuoteIdentPg(cur.Name))
 			continue
 		}
-		if want, ok := byName[strings.ToLower(cur.Name)]; ok && indexEqualPg(cur, want) {
+		if want, ok := byName[cur.Name]; ok && indexEqualPg(cur, want) {
 			continue
 		}
-		stmts = append(stmts, "DROP INDEX "+sqlgen.QuoteIdentPg(schema)+"."+sqlgen.QuoteIdentPg(cur.Name))
+		if cur.Constraint != "" {
+			stmts = append(stmts, "ALTER TABLE "+qual+" DROP CONSTRAINT "+sqlgen.QuoteIdentPg(cur.Constraint))
+		} else {
+			stmts = append(stmts, "DROP INDEX "+sqlgen.QuoteIdentPg(schema)+"."+sqlgen.QuoteIdentPg(cur.Name))
+		}
 	}
 	// Then adds.
 	if desiredPrimary != nil && (currentPrimary == nil || !indexEqualPg(*currentPrimary, *desiredPrimary)) {
@@ -601,7 +612,7 @@ func buildAlterIndexes(schema, table string, current, desired []driver.Index) ([
 		if strings.EqualFold(want.Type, "PRIMARY") {
 			continue
 		}
-		if cur, ok := currentByName[strings.ToLower(want.Name)]; ok && indexEqualPg(cur, want) {
+		if cur, ok := currentByName[want.Name]; ok && indexEqualPg(cur, want) {
 			continue
 		}
 		cols, err := indexColumnsFragmentPg(want.Columns)
@@ -634,7 +645,7 @@ func indexEqualPg(a, b driver.Index) bool {
 
 // sqlQuoteStringPg renders a SQL string literal with PostgreSQL's
 // standard_conforming_strings semantics: only the single quote is
-// special (doubled to ''); a backslash is an ordinary character and is
+// special (doubled to ”); a backslash is an ordinary character and is
 // not escaped.
 func sqlQuoteStringPg(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"

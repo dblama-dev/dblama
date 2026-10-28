@@ -128,7 +128,7 @@ async function submit(): Promise<void> {
       ifNotExists: isSql.value && ifNotExists.value,
       gzip: gzip.value,
     }
-    await downloadExport(db.value, body)
+    await downloadExport(db.value, body, catalog.schemaAware ? catalog.schema : undefined)
     notification.success({ content: t('export.success'), duration: 4000 })
   } catch (err) {
     notification.error({

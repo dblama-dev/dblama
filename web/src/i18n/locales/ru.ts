@@ -29,6 +29,13 @@ export default {
     logout: 'Выйти',
   },
   tree: {
+    schemas: 'Схемы',
+    sequences: 'Последовательности',
+    newSequence: 'Создать последовательность',
+    sequenceName: 'Имя последовательности',
+    dropSequence: 'Удалить последовательность',
+    dropSequenceConfirm: 'Удалить последовательность {name}?',
+
     selectDb: 'База данных',
     search: 'Поиск',
     tables: 'Таблицы',

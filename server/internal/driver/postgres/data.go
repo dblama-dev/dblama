@@ -59,13 +59,16 @@ LIMIT 1`
 // The db argument is validated non-empty and selects nothing. An empty
 // db or table name fails before any query is issued.
 func (d *PostgresDriver) SelectRows(ctx context.Context, db, table string, q sqlgen.SelectQuery) (driver.Page, error) {
+	if err := d.checkDatabase(db); err != nil {
+		return driver.Page{}, err
+	}
 	if db == "" {
 		return driver.Page{}, fmt.Errorf("select rows: %w: database name", sqlgen.ErrEmptyIdentifier)
 	}
 	if table == "" {
 		return driver.Page{}, fmt.Errorf("select rows: %w: table name", sqlgen.ErrEmptyIdentifier)
 	}
-	schema := d.CurrentSchema()
+	schema := d.schemaFor(ctx)
 
 	columns, err := d.selectColumns(ctx, schema, table, q.Columns)
 	if err != nil {
@@ -193,7 +196,7 @@ func convertValue(v any, columnType string) any {
 	case nil:
 		return nil
 	case time.Time:
-		return val.Format(time.RFC3339)
+		return val.Format(time.RFC3339Nano)
 	case []byte:
 		if columnType == "bytea" {
 			return "0x" + hex.EncodeToString(val)
@@ -223,7 +226,7 @@ func pgArrayToJSON(literal, elemType string) string {
 	out := make([]any, len(elements))
 	for i, el := range elements {
 		if !el.quoted && strings.HasPrefix(el.text, "{") {
-			out[i] = pgArrayToJSON(el.text, elemType)
+			out[i] = json.RawMessage(pgArrayToJSON(el.text, elemType))
 			continue
 		}
 		out[i] = arrayElementJSON(el, elemType)
@@ -273,10 +276,17 @@ func arrayElements(literal string) ([]arrayElem, bool) {
 			escape = false
 			started = true
 		case inQuote && c == '\\':
+			if depth > 0 {
+				cur.WriteByte(c)
+			}
 			escape = true
 		case c == '"':
 			inQuote = !inQuote
-			elemQuoted = true
+			if depth > 0 {
+				cur.WriteByte(c)
+			} else {
+				elemQuoted = true
+			}
 			started = true
 		case inQuote:
 			cur.WriteByte(c)
@@ -341,6 +351,9 @@ func isNumericElemType(t string) bool {
 // otherwise no id is generated and LastInsertID reads 0. An empty db or
 // table name, or an empty values set, fails before any statement.
 func (d *PostgresDriver) InsertRow(ctx context.Context, db, table string, vals driver.RowValues) error {
+	if err := d.checkDatabase(db); err != nil {
+		return err
+	}
 	if db == "" {
 		return fmt.Errorf("insert row: %w: database name", sqlgen.ErrEmptyIdentifier)
 	}
@@ -348,9 +361,13 @@ func (d *PostgresDriver) InsertRow(ctx context.Context, db, table string, vals d
 		return fmt.Errorf("insert row: %w: table name", sqlgen.ErrEmptyIdentifier)
 	}
 	if len(vals) == 0 {
-		return fmt.Errorf("insert row into %s.%s: no values", d.CurrentSchema(), table)
+		return fmt.Errorf("insert row into %s.%s: no values", d.schemaFor(ctx), table)
 	}
-	schema := d.CurrentSchema()
+	schema := d.schemaFor(ctx)
+	vals, err := d.normalizeValues(ctx, schema, table, vals, true)
+	if err != nil {
+		return err
+	}
 
 	cols := sortedKeys(vals)
 	args := make([]any, len(cols))
@@ -359,6 +376,10 @@ func (d *PostgresDriver) InsertRow(ctx context.Context, db, table string, vals d
 	}
 
 	query, _, err := sqlgen.BuildInsertPg(table, cols)
+	if len(cols) == 0 {
+		query = "INSERT INTO " + sqlgen.QuoteIdentPg(table) + " DEFAULT VALUES"
+		err = nil
+	}
 	if err != nil {
 		return fmt.Errorf("insert row into %s.%s: %w", schema, table, err)
 	}
@@ -398,6 +419,9 @@ func (d *PostgresDriver) InsertRow(ctx context.Context, db, table string, vals d
 // fails before any statement: the driver never issues an UPDATE without
 // a WHERE clause.
 func (d *PostgresDriver) UpdateRow(ctx context.Context, db, table string, where driver.PK, vals driver.RowValues) error {
+	if err := d.checkDatabase(db); err != nil {
+		return err
+	}
 	if db == "" {
 		return fmt.Errorf("update row: %w: database name", sqlgen.ErrEmptyIdentifier)
 	}
@@ -405,12 +429,21 @@ func (d *PostgresDriver) UpdateRow(ctx context.Context, db, table string, where 
 		return fmt.Errorf("update row: %w: table name", sqlgen.ErrEmptyIdentifier)
 	}
 	if len(vals) == 0 {
-		return fmt.Errorf("update row in %s.%s: no values", d.CurrentSchema(), table)
+		return fmt.Errorf("update row in %s.%s: no values", d.schemaFor(ctx), table)
 	}
 	if len(where) == 0 {
-		return fmt.Errorf("update row in %s.%s: refusing an update without a where clause", d.CurrentSchema(), table)
+		return fmt.Errorf("update row in %s.%s: refusing an update without a where clause", d.schemaFor(ctx), table)
 	}
-	schema := d.CurrentSchema()
+	schema := d.schemaFor(ctx)
+	vals, err := d.normalizeValues(ctx, schema, table, vals, false)
+	if err != nil {
+		return err
+	}
+	key, err := d.normalizeValues(ctx, schema, table, driver.RowValues(where), false)
+	if err != nil {
+		return err
+	}
+	where = driver.PK(key)
 
 	cols := sortedKeys(vals)
 	setArgs := make([]any, len(cols))
@@ -441,6 +474,9 @@ func (d *PostgresDriver) UpdateRow(ctx context.Context, db, table string, where 
 // DELETEs inside the transaction — the keys usually arrive as primary
 // keys, and per-key statements reuse BuildDeletePg unchanged.
 func (d *PostgresDriver) DeleteRows(ctx context.Context, db, table string, where []driver.PK) error {
+	if err := d.checkDatabase(db); err != nil {
+		return err
+	}
 	if db == "" {
 		return fmt.Errorf("delete rows: %w: database name", sqlgen.ErrEmptyIdentifier)
 	}
@@ -448,14 +484,23 @@ func (d *PostgresDriver) DeleteRows(ctx context.Context, db, table string, where
 		return fmt.Errorf("delete rows: %w: table name", sqlgen.ErrEmptyIdentifier)
 	}
 	if len(where) == 0 {
-		return fmt.Errorf("delete rows from %s.%s: no keys", d.CurrentSchema(), table)
+		return fmt.Errorf("delete rows from %s.%s: no keys", d.schemaFor(ctx), table)
 	}
 	for i, pk := range where {
 		if len(pk) == 0 {
-			return fmt.Errorf("delete rows from %s.%s: key %d is empty", d.CurrentSchema(), table, i+1)
+			return fmt.Errorf("delete rows from %s.%s: key %d is empty", d.schemaFor(ctx), table, i+1)
 		}
 	}
-	schema := d.CurrentSchema()
+	schema := d.schemaFor(ctx)
+	keys := make([]driver.PK, len(where))
+	for i, pk := range where {
+		value, err := d.normalizeValues(ctx, schema, table, driver.RowValues(pk), false)
+		if err != nil {
+			return err
+		}
+		keys[i] = driver.PK(value)
+	}
+	where = keys
 
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -493,6 +538,9 @@ func (d *PostgresDriver) DeleteRows(ctx context.Context, db, table string, where
 // row. An empty db or table name, an empty row list or a mixed column
 // set fails before any statement.
 func (d *PostgresDriver) UpsertRows(ctx context.Context, db, table string, rows []driver.RowValues) error {
+	if err := d.checkDatabase(db); err != nil {
+		return err
+	}
 	if db == "" {
 		return fmt.Errorf("upsert rows: %w: database name", sqlgen.ErrEmptyIdentifier)
 	}
@@ -500,9 +548,18 @@ func (d *PostgresDriver) UpsertRows(ctx context.Context, db, table string, rows 
 		return fmt.Errorf("upsert rows: %w: table name", sqlgen.ErrEmptyIdentifier)
 	}
 	if len(rows) == 0 {
-		return fmt.Errorf("upsert rows into %s.%s: no rows", d.CurrentSchema(), table)
+		return fmt.Errorf("upsert rows into %s.%s: no rows", d.schemaFor(ctx), table)
 	}
-	schema := d.CurrentSchema()
+	schema := d.schemaFor(ctx)
+	normalized := make([]driver.RowValues, len(rows))
+	for i, row := range rows {
+		value, err := d.normalizeValues(ctx, schema, table, row, false)
+		if err != nil {
+			return err
+		}
+		normalized[i] = value
+	}
+	rows = normalized
 
 	pk, err := d.PrimaryKey(ctx, db, table)
 	if err != nil {
@@ -668,4 +725,42 @@ func qualifyWrite(verb, query, schema, table string) (string, error) {
 		return "", fmt.Errorf("qualifyWrite: verb not found in %q", query)
 	}
 	return qualified, nil
+}
+
+// normalizeValues reverses the JSON-friendly browse representation before
+// binding PostgreSQL parameters; it never mutates caller-owned values.
+func (d *PostgresDriver) normalizeValues(ctx context.Context, schema, table string, values driver.RowValues, inserting bool) (driver.RowValues, error) {
+	columns, err := d.tableColumns(ctx, schema, table)
+	if err != nil {
+		return nil, err
+	}
+	out := make(driver.RowValues, len(values))
+	for k, v := range values {
+		out[k] = v
+	}
+	for _, col := range columns {
+		value, exists := out[col.Name]
+		if !exists {
+			continue
+		}
+		if inserting && col.AutoIncrement && value == nil {
+			delete(out, col.Name)
+			continue
+		}
+		text, ok := value.(string)
+		if !ok {
+			continue
+		}
+		if strings.HasSuffix(col.Type, "[]") && strings.HasPrefix(strings.TrimSpace(text), "[") {
+			literal, valid := jsonToPgArray(text)
+			if !valid {
+				return nil, fmt.Errorf("invalid JSON array for %s", col.Name)
+			}
+			out[col.Name] = literal
+		}
+		if col.Type == "bytea" && strings.HasPrefix(text, "0x") {
+			out[col.Name] = `\x` + text[2:]
+		}
+	}
+	return out, nil
 }

@@ -93,7 +93,7 @@ func TestSchemaParam_PassedToDriver(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 	if len(fake.schemaCalls) != 1 || fake.schemaCalls[0] != "odd schema" {
-		t.Errorf("SetSchema calls = %v, want [odd schema]", fake.schemaCalls)
+		t.Errorf("request schemas = %v, want [odd schema]", fake.schemaCalls)
 	}
 }
 

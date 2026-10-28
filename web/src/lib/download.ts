@@ -3,6 +3,7 @@
 // fetch directly with the same X-Requested-With header the api client
 // sends for the CSRF check.
 
+import { withSchema } from './schema'
 import { ApiError } from '../api/client'
 import type { ExportRequest } from '../api/types'
 
@@ -22,10 +23,10 @@ interface ErrorEnvelope {
  * "dump". Throws ApiError for transport failures and for JSON error
  * envelopes (the server validates before any header is written).
  */
-export async function downloadExport(db: string, body: ExportRequest): Promise<void> {
+export async function downloadExport(db: string, body: ExportRequest, schema: string | null = null): Promise<void> {
   let res: Response
   try {
-    res = await fetch(`/api/databases/${encodeURIComponent(db)}/export`, {
+    res = await fetch(withSchema(`/api/databases/${encodeURIComponent(db)}/export`, schema, true), {
       method: 'POST',
       headers: {
         'X-Requested-With': 'XMLHttpRequest',

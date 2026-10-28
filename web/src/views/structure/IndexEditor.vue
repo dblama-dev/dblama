@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useNotification } from 'naive-ui'
 import { NButton, NInput, NInputNumber, NSelect } from 'naive-ui'
 
+import { useCatalogStore } from '../../stores/catalog'
 import { api, ApiError } from '../../api/client'
 import type { Index, IndexColumn } from '../../api/types'
 
@@ -34,6 +35,7 @@ const emit = defineEmits<{ saved: [] }>()
 
 const { t } = useI18n()
 const notification = useNotification()
+const catalog = useCatalogStore()
 
 const INDEX_TYPES = ['PRIMARY', 'UNIQUE', 'INDEX', 'FULLTEXT', 'SPATIAL']
 
@@ -110,7 +112,7 @@ async function save(): Promise<void> {
   try {
     await api(
       'POST',
-      `/api/databases/${encodeURIComponent(props.db)}/tables/${encodeURIComponent(props.table)}/indexes`,
+      catalog.path(`/api/databases/${encodeURIComponent(props.db)}/tables/${encodeURIComponent(props.table)}/indexes`),
       rows.value.map(toIndex),
     )
     notification.success({ content: t('structure.saved'), duration: 3000 })

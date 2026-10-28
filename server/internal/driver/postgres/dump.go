@@ -1,9 +1,9 @@
 package postgres
 
 import (
-	"encoding/json"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"slices"
@@ -37,7 +37,7 @@ func (d *PostgresDriver) ShowCreateTable(ctx context.Context, db, table string) 
 	if err != nil {
 		return "", fmt.Errorf("show create table: %w", err)
 	}
-	return strings.Join(stmts, "\n"), nil
+	return strings.Join(stmts, ";\n"), nil
 }
 
 // Export streams a dump of database db (the pool's login database; the
@@ -118,7 +118,7 @@ func (d *PostgresDriver) Export(ctx context.Context, db string, req driver.Expor
 // table — optional DROP, the generated CREATE (rewritten with IF NOT
 // EXISTS when requested) and the data as INSERT batches.
 func (d *PostgresDriver) exportSQL(ctx context.Context, tables []string, req driver.ExportRequest, out io.Writer) error {
-	schema := d.CurrentSchema()
+	schema := d.schemaFor(ctx)
 	header := "-- db-manager dump\n" +
 		"-- Database: " + sqlgen.QuoteIdentPg(d.loginDB) + "\n" +
 		"-- Schema: " + sqlgen.QuoteIdentPg(schema) + "\n\n"
@@ -144,7 +144,7 @@ func (d *PostgresDriver) exportSQL(ctx context.Context, tables []string, req dri
 		}
 		section := "-- Table: " + qual + "\n"
 		if req.DropIfExists {
-			section += "DROP TABLE IF EXISTS " + qual + ";\n"
+			section += "DROP TABLE IF EXISTS " + sqlgen.QuoteIdentPg(table) + ";\n"
 		}
 		section += create + ";\n\n"
 		if err := writeExport(out, section); err != nil {
@@ -152,6 +152,9 @@ func (d *PostgresDriver) exportSQL(ctx context.Context, tables []string, req dri
 		}
 
 		if err := d.exportTableSQLRows(ctx, table, out); err != nil {
+			return err
+		}
+		if err := d.exportSerialState(ctx, table, out); err != nil {
 			return err
 		}
 	}
@@ -212,15 +215,15 @@ func (d *PostgresDriver) exportTableSQLRows(ctx context.Context, table string, o
 		return writeExport(out, sb.String())
 	})
 	if err != nil {
-		return fmt.Errorf("export data of %s.%s: %w", d.CurrentSchema(), table, err)
+		return fmt.Errorf("export data of %s.%s: %w", d.schemaFor(ctx), table, err)
 	}
 	return nil
 }
 
 // exportDelimited writes one table as delimited text via the shared CSV
-// writer: header row, NULL → empty field, enclosure only when needed.
+// writer: header row, NULL → \N; leading backslashes are escaped.
 func (d *PostgresDriver) exportDelimited(ctx context.Context, table string, sep rune, out io.Writer) error {
-	columns, err := d.selectColumns(ctx, d.CurrentSchema(), table, nil)
+	columns, err := d.selectColumns(ctx, d.schemaFor(ctx), table, nil)
 	if err != nil {
 		return fmt.Errorf("export: %w", err)
 	}
@@ -236,17 +239,27 @@ func (d *PostgresDriver) exportDelimited(ctx context.Context, table string, sep 
 
 	cw := dump.NewCSVWriter(out, sep)
 	if err := cw.WriteHeader(names); err != nil {
-		return fmt.Errorf("export header of %s.%s: %w", d.CurrentSchema(), table, err)
+		return fmt.Errorf("export header of %s.%s: %w", d.schemaFor(ctx), table, err)
 	}
 	if err := d.exportPages(ctx, table, pk, func(page driver.Page) error {
 		for _, row := range page.Rows {
-			if err := cw.WriteRow(row); err != nil {
+			encoded := make([]any, len(row))
+			for i, v := range row {
+				if v == nil {
+					encoded[i] = `\N`
+				} else if text, ok := v.(string); ok && strings.HasPrefix(text, `\`) {
+					encoded[i] = `\` + text
+				} else {
+					encoded[i] = v
+				}
+			}
+			if err := cw.WriteRow(encoded); err != nil {
 				return err
 			}
 		}
 		return nil
 	}); err != nil {
-		return fmt.Errorf("export data of %s.%s: %w", d.CurrentSchema(), table, err)
+		return fmt.Errorf("export data of %s.%s: %w", d.schemaFor(ctx), table, err)
 	}
 	return nil
 }
@@ -279,7 +292,7 @@ func (d *PostgresDriver) exportPages(ctx context.Context, table string, orderBy 
 			last := page.Rows[len(page.Rows)-1]
 			idx := slices.IndexFunc(page.Columns, func(c driver.ColumnMeta) bool { return c.Name == orderBy[0] })
 			if idx < 0 || idx >= len(last) {
-				return fmt.Errorf("key column %q not found in result of %s.%s", orderBy[0], d.CurrentSchema(), table)
+				return fmt.Errorf("key column %q not found in result of %s.%s", orderBy[0], d.schemaFor(ctx), table)
 			}
 			q.Filters = []sqlgen.Filter{{
 				Column:   orderBy[0],
@@ -327,16 +340,16 @@ func pgKeysetText(v any) string {
 		}
 		return "f"
 	case time.Time:
-		return val.Format(time.RFC3339)
+		return val.Format(time.RFC3339Nano)
 	default:
 		return fmt.Sprint(v)
 	}
 }
 
 // sqlLiteralPg renders one page value as a PG SQL literal for an INSERT:
-// NULL stays NULL; strings are ''-escaped (PG backslash is literal);
+// NULL stays NULL; strings are ”-escaped (PG backslash is literal);
 // bytea columns emit '\x…'::bytea hex literals (empty binary is
-// ''::bytea); time values keep their RFC3339 form (PG parses it);
+// ”::bytea); time values keep their RFC3339 form (PG parses it);
 // arrays and jsonb arrive as their text rendering and are quoted.
 func sqlLiteralPg(v any, colType string) string {
 	if v == nil {
@@ -360,9 +373,6 @@ func sqlLiteralPg(v any, colType string) string {
 	return sqlQuoteStringPg(fmt.Sprint(v))
 }
 
-// jsonUnmarshal is an indirection seam for tests.
-func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }
-
 // isByteaTypeName reports whether the column type is a binary PG type.
 func isByteaTypeName(t string) bool {
 	return t == "bytea"
@@ -374,33 +384,29 @@ func isByteaTypeName(t string) bool {
 // escaping; JSON null becomes the unquoted NULL element.
 func jsonToPgArray(jsonText string) (string, bool) {
 	var items []any
-	if err := jsonUnmarshal([]byte(jsonText), &items); err != nil {
+	decoder := json.NewDecoder(strings.NewReader(jsonText))
+	decoder.UseNumber()
+	if err := decoder.Decode(&items); err != nil {
 		return "", false
 	}
-	var sb strings.Builder
-	sb.WriteString("{")
-	for i, item := range items {
-		if i > 0 {
-			sb.WriteString(",")
+	var render func([]any) string
+	render = func(values []any) string {
+		parts := make([]string, len(values))
+		for i, v := range values {
+			switch value := v.(type) {
+			case nil:
+				parts[i] = "NULL"
+			case []any:
+				parts[i] = render(value)
+			case string:
+				parts[i] = `"` + strings.ReplaceAll(strings.ReplaceAll(value, `\`, `\\`), `"`, `\"`) + `"`
+			default:
+				parts[i] = fmt.Sprint(value)
+			}
 		}
-		if item == nil {
-			sb.WriteString("NULL")
-			continue
-		}
-		el := fmt.Sprint(item)
-		if el == "" {
-			sb.WriteString(`""`)
-			continue
-		}
-		needsQuote := strings.ContainsAny(el, `,"{}\`) || strings.TrimSpace(el) != el
-		if needsQuote {
-			sb.WriteString(`"` + strings.ReplaceAll(strings.ReplaceAll(el, `\`, `\\`), `"`, `\"`) + `"`)
-		} else {
-			sb.WriteString(el)
-		}
+		return "{" + strings.Join(parts, ",") + "}"
 	}
-	sb.WriteString("}")
-	return sb.String(), true
+	return render(items), true
 }
 
 func writeExport(w io.Writer, s string) error {
@@ -412,8 +418,11 @@ func writeExport(w io.Writer, s string) error {
 
 // TruncateTables truncates each table in the current schema; the first
 // error aborts.
-func (d *PostgresDriver) TruncateTables(ctx context.Context, _ string, tables []string) error {
-	schema := d.CurrentSchema()
+func (d *PostgresDriver) TruncateTables(ctx context.Context, db string, tables []string) error {
+	if err := d.checkDatabase(db); err != nil {
+		return err
+	}
+	schema := d.schemaFor(ctx)
 	for _, table := range tables {
 		qual, err := qualify(schema, table)
 		if err != nil {
@@ -428,8 +437,11 @@ func (d *PostgresDriver) TruncateTables(ctx context.Context, _ string, tables []
 
 // DropTables drops each table in the current schema; the first error
 // aborts.
-func (d *PostgresDriver) DropTables(ctx context.Context, _ string, tables []string) error {
-	schema := d.CurrentSchema()
+func (d *PostgresDriver) DropTables(ctx context.Context, db string, tables []string) error {
+	if err := d.checkDatabase(db); err != nil {
+		return err
+	}
+	schema := d.schemaFor(ctx)
 	for _, table := range tables {
 		qual, err := qualify(schema, table)
 		if err != nil {
@@ -444,8 +456,11 @@ func (d *PostgresDriver) DropTables(ctx context.Context, _ string, tables []stri
 
 // DropViews drops each view in the current schema; the first error
 // aborts.
-func (d *PostgresDriver) DropViews(ctx context.Context, _ string, views []string) error {
-	schema := d.CurrentSchema()
+func (d *PostgresDriver) DropViews(ctx context.Context, db string, views []string) error {
+	if err := d.checkDatabase(db); err != nil {
+		return err
+	}
+	schema := d.schemaFor(ctx)
 	for _, view := range views {
 		qual, err := qualify(schema, view)
 		if err != nil {
@@ -460,3 +475,30 @@ func (d *PostgresDriver) DropViews(ctx context.Context, _ string, views []string
 
 // csvBatchSize is the multi-row INSERT tuple count of the CSV importer.
 const csvBatchSize = 100
+
+func (d *PostgresDriver) exportSerialState(ctx context.Context, table string, out io.Writer) error {
+	columns, err := d.tableColumns(ctx, d.schemaFor(ctx), table)
+	if err != nil {
+		return err
+	}
+	qual, _ := qualify(d.schemaFor(ctx), table)
+	for _, col := range columns {
+		if !col.AutoIncrement {
+			continue
+		}
+		var sequence string
+		if err := d.db.QueryRowContext(ctx, "SELECT pg_get_serial_sequence($1,$2)", qual, col.Name).Scan(&sequence); err != nil {
+			return err
+		}
+		var value int64
+		var called bool
+		if err := d.db.QueryRowContext(ctx, "SELECT last_value, is_called FROM "+sequence).Scan(&value, &called); err != nil {
+			return err
+		}
+		statement := fmt.Sprintf("SELECT pg_catalog.setval(pg_get_serial_sequence(%s,%s),%d,%t);\n", sqlQuoteStringPg(sqlgen.QuoteIdentPg(table)), sqlQuoteStringPg(col.Name), value, called)
+		if err := writeExport(out, statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}

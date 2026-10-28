@@ -36,7 +36,8 @@ func pgCreateFixture() driver.TableDef {
 		ForeignKeys: []driver.ForeignKey{{
 			Name:       "fk_parent",
 			Columns:    []string{"parent_id"},
-			RefTable:   "other schema.parent",
+			RefTable:   "parent",
+			RefSchema:  "other schema",
 			RefColumns: []string{"id"},
 			OnDelete:   "CASCADE",
 			OnUpdate:   "RESTRICT",
@@ -382,7 +383,7 @@ func TestBuildAlterIndexes(t *testing.T) {
 	t.Run("duplicate names", func(t *testing.T) {
 		desired := []driver.Index{
 			{Name: "uq", Type: "INDEX", Columns: []driver.IndexColumn{{Name: "c"}}},
-			{Name: "UQ", Type: "INDEX", Columns: []driver.IndexColumn{{Name: "d"}}},
+			{Name: "uq", Type: "INDEX", Columns: []driver.IndexColumn{{Name: "d"}}},
 		}
 		if _, err := buildAlterIndexes(buildSchema, "t", nil, desired); err == nil {
 			t.Fatal("expected error for duplicate index names, got nil")
@@ -409,7 +410,7 @@ func TestBuildAlterIndexes(t *testing.T) {
 }
 
 // TestPgQuoteString pins PostgreSQL's literal quoting: only the single
-// quote is special (doubled to ''); with standard_conforming_strings a
+// quote is special (doubled to ”); with standard_conforming_strings a
 // backslash is an ordinary character and must NOT be escaped (the MySQL
 // helper doubles it — PostgreSQL's must not).
 func TestPgQuoteString(t *testing.T) {

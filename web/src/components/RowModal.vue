@@ -116,7 +116,7 @@ const NUMERIC_PREFIXES = [
 const LONG_TEXT_RE = /^(text|longtext|mediumtext|tinytext|blob|longblob|mediumblob|tinyblob|json)/
 
 function isNumeric(type: string): boolean {
-  return NUMERIC_PREFIXES.some((prefix) => type.startsWith(prefix))
+  return !type.endsWith('[]') && NUMERIC_PREFIXES.some((prefix) => type.startsWith(prefix))
 }
 
 function isLongText(type: string): boolean {

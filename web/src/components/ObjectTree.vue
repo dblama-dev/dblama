@@ -8,6 +8,16 @@
       :placeholder="t('tree.selectDb')"
       @update:value="selectDb"
     />
+    <n-select v-if="session.sessionInfo?.caps.schemas" data-testid="schema-select"
+      :value="catalog.schema" :options="schemas.map(name => ({ label: name, value: name }))"
+      :placeholder="t('tree.schemas')" size="small" @update:value="selectSchema" />
+    <n-alert v-if="schemaError" type="error">{{ schemaError }}</n-alert>
+    <n-modal v-model:show="sequenceDialog" preset="card" :title="t('tree.newSequence')" style="width: 380px">
+      <n-input v-model:value="sequenceName" :placeholder="t('tree.sequenceName')" data-testid="sequence-name" />
+      <n-input-number v-model:value="sequenceIncrement" :min="1" :precision="0" />
+      <n-button :disabled="!sequenceName.trim() || sequenceBusy" :loading="sequenceBusy"
+        data-testid="sequence-create" @click="addSequence">{{ t('tree.newSequence') }}</n-button>
+    </n-modal>
     <n-input
       v-model:value="search"
       size="small"
@@ -34,11 +44,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, ref } from 'vue'
+import { computed, h, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { NAlert, NButton, NInput, NSelect, NTree, type TreeOption } from 'naive-ui'
+import { NAlert, NButton, NInput, NSelect, NTree, NModal, NInputNumber, NPopconfirm, type TreeOption } from 'naive-ui'
 
+import { fetchSchemas, fetchSequences, createSequence, dropSequence } from '../lib/schema'
+import type { SequenceInfo } from '../api/types'
 import { api } from '../api/client'
 import { useCatalogStore } from '../stores/catalog'
 import { useSessionStore } from '../stores/session'
@@ -52,6 +64,47 @@ const db = ref<string | null>(null)
 const dbs = ref<string[]>([])
 const dbsLoading = ref(false)
 const dbsError = ref('')
+const schemas = ref<string[]>([])
+const sequences = ref<SequenceInfo[]>([])
+const schemaError = ref('')
+const sequenceDialog = ref(false)
+const sequenceName = ref('')
+const sequenceIncrement = ref<number | null>(1)
+const sequenceBusy = ref(false)
+let schemaLoadID = 0
+async function loadSequences(): Promise<void> {
+  const id = ++schemaLoadID
+  if (!session.sessionInfo?.caps.sequences) return
+  const schema = catalog.schema ?? 'public'
+  const next = await fetchSequences(schema)
+  if (id === schemaLoadID) sequences.value = next
+}
+async function selectSchema(schema: string): Promise<void> {
+  if (!db.value) return
+  schemaError.value = ''
+  sequences.value = []
+  selectedKeys.value = []
+  await catalog.selectSchema(db.value, schema)
+  try { await loadSequences() } catch (err) { schemaError.value = String(err) }
+  void router.push(catalog.path(`/db/${encodeURIComponent(db.value)}`))
+}
+async function addSequence(): Promise<void> {
+  sequenceBusy.value = true
+  schemaError.value = ''
+  try {
+    await createSequence(sequenceName.value, sequenceIncrement.value ?? 1, catalog.schema ?? 'public')
+    sequenceDialog.value = false
+    sequenceName.value = ''
+    await loadSequences()
+  } catch (err) { schemaError.value = String(err) }
+  finally { sequenceBusy.value = false }
+}
+async function removeSequence(name: string): Promise<void> {
+  try {
+    await dropSequence(name, catalog.schema ?? 'public')
+    await loadSequences()
+  } catch (err) { schemaError.value = String(err) }
+}
 const search = ref('')
 const selectedKeys = ref<string[]>([])
 // The database node starts expanded so tables are visible right away;
@@ -64,6 +117,14 @@ const dbOptions = computed(() => dbs.value.map((name) => ({ label: name, value: 
  * back to the first listed database. Tables of the selection are fetched
  * through the catalog store. */
 onMounted(async () => {
+  catalog.schemaAware = session.sessionInfo?.caps.schemas ?? false
+  if (catalog.schemaAware) {
+    catalog.schema ??= 'public'
+    try {
+      schemas.value = await fetchSchemas()
+      await loadSequences()
+    } catch (err) { schemaError.value = String(err) }
+  } else { catalog.schema = null }
   dbsLoading.value = true
   dbsError.value = ''
   try {
@@ -80,6 +141,15 @@ onMounted(async () => {
   if (db.value !== null) await catalog.fetchTables(db.value)
 })
 
+
+watch(() => catalog.schema, async () => {
+  if (!db.value || !catalog.schemaAware) return
+  schemaError.value = ''
+  sequences.value = []
+  await catalog.fetchTables(db.value)
+  try { await loadSequences() } catch (err) { schemaError.value = String(err) }
+})
+
 async function selectDb(next: string): Promise<void> {
   db.value = next
   selectedKeys.value = []
@@ -90,7 +160,7 @@ async function selectDb(next: string): Promise<void> {
 /** The db node and its groups start expanded; unknown keys are ignored by
  * the tree (e.g. group:views when the database has no views). */
 function defaultExpandedKeys(database: string | null): string[] {
-  return database === null ? [] : [`db:${database}`, 'group:tables', 'group:views']
+  return database === null ? [] : [`db:${database}`, 'group:tables', 'group:views', 'group:schemas', 'group:sequences']
 }
 
 function onExpand(keys: string[]): void {
@@ -148,6 +218,20 @@ const treeData = computed<TreeOption[]>(() => {
   if (views.length > 0) {
     children.push({ key: 'group:views', label: t('tree.views'), children: views })
   }
+  if (session.sessionInfo?.caps.schemas) {
+    children.push({ key: 'group:schemas', label: t('tree.schemas'), children: schemas.value.filter(matches).map(name => ({ key: `schema:${name}`, label: name, isLeaf: true })) })
+  }
+  if (session.sessionInfo?.caps.sequences) {
+    children.push({ key: 'group:sequences', label: t('tree.sequences'),
+      suffix: () => h(NButton, { size: 'tiny', quaternary: true, 'data-testid': 'tree-add-sequence', title: t('tree.newSequence'), onClick: (e: MouseEvent) => { e.stopPropagation(); sequenceDialog.value = true } }, { default: () => '+' }),
+      children: sequences.value.filter(seq => matches(seq.name)).map(seq => ({ key: `sequence:${seq.name}`, label: seq.name, isLeaf: true,
+        suffix: () => h(NPopconfirm, { onPositiveClick: () => removeSequence(seq.name) }, {
+          default: () => t('tree.dropSequenceConfirm', { name: seq.name }),
+          trigger: () => h(NButton, { size: 'tiny', quaternary: true, title: t('tree.dropSequence'), onClick: (e: MouseEvent) => e.stopPropagation() }, { default: () => '×' }),
+        }),
+      })),
+    })
+  }
   return [{ key: `db:${db.value}`, label: db.value, children }]
 })
 
@@ -157,18 +241,19 @@ function onSelect(keys: string[]): void {
   selectedKeys.value = [key]
   // Identifiers may contain %, ? or #; vue-router decodes params on read.
   if (key === 'console' || key === 'export' || key === 'import') {
-    void router.push(`/db/${encodeURIComponent(db.value)}/${key}`)
+    void router.push(catalog.path(`/db/${encodeURIComponent(db.value)}/${key}`))
     return
   }
+  if (key.startsWith('schema:')) { void selectSchema(key.slice(7)); return }
   if (!key.startsWith('table:')) return
   const table = key.slice('table:'.length)
-  void router.push(`/db/${encodeURIComponent(db.value)}/table/${encodeURIComponent(table)}`)
+  void router.push(catalog.path(`/db/${encodeURIComponent(db.value)}/table/${encodeURIComponent(table)}`))
 }
 
 /** Opens the create-table structure editor on the _new placeholder. */
 function createTable(): void {
   if (db.value === null) return
-  void router.push(`/db/${encodeURIComponent(db.value)}/table/${encodeURIComponent('_new')}?view=structure`)
+  void router.push(catalog.path(`/db/${encodeURIComponent(db.value)}/table/${encodeURIComponent('_new')}?view=structure`))
 }
 </script>
 

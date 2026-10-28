@@ -7,8 +7,9 @@ package postgres
 
 import (
 	"bytes"
-	"context"
 	"compress/gzip"
+	"context"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -230,25 +231,25 @@ line2'), ('c\d', E'back\\slash'), ('юникод', '🌍')`)
 		t.Errorf("columns: got %d want %d", len(got.Columns), len(want.Columns))
 	}
 
-	page, err := d.SelectRows(context.Background(), d.loginDB, "er_src1", sqlgen.SelectQuery{Sorts: []sqlgen.Sort{{Column: "id"}}})
-	if err != nil {
-		t.Fatalf("dst rows: %v", err)
-	}
-	if page.TotalRows != 120 {
-		t.Errorf("dst rows = %d, want 120", page.TotalRows)
-	}
-	d.SetSchema("public")
-	origPage, err := d.SelectRows(context.Background(), d.loginDB, "er_src1", sqlgen.SelectQuery{Sorts: []sqlgen.Sort{{Column: "id"}}})
-	if err != nil {
-		t.Fatalf("src rows: %v", err)
-	}
-	for i, row := range page.Rows {
-		for j, v := range row {
-			if v != origPage.Rows[i][j] && !(v == "" && origPage.Rows[i][j] == nil) {
-				t.Errorf("row %d col %d: got %#v want %#v", i, j, v, origPage.Rows[i][j])
-			}
+	for _, table := range []string{"er_src1", "er_src2"} {
+		key := "id"
+		if table == "er_src2" {
+			key = "k"
+		}
+		q := sqlgen.SelectQuery{Limit: 1000, Sorts: []sqlgen.Sort{{Column: key}}}
+		dst, err := d.SelectRows(driver.WithSchema(context.Background(), "er_dst"), d.loginDB, table, q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src, err := d.SelectRows(driver.WithSchema(context.Background(), "public"), d.loginDB, table, q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if src.TotalRows != dst.TotalRows || !reflect.DeepEqual(src.Rows, dst.Rows) {
+			t.Errorf("%s restored rows differ: %v versus %v", table, dst.Rows, src.Rows)
 		}
 	}
+
 }
 
 func TestExportCSV_SpecialValues(t *testing.T) {
@@ -342,7 +343,7 @@ func TestImportSQL_MidError(t *testing.T) {
 func TestImportCSV_Basic(t *testing.T) {
 	d := setupConsoleDB(t)
 	execDDL(t, d, `CREATE TABLE ic_t (id int PRIMARY KEY, name varchar(32), balance numeric(10,2))`)
-	csvData := "1,alice,10.5\n2,,\n3,bob,0\n"
+	csvData := "1,alice,10.5\n2,\\N,\\N\n3,bob,0\n"
 	err := d.ImportCSV(context.Background(), d.loginDB, "ic_t", strings.NewReader(csvData), driver.CSVImportOpts{}, nil)
 	if err != nil {
 		t.Fatalf("import: %v", err)

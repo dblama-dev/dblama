@@ -72,4 +72,17 @@ describe('catalog store', () => {
     expect(store.error).toBeNull()
     expect(store.tables).toEqual(tables)
   })
+  it('discards late table responses after switching schemas', async () => {
+    let finish!: (v: unknown) => void
+    mockedApi.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+      .mockResolvedValueOnce({ tables: [tables[1]] })
+    const store = useCatalogStore()
+    const old = store.selectSchema('appdb', 'old')
+    await store.selectSchema('appdb', 'Odd Schema')
+    finish({ tables: [tables[0]] })
+    await old
+    expect(store.tables).toEqual([tables[1]])
+    expect(mockedApi).toHaveBeenLastCalledWith('GET', '/api/databases/appdb/tables?schema=Odd%20Schema')
+  })
+
 })

@@ -29,6 +29,13 @@ export default {
     logout: 'Sign out',
   },
   tree: {
+    schemas: 'Schemas',
+    sequences: 'Sequences',
+    newSequence: 'Create sequence',
+    sequenceName: 'Sequence name',
+    dropSequence: 'Drop sequence',
+    dropSequenceConfirm: 'Drop sequence {name}?',
+
     selectDb: 'Database',
     search: 'Search',
     tables: 'Tables',

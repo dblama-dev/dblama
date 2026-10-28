@@ -78,11 +78,14 @@ var _ driver.SchemaAware = (*PostgresDriver)(nil)
 // non-empty to keep the driver contract uniform, and the schema
 // (SetSchema) picks the object set.
 func (d *PostgresDriver) ListTables(ctx context.Context, db string) ([]driver.TableInfo, error) {
+	if err := d.checkDatabase(db); err != nil {
+		return nil, err
+	}
 	if db == "" {
 		return nil, fmt.Errorf("list tables: %w: database name", sqlgen.ErrEmptyIdentifier)
 	}
 
-	rows, err := d.db.QueryContext(ctx, listTablesQuery, d.CurrentSchema())
+	rows, err := d.db.QueryContext(ctx, listTablesQuery, d.schemaFor(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("query tables: %w", err)
 	}
@@ -110,6 +113,9 @@ func (d *PostgresDriver) ListTables(ctx context.Context, db string) ([]driver.Ta
 // a table without a primary key (or a missing table) yields an empty
 // slice, not an error. Empty db or table names fail before any query.
 func (d *PostgresDriver) PrimaryKey(ctx context.Context, db, table string) ([]string, error) {
+	if err := d.checkDatabase(db); err != nil {
+		return nil, err
+	}
 	if db == "" {
 		return nil, fmt.Errorf("read primary key: %w: database name", sqlgen.ErrEmptyIdentifier)
 	}
@@ -117,7 +123,7 @@ func (d *PostgresDriver) PrimaryKey(ctx context.Context, db, table string) ([]st
 		return nil, fmt.Errorf("read primary key: %w: table name", sqlgen.ErrEmptyIdentifier)
 	}
 
-	rows, err := d.db.QueryContext(ctx, primaryKeyQuery, d.CurrentSchema(), table)
+	rows, err := d.db.QueryContext(ctx, primaryKeyQuery, d.schemaFor(ctx), table)
 	if err != nil {
 		return nil, fmt.Errorf("query primary key of %s: %w", table, err)
 	}
@@ -135,4 +141,12 @@ func (d *PostgresDriver) PrimaryKey(ctx context.Context, db, table string) ([]st
 		return nil, fmt.Errorf("iterate primary key of %s: %w", table, err)
 	}
 	return pk, nil
+}
+
+// schemaFor never mutates the session default while handling a request.
+func (d *PostgresDriver) schemaFor(ctx context.Context) string {
+	if schema := driver.SchemaFromContext(ctx); schema != "" {
+		return schema
+	}
+	return d.CurrentSchema()
 }

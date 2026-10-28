@@ -48,19 +48,19 @@ type stubDriver struct {
 	truncateErr      error
 	// Schema and sequence capability configuration and recordings. A nil
 	// schemaAware/sequenceMgr models a driver without the capability.
-	schemaAware   bool
-	gotSchemas    []string
-	schemaErr     error
-	setSchemaErr  error
-	schemaCalls   []string
-	sequenceMgr   bool
-	sequences     []driver.SequenceInfo
-	seqErr        error
-	seqCalls      []string
-	dropTablesCalls  []tablesOpCall
-	dropTablesErr    error
-	dropViewsCalls   []tablesOpCall
-	dropViewsErr     error
+	schemaAware     bool
+	gotSchemas      []string
+	schemaErr       error
+	setSchemaErr    error
+	schemaCalls     []string
+	sequenceMgr     bool
+	sequences       []driver.SequenceInfo
+	seqErr          error
+	seqCalls        []string
+	dropTablesCalls []tablesOpCall
+	dropTablesErr   error
+	dropViewsCalls  []tablesOpCall
+	dropViewsErr    error
 	// Row browsing and row writes.
 	selectCalls  []selectCall
 	selectPage   driver.Page
@@ -186,8 +186,11 @@ func (d *stubDriver) ListDatabases(context.Context) ([]driver.DatabaseInfo, erro
 	return d.databases, nil
 }
 
-func (d *stubDriver) ListTables(_ context.Context, db string) ([]driver.TableInfo, error) {
+func (d *stubDriver) ListTables(ctx context.Context, db string) ([]driver.TableInfo, error) {
 	d.gotListTables = append(d.gotListTables, db)
+	if schema := driver.SchemaFromContext(ctx); schema != "" {
+		d.schemaCalls = append(d.schemaCalls, schema)
+	}
 	if d.tablesErr != nil {
 		return nil, d.tablesErr
 	}

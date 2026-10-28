@@ -98,7 +98,7 @@ func TestExportSQL_RoundTrip(t *testing.T) {
 			})
 
 			var dump bytes.Buffer
-			err := drv.Export(context.Background(), driver.ExportRequest{
+			err := drv.Export(context.Background(), cfg.Database, driver.ExportRequest{
 				Format: "sql",
 				Tables: []string{"d_rt_pk", "d_rt_nopk"},
 			}, &dump)
@@ -191,7 +191,7 @@ func TestExportCSV_SpecialValues(t *testing.T) {
 			t.Cleanup(func() { execDDL(t, cfg, "DROP TABLE IF EXISTS d_csv_t") })
 
 			var out bytes.Buffer
-			err := drv.Export(context.Background(), driver.ExportRequest{
+			err := drv.Export(context.Background(), cfg.Database, driver.ExportRequest{
 				Format: "csv",
 				Tables: []string{"d_csv_t"},
 			}, &out)
@@ -231,11 +231,11 @@ func TestExport_Gzip(t *testing.T) {
 	var plain, zipped bytes.Buffer
 	ctx := context.Background()
 	req := driver.ExportRequest{Format: "csv", Tables: []string{"d_gz_t"}}
-	if err := drv.Export(ctx, req, &plain); err != nil {
+	if err := drv.Export(ctx, cfg.Database, req, &plain); err != nil {
 		t.Fatalf("Export(csv) error: %v", err)
 	}
 	req.Gzip = true
-	if err := drv.Export(ctx, req, &zipped); err != nil {
+	if err := drv.Export(ctx, cfg.Database, req, &zipped); err != nil {
 		t.Fatalf("Export(csv, gzip) error: %v", err)
 	}
 
@@ -283,7 +283,7 @@ func TestExportSQL_KeysetPaging(t *testing.T) {
 			})
 
 			var dump bytes.Buffer
-			err := drv.Export(context.Background(), driver.ExportRequest{Format: "sql"}, &dump)
+			err := drv.Export(context.Background(), cfg.Database, driver.ExportRequest{Format: "sql"}, &dump)
 			if err != nil {
 				t.Fatalf("Export(sql, whole db) error: %v", err)
 			}
@@ -323,10 +323,10 @@ func TestExport_Options(t *testing.T) {
 
 	ctx := context.Background()
 	var plain, both bytes.Buffer
-	if err := drv.Export(ctx, driver.ExportRequest{Format: "sql", Tables: []string{"d_opt_t"}}, &plain); err != nil {
+	if err := drv.Export(ctx, cfg.Database, driver.ExportRequest{Format: "sql", Tables: []string{"d_opt_t"}}, &plain); err != nil {
 		t.Fatalf("Export(sql) error: %v", err)
 	}
-	if err := drv.Export(ctx, driver.ExportRequest{
+	if err := drv.Export(ctx, cfg.Database, driver.ExportRequest{
 		Format:       "sql",
 		Tables:       []string{"d_opt_t"},
 		DropIfExists: true,
@@ -361,16 +361,16 @@ func TestExport_Rejections(t *testing.T) {
 
 	ctx := context.Background()
 	var buf bytes.Buffer
-	if err := drv.Export(ctx, driver.ExportRequest{Format: "xml", Tables: []string{"d_rej_t"}}, &buf); err == nil {
+	if err := drv.Export(ctx, cfg.Database, driver.ExportRequest{Format: "xml", Tables: []string{"d_rej_t"}}, &buf); err == nil {
 		t.Error("Export(unknown format) error: expected error, got nil")
 	}
-	if err := drv.Export(ctx, driver.ExportRequest{Format: "csv"}, &buf); err == nil {
+	if err := drv.Export(ctx, cfg.Database, driver.ExportRequest{Format: "csv"}, &buf); err == nil {
 		t.Error("Export(csv, no tables) error: expected error, got nil")
 	}
-	if err := drv.Export(ctx, driver.ExportRequest{Format: "tsv", Tables: []string{"d_rej_t", "other"}}, &buf); err == nil {
+	if err := drv.Export(ctx, cfg.Database, driver.ExportRequest{Format: "tsv", Tables: []string{"d_rej_t", "other"}}, &buf); err == nil {
 		t.Error("Export(tsv, two tables) error: expected error, got nil")
 	}
-	if err := drv.Export(ctx, driver.ExportRequest{Format: "csv", Tables: []string{"d_missing_t"}}, &buf); err == nil {
+	if err := drv.Export(ctx, cfg.Database, driver.ExportRequest{Format: "csv", Tables: []string{"d_missing_t"}}, &buf); err == nil {
 		t.Error("Export(csv, missing table) error: expected error, got nil")
 	}
 	if buf.Len() != 0 {
@@ -395,7 +395,7 @@ func TestExport_WriteError(t *testing.T) {
 
 	ctx := context.Background()
 	for _, zipped := range []bool{false, true} {
-		err := drv.Export(ctx, driver.ExportRequest{
+		err := drv.Export(ctx, cfg.Database, driver.ExportRequest{
 			Format: "csv",
 			Tables: []string{"d_werr_t"},
 			Gzip:   zipped,

@@ -71,9 +71,10 @@ function mockBase(): void {
   })
 }
 
-function mountEditor(table = 'users'): ReturnType<typeof mount> {
+function mountEditor(table = 'users', schema?: string): ReturnType<typeof mount> {
   const pinia = createPinia()
   setActivePinia(pinia)
+  if (schema) { const c = useCatalogStore(); c.schemaAware = true; c.schema = schema }
     // Teleport is stubbed so notification content stays inside the wrapper.
     return mount(
       defineComponent({
@@ -437,4 +438,20 @@ describe('StructureEditor', () => {
     expect(wrapper.find('.struct-field--table-name').find('input').element.value).toBe('')
     wrapper.unmount()
   })
+})
+
+it('uses schema for definitions and writes and hides PostgreSQL column reordering', async () => {
+  mockedApi.mockImplementation(async (method, url) => {
+    if (method === 'GET' && url.includes('/tables?')) return { tables: [] }
+    if (method === 'GET') return def
+    return undefined
+  })
+  const wrapper = mountEditor('users', 'Odd Schema')
+  await flushPromises()
+  expect(mockedApi).toHaveBeenCalledWith('GET', `${defUrl}?schema=Odd%20Schema`)
+  expect(wrapper.find('[data-testid="col-up"]').exists()).toBe(false)
+  await wrapper.find('[data-testid="struct-save"]').trigger('click')
+  await flushPromises()
+  expect(mockedApi).toHaveBeenCalledWith('PUT', `${defUrl}?schema=Odd%20Schema`, expect.anything())
+  wrapper.unmount()
 })

@@ -93,6 +93,7 @@ export interface IndexColumn {
 }
 
 export interface Index {
+  constraint?: string
   name: string
   type: string
   columns: IndexColumn[]
@@ -102,6 +103,7 @@ export interface ForeignKey {
   name: string
   columns: string[]
   refTable: string
+  refSchema?: string
   refColumns: string[]
   onDelete?: string
   onUpdate?: string
@@ -138,6 +140,12 @@ export interface QueryResult {
   lastInsertId?: number
   truncated?: boolean
   seconds: number
+}
+
+export interface SequenceInfo {
+  name: string
+  lastValue: number
+  increment: number
 }
 
 export interface Page {

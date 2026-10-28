@@ -62,7 +62,7 @@ func TestImportSQL_Basic(t *testing.T) {
 			})
 
 			var dump bytes.Buffer
-			if err := drv.Export(ctx, driver.ExportRequest{
+			if err := drv.Export(ctx, cfg.Database, driver.ExportRequest{
 				Format: "sql",
 				Tables: []string{"imp_basic_t"},
 			}, &dump); err != nil {
@@ -193,7 +193,7 @@ func TestImportSQL_Gzip(t *testing.T) {
 			})
 
 			var plain bytes.Buffer
-			if err := drv.Export(context.Background(), driver.ExportRequest{
+			if err := drv.Export(context.Background(), cfg.Database, driver.ExportRequest{
 				Format: "sql",
 				Tables: []string{"imp_gz_t"},
 			}, &plain); err != nil {

@@ -180,4 +180,35 @@ describe('ObjectTree', () => {
     expect(mockedApi).toHaveBeenCalledWith('GET', '/api/databases/otherdb/tables')
     expect(catalog.tables).toEqual(tables)
   })
+  it('selects PostgreSQL schemas and exposes sequences, preserving schema in navigation', async () => {
+    const session = useSessionStore()
+    session.sessionInfo!.caps.schemas = true
+    session.sessionInfo!.caps.sequences = true
+    session.sessionInfo!.driver.flavor = 'postgres'
+    mockedApi.mockImplementation(async (_method, url) => {
+      if (url === '/api/databases') return databasesPayload
+      if (url === '/api/schemas') return { schemas: ['public', 'Odd Schema'] }
+      if (url.startsWith('/api/sequences')) return { sequences: [{ name: 'order_seq', lastValue: 0, increment: 1 }] }
+      if (url.includes('/tables')) return { tables }
+      return undefined
+    })
+    const wrapper = await mountTree()
+    expect(mockedApi).toHaveBeenCalledWith('GET', '/api/databases/mydb/tables?schema=public')
+    expect(wrapper.find('[data-testid="schema-select"]').exists()).toBe(true)
+    wrapper.findComponent(NTree).vm.$emit('update:selected-keys', ['schema:Odd Schema'])
+    await flushPromises()
+    expect(mockedApi).toHaveBeenCalledWith('GET', '/api/databases/mydb/tables?schema=Odd%20Schema')
+    expect(mockedApi).toHaveBeenCalledWith('GET', '/api/sequences?schema=Odd%20Schema')
+    wrapper.findComponent(NTree).vm.$emit('update:selected-keys', ['table:users'])
+    await flushPromises()
+    expect(pushSpy).toHaveBeenCalledWith('/db/mydb/table/users?schema=Odd%20Schema')
+    expect(wrapper.text()).toContain('order_seq')
+    // Browser history changes catalog scope through the route guard.
+    useCatalogStore().schema = 'public'
+    await flushPromises()
+    expect(mockedApi).toHaveBeenLastCalledWith('GET', '/api/sequences?schema=public')
+    expect(wrapper.find('[data-testid="tree-add-sequence"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
 })

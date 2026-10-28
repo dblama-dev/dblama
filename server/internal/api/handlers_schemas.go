@@ -9,19 +9,16 @@ import (
 	"github.com/hitslab/db-manager/server/internal/session"
 )
 
-// applySchemaParam makes schema the current schema of schema-aware
-// drivers (PostgreSQL): handlers call it with the ?schema= query
-// parameter before any catalog/data call. Drivers without schemas
-// (MySQL) ignore the parameter. An unknown schema surfaces later as a
-// driver error (500 driver_error) — the parameter is passed through.
-func applySchemaParam(r *http.Request, sess *session.Session) {
-	sa, ok := sess.Driver.(driver.SchemaAware)
-	if !ok {
-		return
-	}
-	if schema := r.URL.Query().Get("schema"); schema != "" {
-		_ = sa.SetSchema(schema)
-	}
+// requestSchema binds schema to the request, including console and transfer
+// routes. No mutable session-wide selection is changed.
+func requestSchema(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sess, _ := session.FromContext(r.Context())
+		if _, ok := sess.Driver.(driver.SchemaAware); ok {
+			r = r.WithContext(driver.WithSchema(r.Context(), r.URL.Query().Get("schema")))
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // sequenceAware extracts the SequenceManager capability or answers with
@@ -73,11 +70,9 @@ func (s *apiServer) handleSequencesList(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	schema := r.URL.Query().Get("schema")
+	schema := driver.SchemaFromContext(r.Context())
 	if schema == "" {
-		if sa, ok := sessSchema(r); ok {
-			schema = sa.CurrentSchema()
-		}
+		schema = "public"
 	}
 	seqs, err := sm.ListSequences(r.Context(), schema)
 	if err != nil {
@@ -157,14 +152,4 @@ func (s *apiServer) handleSequenceUpdate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// sessSchema returns the SchemaAware capability of the request session.
-func sessSchema(r *http.Request) (driver.SchemaAware, bool) {
-	sess, _ := session.FromContext(r.Context())
-	if sess == nil {
-		return nil, false
-	}
-	sa, ok := sess.Driver.(driver.SchemaAware)
-	return sa, ok
 }

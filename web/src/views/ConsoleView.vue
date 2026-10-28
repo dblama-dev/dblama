@@ -60,11 +60,13 @@ import { NAlert, NButton, NSelect } from 'naive-ui'
 
 import ResultGrid from '../components/ResultGrid.vue'
 import { useConsole } from '../lib/useConsole'
+import { useCatalogStore } from '../stores/catalog'
 import { useSessionStore } from '../stores/session'
 
 const { t } = useI18n()
 const route = useRoute()
 const session = useSessionStore()
+const catalog = useCatalogStore()
 
 // History is scoped per connected server. The session carries the
 // driver flavor and host (no port), which identifies the single live
@@ -77,6 +79,7 @@ const serverKey = computed(() => {
 const c = useConsole({
   db: () => String(route.params.db ?? ''),
   serverKey: serverKey.value,
+  schema: () => catalog.schemaAware ? catalog.schema : null,
 })
 
 // --- CodeMirror editor -------------------------------------------------
