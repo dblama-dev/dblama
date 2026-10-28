@@ -7,6 +7,7 @@
     <n-tabs type="line" :value="view" @update:value="switchView">
       <n-tab name="data">{{ t('table.data') }}</n-tab>
       <n-tab name="structure">{{ t('table.structure') }}</n-tab>
+      <n-tab v-if="!isNewTable" name="sql">{{ t('table.sql') }}</n-tab>
     </n-tabs>
     <!-- Create mode (_new): no rows exist yet, the data tab is a
          placeholder and only the structure editor is usable. -->
@@ -40,6 +41,7 @@
       @renamed="onTableRenamed"
       @created="onTableCreated"
     />
+    <TableSQL v-else-if="view === 'sql'" :db="db" :table="table" />
     <RowModal
       v-if="!isNewTable"
       :show="rowModal.show"
@@ -67,6 +69,7 @@ import { useCatalogStore } from '../stores/catalog'
 import DataGrid from '../components/DataGrid.vue'
 import RowModal from '../components/RowModal.vue'
 import StructureEditor from './structure/StructureEditor.vue'
+import TableSQL from './structure/TableSQL.vue'
 import { buildRowsQuery, type RowsFilter, type RowsSort } from '../lib/tableQuery'
 
 const { t } = useI18n()
@@ -79,7 +82,10 @@ const catalog = useCatalogStore()
 // for the api path (identifiers may contain %, spaces, ...).
 const db = computed(() => String(route.params.db ?? ''))
 const table = computed(() => String(route.params.t ?? ''))
-const view = computed(() => (route.query.view === 'structure' ? 'structure' : 'data'))
+const view = computed(() => {
+  if (route.query.view === 'sql') return isNewTable.value ? 'structure' : 'sql'
+  return route.query.view === 'structure' ? 'structure' : 'data'
+})
 // The literal "_new" is the create-table placeholder, not a table name.
 const isNewTable = computed(() => table.value === '_new')
 

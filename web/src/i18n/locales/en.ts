@@ -48,6 +48,9 @@ export default {
     loadFailed: 'Failed to load the table list',
   },
   table: {
+    sql: 'SQL',
+    sqlLoading: 'Loading SQL…',
+    sqlRefresh: 'Refresh',
     data: 'Data',
     structure: 'Structure',
     new: 'New table',

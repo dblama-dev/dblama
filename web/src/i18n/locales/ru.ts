@@ -48,6 +48,9 @@ export default {
     loadFailed: 'Не удалось загрузить список таблиц',
   },
   table: {
+    sql: 'SQL',
+    sqlLoading: 'Загрузка SQL…',
+    sqlRefresh: 'Обновить',
     data: 'Данные',
     structure: 'Структура',
     new: 'Новая таблица',

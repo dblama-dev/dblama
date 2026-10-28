@@ -1,8 +1,8 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { defineComponent, h } from 'vue'
-import { NNotificationProvider } from 'naive-ui'
-import { expect, it, vi } from 'vitest'
+import { defineComponent, h, reactive } from 'vue'
+import { NNotificationProvider, NTabs } from 'naive-ui'
+import { beforeEach, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
 import { useCatalogStore } from '../stores/catalog'
 import i18n from '../i18n'
@@ -10,7 +10,10 @@ import TableView from './TableView.vue'
 import DataGrid from '../components/DataGrid.vue'
 import RowModal from '../components/RowModal.vue'
 vi.mock('../api/client', () => ({ api: vi.fn(), ApiError: class extends Error {} }))
-vi.mock('vue-router', () => ({ useRoute: () => ({ params: { db: 'app', t: 'items' }, query: {} }), useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }))
+let route = reactive({ params: { db: 'app', t: 'items' }, query: {} as Record<string, string> })
+const push = vi.fn()
+vi.mock('vue-router', () => ({ useRoute: () => route, useRouter: () => ({ push, replace: vi.fn() }) }))
+beforeEach(() => { route = reactive({ params: { db: 'app', t: 'items' }, query: {} }); vi.mocked(api).mockReset(); push.mockClear() })
 it('scopes rows, keys and writes to the schema and reloads when it changes', async () => {
   const pinia = createPinia(); setActivePinia(pinia)
   const catalog = useCatalogStore(); catalog.schemaAware = true; catalog.schema = 'Odd Schema'
@@ -31,4 +34,40 @@ it('scopes rows, keys and writes to the schema and reloads when it changes', asy
   await flushPromises()
   expect(api).toHaveBeenCalledWith('GET', '/api/databases/app/tables/items/pk?schema=second')
   wrapper.unmount()
+})
+
+function openTable() {
+ const pinia = createPinia(); setActivePinia(pinia)
+ vi.mocked(api).mockImplementation(async (_method, path) => {
+  if (path.includes('/create-sql')) return { sql: 'CREATE TABLE visible (id int)' }
+  if (path.includes('/pk')) return { columns: ['id'] }
+  if (path.includes('/rows')) return { columns: [], rows: [], totalRows: 0 }
+  return { columns: [], indexes: [], foreignKeys: [], options: {} }
+ })
+ return mount(defineComponent({ setup: () => () => h(NNotificationProvider, null, { default: () => h(TableView) }) }), { global: { plugins: [pinia, i18n], stubs: { DataGrid: true, RowModal: true, StructureEditor: true } } })
+}
+it('opens SQL from the URL and retains schema when changing sections', async () => {
+ route.query = { view: 'sql', schema: 'Odd Schema' }
+ const wrapper = openTable(); await flushPromises()
+ expect(wrapper.get('pre code').text()).toContain('CREATE TABLE visible')
+ wrapper.findComponent(NTabs).vm.$emit('update:value', 'structure'); await flushPromises()
+ expect(push).toHaveBeenCalledWith({ query: { view: 'structure', schema: 'Odd Schema' } })
+ wrapper.unmount()
+})
+it('shows structure for a new table addressed by view=sql without requesting DDL', async () => {
+ route.params.t = '_new'; route.query = { view: 'sql' }
+ const wrapper = openTable(); await flushPromises()
+ expect(wrapper.find('pre').exists()).toBe(false)
+ expect(wrapper.find('structure-editor-stub').exists()).toBe(true)
+ expect(api).not.toHaveBeenCalled()
+ wrapper.unmount()
+})
+it('reads fresh SQL after returning from the structure section', async () => {
+ route.query = { view: 'sql' }
+ const wrapper = openTable(); await flushPromises()
+ route.query = { view: 'structure' }; await flushPromises()
+ vi.mocked(api).mockResolvedValueOnce({ sql: 'CREATE TABLE updated (id int, name text)' })
+ route.query = { view: 'sql' }; await flushPromises()
+ expect(wrapper.get('pre code').text()).toContain('name text')
+ wrapper.unmount()
 })
