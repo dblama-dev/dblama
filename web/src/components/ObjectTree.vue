@@ -48,7 +48,7 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { NAlert, NButton, NInput, NSelect, NTree, NModal, NInputNumber, NPopconfirm, type TreeOption } from 'naive-ui'
 
 import { fetchSchemas, fetchSequences, createSequence, dropSequence, alterSequence } from '../lib/schema'
@@ -59,10 +59,12 @@ import { useSessionStore } from '../stores/session'
 
 const { t } = useI18n()
 const router = useRouter()
+const route = useRoute()
 const catalog = useCatalogStore()
 const session = useSessionStore()
 
 const db = ref<string | null>(null)
+const routeDatabase = computed(() => typeof route.params.db === 'string' ? route.params.db : null)
 const dbs = ref<string[]>([])
 const dbsLoading = ref(false)
 const dbsError = ref('')
@@ -119,9 +121,8 @@ const expandedKeys = ref<string[]>([])
 
 const dbOptions = computed(() => dbs.value.map((name) => ({ label: name, value: name })))
 
-/** Loads the database list and preselects the session database, falling
- * back to the first listed database. Tables of the selection are fetched
- * through the catalog store. */
+/** Keep the sidebar and shared catalog on the open route's database.
+ * Outside a database route, retain the selection or use the login database. */
 async function loadDatabases(): Promise<void> {
   catalog.schemaAware = session.sessionInfo?.caps.schemas ?? false
   if (catalog.schemaAware) {
@@ -142,13 +143,21 @@ async function loadDatabases(): Promise<void> {
     dbsLoading.value = false
   }
   const initial = db.value ?? session.sessionInfo?.database
-  db.value = initial && dbs.value.includes(initial) ? initial : (dbs.value[0] ?? null)
+  // A rename may update the route before this list response catches up.
+  db.value = routeDatabase.value ?? (initial && dbs.value.includes(initial) ? initial : (dbs.value[0] ?? null))
   expandedKeys.value = defaultExpandedKeys(db.value)
   if (db.value !== null) await catalog.fetchTables(db.value)
 }
 onMounted(loadDatabases)
 watch(() => catalog.databaseRevision, loadDatabases)
 
+watch(routeDatabase, async next => {
+  if (!next || next === db.value) return
+  db.value = next
+  selectedKeys.value = []
+  expandedKeys.value = defaultExpandedKeys(next)
+  await catalog.fetchTables(next)
+})
 
 watch(() => catalog.schema, async () => {
   if (!db.value || !catalog.schemaAware) return
@@ -162,6 +171,7 @@ async function selectDb(next: string): Promise<void> {
   db.value = next
   selectedKeys.value = []
   expandedKeys.value = defaultExpandedKeys(next)
+  void router.push(catalog.path(`/db/${encodeURIComponent(next)}`))
   await catalog.fetchTables(next)
 }
 

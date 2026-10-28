@@ -17,6 +17,13 @@ func TestDatabaseOperations(t *testing.T) {
 			if err := d.CreateDatabase(ctx, "p5_src", "utf8mb4_unicode_ci"); err != nil {
 				t.Fatal(err)
 			}
+			if err := d.CreateDatabase(ctx, "p5_latin", "latin1_swedish_ci"); err != nil {
+				t.Fatal(err)
+			}
+			var explicitCharset string
+			if err := d.db.QueryRowContext(ctx, "SELECT DEFAULT_CHARACTER_SET_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = 'p5_latin'").Scan(&explicitCharset); err != nil || explicitCharset != "latin1" {
+				t.Fatalf("explicit collation character set %q: %v", explicitCharset, err)
+			}
 			exec := func(q string) {
 				t.Helper()
 				if _, err := d.db.ExecContext(ctx, q); err != nil {
@@ -95,7 +102,7 @@ func TestDatabaseOperations(t *testing.T) {
 			if _, err := d.db.ExecContext(ctx, "SELECT * FROM p5_target.items"); err == nil {
 				t.Fatal("partial copy left behind")
 			}
-			for _, name := range []string{"p5_renamed", "p5_target", "p5_moved"} {
+			for _, name := range []string{"p5_renamed", "p5_target", "p5_moved", "p5_latin"} {
 				if err := d.DropDatabase(ctx, name); err != nil {
 					t.Fatal(err)
 				}
@@ -108,6 +115,45 @@ func TestDatabaseOperations(t *testing.T) {
 				if strings.HasPrefix(db.Name, "p5_") {
 					t.Fatalf("unexpected database after cleanup: %s", db.Name)
 				}
+			}
+		})
+	}
+}
+
+func TestDatabaseRenamePreservesServerDefaultCollation(t *testing.T) {
+	for _, image := range testImages {
+		t.Run(image.image, func(t *testing.T) {
+			ctx := context.Background()
+			d := connectOK(t, startDB(t, image.image)).(*MysqlDriver)
+			if err := d.CreateDatabase(ctx, "default_collation_source", ""); err != nil {
+				t.Fatal(err)
+			}
+			var charset, collation string
+			if err := d.db.QueryRowContext(ctx, "SELECT DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = 'default_collation_source'").Scan(&charset, &collation); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := d.db.ExecContext(ctx, "CREATE TABLE default_collation_source.items (id INT PRIMARY KEY, label VARCHAR(80))"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := d.db.ExecContext(ctx, "INSERT INTO default_collation_source.items VALUES (7, 'preserved')"); err != nil {
+				t.Fatal(err)
+			}
+			if err := d.RenameDatabase(ctx, "default_collation_source", "default_collation_renamed"); err != nil {
+				t.Fatalf("rename database with server default %s/%s: %v", charset, collation, err)
+			}
+			var gotCharset, gotCollation, label string
+			if err := d.db.QueryRowContext(ctx, "SELECT DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = 'default_collation_renamed'").Scan(&gotCharset, &gotCollation); err != nil {
+				t.Fatal(err)
+			}
+			if gotCharset != charset || gotCollation != collation {
+				t.Fatalf("database defaults changed from %s/%s to %s/%s", charset, collation, gotCharset, gotCollation)
+			}
+			if err := d.db.QueryRowContext(ctx, "SELECT label FROM default_collation_renamed.items WHERE id = 7").Scan(&label); err != nil || label != "preserved" {
+				t.Fatalf("renamed row %q: %v", label, err)
+			}
+			var remaining int
+			if err := d.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = 'default_collation_source'").Scan(&remaining); err != nil || remaining != 0 {
+				t.Fatalf("source remains after rename: %d %v", remaining, err)
 			}
 		})
 	}

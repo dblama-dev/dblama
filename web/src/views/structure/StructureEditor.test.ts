@@ -1,10 +1,9 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, h, reactive } from 'vue'
 import {
   NCheckbox,
   NInput,
   NNotificationProvider,
-  NRadio,
   NSelect,
 } from 'naive-ui'
 import { createPinia, setActivePinia } from 'pinia'
@@ -105,21 +104,21 @@ function rowByName(wrapper: ReturnType<typeof mount>, name: string) {
   return row!
 }
 
-function field(row: ReturnType<typeof rows>, cls: string) {
+function field(row: DOMWrapper<Element> | VueWrapper, cls: string) {
   return row.find(`.${cls}`)
 }
 
-function nameInput(row: ReturnType<typeof rows>) {
+function nameInput(row: DOMWrapper<Element> | VueWrapper) {
   const input = field(row, 'struct-field--name').find('input')
   expect(input.exists()).toBe(true)
   return input
 }
 
-function setString(row: ReturnType<typeof rows>, cls: string, value: string): void {
+function setString(row: DOMWrapper<Element> | VueWrapper, cls: string, value: string): void {
   field(row, cls).findComponent(NInput).vm.$emit('update:value', value)
 }
 
-function setGenerated(row: ReturnType<typeof rows>, value: string): void {
+function setGenerated(row: DOMWrapper<Element> | VueWrapper, value: string): void {
   field(row, 'struct-field--generated').findComponent(NSelect).vm.$emit('update:value', value)
 }
 
@@ -145,7 +144,7 @@ describe('StructureEditor', () => {
 
     const names = rows(wrapper).map((r) => nameInput(r).element.value)
     expect(names).toEqual(['id', 'title', 'size'])
-    expect(field(rowByName(wrapper, 'id'), 'struct-field--autoinc').findComponent(NRadio).props('checked')).toBe(true)
+    expect(field(rowByName(wrapper, 'id'), 'struct-field--autoinc').findComponent(NCheckbox).props('checked')).toBe(true)
     expect(field(rowByName(wrapper, 'title'), 'struct-field--default').findComponent(NInput).props('value')).toBe('untitled')
     wrapper.unmount()
   })
@@ -181,6 +180,7 @@ describe('StructureEditor', () => {
       name: 'size',
       oldName: 'size',
       type: '',
+      nullable: false,
     })
     wrapper.unmount()
   })
@@ -226,16 +226,44 @@ describe('StructureEditor', () => {
     wrapper.unmount()
   })
 
+  it('turns off a loaded auto_increment column with a real click', async () => {
+    mockBase()
+    const wrapper = await mountLoaded()
+    const toggle = field(rowByName(wrapper, 'id'), 'struct-field--autoinc').find('.n-radio, .n-checkbox')
+    await toggle.trigger('click')
+    await clickSave(wrapper)
+    expect(putBodies()[0].columns.find(c => c.name === 'id')?.autoIncrement).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('disabling a PostgreSQL serial also removes its nextval default', async () => {
+    mockedApi.mockImplementation(async (method, url) => {
+      if (method === 'GET' && url.startsWith(defUrl)) return {
+        ...def, columns: [{ name: 'id', oldName: 'id', type: 'int', nullable: false, autoIncrement: true,
+          default: { value: "nextval('users_id_seq'::regclass)", isSqlExpression: true } }],
+      }
+      return undefined
+    })
+    const wrapper = mountEditor('users', 'public')
+    await flushPromises()
+    await field(rowByName(wrapper, 'id'), 'struct-field--autoinc').find('.n-checkbox').trigger('click')
+    await clickSave(wrapper)
+    const body = mockedApi.mock.calls.find(([method]) => method === 'PUT')![2] as TableDef
+    expect(body.columns[0].autoIncrement).toBeUndefined()
+    expect(body.columns[0].default).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it('auto_increment is exclusive: checking one column unchecks the other', async () => {
     mockBase()
     const wrapper = await mountLoaded()
 
-    const titleRadio = field(rowByName(wrapper, 'title'), 'struct-field--autoinc').findComponent(NRadio)
-    titleRadio.vm.$emit('update:checked', true)
+    const titleCheckbox = field(rowByName(wrapper, 'title'), 'struct-field--autoinc').findComponent(NCheckbox)
+    titleCheckbox.vm.$emit('update:checked', true)
     await flushPromises()
 
-    expect(field(rowByName(wrapper, 'title'), 'struct-field--autoinc').findComponent(NRadio).props('checked')).toBe(true)
-    expect(field(rowByName(wrapper, 'id'), 'struct-field--autoinc').findComponent(NRadio).props('checked')).toBe(false)
+    expect(field(rowByName(wrapper, 'title'), 'struct-field--autoinc').findComponent(NCheckbox).props('checked')).toBe(true)
+    expect(field(rowByName(wrapper, 'id'), 'struct-field--autoinc').findComponent(NCheckbox).props('checked')).toBe(false)
 
     await clickSave(wrapper)
     const columns = putBodies()[0].columns
@@ -403,6 +431,32 @@ describe('StructureEditor', () => {
       options: {},
     })
     expect(wrapper.findComponent(StructureEditor).emitted('created')).toEqual([['newtbl']])
+    wrapper.unmount()
+  })
+
+  it('includes a draft primary key in the same request that creates the table', async () => {
+    mockedApi.mockResolvedValue(undefined)
+    const wrapper = mountEditor('_new')
+    await flushPromises()
+    setString(wrapper, 'struct-field--table-name', 'items')
+    await wrapper.find('[data-testid="struct-add"]').trigger('click')
+    const row = rows(wrapper)[0]
+    setString(row, 'struct-field--name', 'id')
+    field(row, 'struct-field--type').findComponent(NSelect).vm.$emit('update:value', 'int')
+    await flushPromises()
+    const addIndex = wrapper.findAll('button').find(button => button.text() === i18n.global.t('structure.addIndex'))
+    expect(addIndex, 'new tables must expose index editing').toBeDefined()
+    await addIndex!.trigger('click')
+    expect(wrapper.find('[data-testid="struct-save"]').attributes('disabled')).toBeDefined()
+    const index = wrapper.find('[data-testid="index-row"]')
+    index.find('.struct-field--indextype').findComponent(NSelect).vm.$emit('update:value', 'PRIMARY')
+    index.find('.struct-field--indexcolumns').findComponent(NSelect).vm.$emit('update:value', ['id'])
+    await flushPromises()
+    await clickSave(wrapper)
+    expect(mockedApi).toHaveBeenCalledWith('PUT', '/api/databases/mydb/tables/_new', expect.objectContaining({
+      indexes: [{ name: 'PRIMARY', type: 'PRIMARY', columns: [{ name: 'id' }] }],
+    }))
+    expect(mockedApi.mock.calls.some(([method]) => method === 'POST')).toBe(false)
     wrapper.unmount()
   })
 

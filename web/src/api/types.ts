@@ -134,8 +134,8 @@ export interface ColumnMeta {
 // driver.Result json tags. A row-returning statement fills columns/rows,
 // a non-row statement fills affectedRows/lastInsertId.
 export interface QueryResult {
-  columns: ColumnMeta[]
-  rows: unknown[][]
+  columns: ColumnMeta[] | null
+  rows: unknown[][] | null
   affectedRows?: number
   lastInsertId?: number
   truncated?: boolean

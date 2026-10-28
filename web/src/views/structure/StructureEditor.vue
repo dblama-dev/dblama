@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useNotification } from 'naive-ui'
-import { NButton, NCheckbox, NInput, NRadio, NSelect } from 'naive-ui'
+import { NButton, NCheckbox, NInput, NSelect } from 'naive-ui'
 
 import { api, ApiError } from '../../api/client'
 import { useCatalogStore } from '../../stores/catalog'
@@ -115,6 +115,7 @@ const tableName = ref(props.table === '_new' ? '' : props.table)
 const rows = ref<EditableColumn[]>([])
 const options = ref<TableOptions>({})
 const indexes = ref<Index[]>([])
+const indexesValid = ref(true)
 const foreignKeys = ref<ForeignKey[]>([])
 let keySeq = 0
 
@@ -242,7 +243,14 @@ function toggleDeletion(row: EditableColumn): void {
 function setAutoIncrement(row: EditableColumn, value: boolean): void {
   // At most one AUTO_INCREMENT column per table.
   for (const r of rows.value) {
-    r.autoIncrement = r === row && value
+    const enabled = r === row && value
+    // PostgreSQL serial is represented by both this flag and a nextval
+    // default. Keeping that default would re-enable generation on reload.
+    if (r.autoIncrement && !enabled && catalog.schemaAware && r.isSqlExpression && r.defaultValue.trim().startsWith('nextval(')) {
+      r.defaultValue = ''
+      r.isSqlExpression = false
+    }
+    r.autoIncrement = enabled
   }
 }
 
@@ -268,6 +276,7 @@ function onGeneratedChanged(row: EditableColumn, value: '' | 'VIRTUAL' | 'STORED
 const canSave = computed(
   () =>
     tableName.value.trim() !== '' &&
+    (!createMode.value || indexesValid.value) &&
     // Create mode needs at least one column (the backend rejects an
     // empty CREATE TABLE anyway); alter mode with zero surviving rows
     // is left to the backend to report.
@@ -331,7 +340,7 @@ function buildColumns(): ColumnDef[] {
   for (const row of rows.value) {
     if (row.markedForDeletion) {
       if (row.originalName) {
-        result.push({ name: row.originalName, oldName: row.originalName, type: '' })
+        result.push({ name: row.originalName, oldName: row.originalName, type: '', nullable: false })
       }
       // A dropped column is no anchor for the next ADD.
       continue
@@ -542,7 +551,7 @@ async function save(): Promise<void> {
           </label>
           <label class="struct-field struct-field--autoinc">
             <span class="struct-field__label">{{ t('structure.autoIncrement') }}</span>
-            <NRadio
+            <NCheckbox
               :checked="row.autoIncrement"
               :disabled="row.generated !== '' || row.markedForDeletion"
               @update:checked="setAutoIncrement(row, $event)"
@@ -629,19 +638,17 @@ async function save(): Promise<void> {
         </NButton>
       </div>
 
-      <h3
-        v-if="!createMode"
-        class="structure-editor__title"
-      >
+      <h3 class="structure-editor__title">
         {{ t('structure.indexes') }}
       </h3>
       <!-- The indexes endpoint only exists for a saved table; on create
            the inline indexes list of the PUT body is used instead. -->
       <IndexEditor
-        v-if="!createMode"
         :db="db"
         :table="table"
-        :indexes="indexes"
+        v-model:indexes="indexes"
+        :draft="createMode"
+        @validity="indexesValid = $event"
         :column-names="rows.filter((r) => !r.markedForDeletion).map((r) => r.name)"
         @saved="load"
       />

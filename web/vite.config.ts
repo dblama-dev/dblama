@@ -30,6 +30,7 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    include: ['src/**/*.test.ts'],
     maxWorkers: 2,
     passWithNoTests: true,
   },

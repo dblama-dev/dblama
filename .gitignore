@@ -7,3 +7,5 @@ dist/
 *.log
 .env
 server/dbmanager
+web/test-results/
+web/playwright-report/

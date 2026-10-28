@@ -1,6 +1,6 @@
 import { createPinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
-import { defineComponent, h } from 'vue'
+import { defineComponent, h, type PropType } from 'vue'
 import {
   NButton,
   NCheckbox,
@@ -53,8 +53,8 @@ const columns: ColumnDef[] = [
 const ModalInProvider = defineComponent({
   props: {
     show: { type: Boolean, default: true },
-    mode: { type: String, default: 'insert' },
-    columns: { type: Array, default: () => columns },
+    mode: { type: String as PropType<'insert' | 'edit'>, default: 'insert' },
+    columns: { type: Array as PropType<ColumnDef[]>, default: () => columns },
     row: { type: Object, default: null },
     rowPk: { type: Object, default: null },
   },

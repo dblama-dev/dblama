@@ -60,6 +60,27 @@ describe('ResultGrid', () => {
     expect(wrapper.findAll('th')).toHaveLength(0)
   })
 
+  it('renders a DDL outcome whose empty result slices serialize as null', () => {
+    const wrapper = mountGrid({ columns: null, rows: null, seconds: 0.2 }, 4)
+
+    expect(wrapper.find('.resultgrid__index').text()).toBe('#4')
+    expect(wrapper.find('.resultgrid__footer').text()).toBe('0.20 с')
+    expect(wrapper.find('table').exists()).toBe(false)
+  })
+
+  it('shows affected rows when the server sends null result slices', () => {
+    const wrapper = mountGrid({ columns: null, rows: null, affectedRows: 2, seconds: 0.2 })
+
+    expect(wrapper.find('.resultgrid__affected').text()).toBe('Затронуто строк: 2')
+  })
+
+  it('keeps column headers for an empty SELECT whose rows serialize as null', () => {
+    const wrapper = mountGrid({ ...rowsResult, rows: null })
+
+    expect(wrapper.findAll('th').map(header => header.text())).toEqual(['id', 'name'])
+    expect(wrapper.findAll('tbody tr')).toHaveLength(0)
+  })
+
   it('shows the truncated badge for a truncated result', () => {
     const wrapper = mountGrid({ ...rowsResult, truncated: true })
 

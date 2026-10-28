@@ -111,3 +111,48 @@ Each run builds a snapshot locally without publishing. GoReleaser configuration 
 The release workflow runs the test matrix. Manual workflow dispatch produces snapshot artifacts. An operator-pushed semantic version tag such as `v0.1.0` creates a draft GitHub release and publishes a nonroot multi-architecture image to `ghcr.io/OWNER/REPOSITORY` using the repository token. An operator reviews and publishes the draft release. Manual workflow dispatch creates snapshot artifacts and performs a local Docker smoke check without publishing. This checkout has no configured remote; no release or image has been published here. Configure a GitHub remote and package permissions before pushing a release tag.
 
 A project license has not been selected in this checkout; no distribution license is asserted here.
+
+## Browser end-to-end checks
+
+Playwright tests drive Chromium against the built SPA, Go server and a real DB.
+They cover login/logout, table structure and AUTO_INCREMENT/primary keys, row
+CRUD/copy/upsert, filters/sorting/pagination, SQL errors and recovery, SQL/CSV
+roundtrips, database lifecycle, views and monitoring. See the scenario matrix in
+`docs/superpowers/specs/2026-10-29-e2e-workflows-design.md`.
+
+```sh
+npm --prefix web ci
+(cd web && npx playwright install --with-deps chromium)
+./scripts/check-e2e.sh mysql
+./scripts/check-e2e.sh mariadb
+./scripts/check-e2e.sh postgres
+```
+
+Each run builds the application and starts it as a local binary on port 18089;
+it refuses to reuse an already running application. Set `E2E_APP_PORT` to use
+another free port. Run engines sequentially in one checkout; parallel runs need
+separate checkouts because build files and reports are shared. Only the disposable
+database uses Docker, on a random loopback
+port. The runner removes that container and its volumes on exit, including test
+failures. It never uses existing containers. CI runs all three engines separately.
+Playwright uses one worker and no retries; failures keep a screenshot and trace in
+`web/test-results/` and an HTML report in `web/playwright-report/`.
+
+To test without Docker, provision a **dedicated disposable test database** first.
+The user needs table/object privileges and CREATE/DROP DATABASE for lifecycle tests.
+Pass explicit connection parameters (for example through your shell environment):
+
+```sh
+export E2E_DB_HOST=127.0.0.1 E2E_DB_PORT=3306
+export E2E_DB_USER=e2e_user E2E_DB_NAME=dbmanager_e2e
+read -rs -p 'Test database password: ' E2E_DB_PASSWORD
+export E2E_DB_PASSWORD
+./scripts/check-e2e.sh mysql --external
+```
+
+External mode creates and removes only uniquely named `e2e_...` test objects, but
+an interrupted process can leave these objects behind. Do not point it at a
+production database. Narrow a run by passing Playwright arguments after the engine
+(and `--external`, when used), e.g. `./scripts/check-e2e.sh mysql structure.spec.ts`.
+This is an initial critical-workflow suite; it does not yet cover every engine
+feature, all administrative privileges or browsers other than Chromium.

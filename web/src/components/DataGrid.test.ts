@@ -111,22 +111,24 @@ describe('DataGrid', () => {
     expect(wrapper.emitted('update:page-size')).toEqual([[100]])
   })
 
-  it('maps the remote sorter event to a sort state', async () => {
+  it('cycles remote sort state when a user clicks a column header', async () => {
     const wrapper = mountGrid()
-    const table = wrapper.findComponent(NDataTable)
+    const nameHeader = () => wrapper.findAll('th').find(header => header.text() === 'name')!
 
-    table.vm.$emit('update:sorter', { column: { key: 'name' }, order: 'descend' })
+    await nameHeader().trigger('click')
     await flushPromises()
     expect(wrapper.emitted('update:sort')).toEqual([[{ column: 'name', desc: true }]])
+    await wrapper.setProps({ sort: { column: 'name', desc: true } })
 
-    table.vm.$emit('update:sorter', { column: { key: 'name' }, order: 'ascend' })
+    await nameHeader().trigger('click')
     await flushPromises()
     expect(wrapper.emitted('update:sort')).toEqual([
       [{ column: 'name', desc: true }],
       [{ column: 'name', desc: false }],
     ])
+    await wrapper.setProps({ sort: { column: 'name', desc: false } })
 
-    table.vm.$emit('update:sorter', { column: { key: 'name' }, order: false })
+    await nameHeader().trigger('click')
     await flushPromises()
     expect(wrapper.emitted('update:sort')?.[2]).toEqual([null])
   })
@@ -255,7 +257,7 @@ describe('TableView data view', () => {
     },
   })
 
-  async function mountView(): ReturnType<typeof mount> {
+  async function mountView(): Promise<ReturnType<typeof mount>> {
     const wrapper = mount(TableViewInProvider, { global: { plugins: [createPinia(), i18n] } })
     await flushPromises()
     await flushPromises()

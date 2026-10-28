@@ -46,7 +46,7 @@ describe('api client', () => {
       ),
     )
 
-    const err: ApiError = await api('GET', '/api/session').catch((e: ApiError) => e)
+    const err: ApiError = await api<never>('GET', '/api/session').catch((e: ApiError) => e)
 
     expect(err).toBeInstanceOf(ApiError)
     expect(err.code).toBe('auth_required')
@@ -64,7 +64,7 @@ describe('api client', () => {
       } as Response),
     )
 
-    const err: ApiError = await api('GET', '/api/session').catch((e: ApiError) => e)
+    const err: ApiError = await api<never>('GET', '/api/session').catch((e: ApiError) => e)
 
     expect(err).toBeInstanceOf(ApiError)
     expect(err.code).toBe('auth_required')
@@ -80,7 +80,7 @@ describe('api client', () => {
       ),
     )
 
-    const err: ApiError = await api('GET', '/api/session').catch((e: ApiError) => e)
+    const err: ApiError = await api<never>('GET', '/api/session').catch((e: ApiError) => e)
 
     expect(err).toBeInstanceOf(ApiError)
     expect(err.code).toBe('internal')
@@ -110,7 +110,7 @@ describe('api client', () => {
   it('throws ApiError with code internal on network failure', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed')))
 
-    const err: ApiError = await api('GET', '/api/drivers').catch((e: ApiError) => e)
+    const err: ApiError = await api<never>('GET', '/api/drivers').catch((e: ApiError) => e)
 
     expect(err).toBeInstanceOf(ApiError)
     expect(err.code).toBe('internal')

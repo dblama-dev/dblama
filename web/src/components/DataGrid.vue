@@ -78,7 +78,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { h } from 'vue'
-import type { DataTableColumns, SelectOption } from 'naive-ui'
+import type { DataTableColumns, DataTableSortState, SelectOption } from 'naive-ui'
 import {
   NAlert,
   NButton,
@@ -176,7 +176,7 @@ function rowKey(row: GridRow): string {
 // monospace, truncated by CSS, with the full value on hover.
 const HEX_RE = /^0x[0-9a-fA-F]+$/
 
-function renderCell(value: unknown): ReturnType<typeof h> {
+function renderCell(value: unknown): ReturnType<typeof h> | string {
   if (value === null || value === undefined) {
     return h('span', { class: 'datagrid__null', style: 'font-style: italic' }, t('grid.null'))
   }
@@ -283,18 +283,14 @@ function onPageSize(size: number): void {
   emit('update:page-size', size)
 }
 
-interface SorterEvent {
-  column?: { key?: string | number }
-  order?: 'ascend' | 'descend' | false
-}
-
-function onSorter(event: SorterEvent): void {
-  const key = event.column?.key
-  if (key === undefined || !event.order) {
+function onSorter(event: DataTableSortState | DataTableSortState[] | null): void {
+  // This grid supports one server-side sort. Naive emits null when cleared.
+  const current = Array.isArray(event) ? event[0] : event
+  if (!current?.order) {
     emit('update:sort', null)
     return
   }
-  emit('update:sort', { column: String(key), desc: event.order === 'descend' })
+  emit('update:sort', { column: String(current.columnKey), desc: current.order === 'descend' })
 }
 
 // --- Filter row --------------------------------------------------------

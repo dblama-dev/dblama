@@ -69,3 +69,38 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  e2e:
+    name: E2E (${{ matrix.engine }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [mysql, mariadb, postgres]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm --prefix web ci
+      - name: Install Chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Test real browser, API and database
+        run: ./scripts/check-e2e.sh '${{ matrix.engine }}'
+      - name: Keep failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-${{ matrix.engine }}
+          path: |
+            web/test-results/
+            web/playwright-report/
+          retention-days: 7

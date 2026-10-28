@@ -1,5 +1,6 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { reactive } from 'vue'
 import { NInput, NSelect, NTree } from 'naive-ui'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -18,10 +19,13 @@ vi.mock('../api/client', () => ({
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: pushSpy }),
+  useRoute: () => route,
 }))
 
 const pushSpy = vi.fn()
+const route = reactive({ params: {} as { db?: string } })
 const mockedApi = vi.mocked(api)
+enableAutoUnmount(afterEach)
 
 const databasesPayload = {
   databases: [
@@ -46,7 +50,7 @@ function mockApi(): void {
   })
 }
 
-async function mountTree(): ReturnType<typeof mount> {
+async function mountTree(): Promise<ReturnType<typeof mount>> {
   const wrapper = mount(ObjectTree, { global: { plugins: [i18n] } })
   await flushPromises()
   return wrapper
@@ -54,6 +58,7 @@ async function mountTree(): ReturnType<typeof mount> {
 
 describe('ObjectTree', () => {
   beforeEach(() => {
+    route.params = {}
     setActivePinia(createPinia())
     pushSpy.mockReset()
     mockApi()
@@ -109,6 +114,41 @@ describe('ObjectTree', () => {
     const text = wrapper.text()
     expect(text).toContain('users')
     expect(text).not.toContain('orders')
+  })
+
+  it('shows the route database tables instead of replacing them with the login database', async () => {
+    route.params.db = 'otherdb'
+    mockedApi.mockImplementation(async (_method, url) => {
+      if (url === '/api/databases') return databasesPayload
+      if (url === '/api/databases/mydb/tables') return { tables }
+      if (url === '/api/databases/otherdb/tables') return { tables: [{ ...tables[0], name: 'other_records' }] }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    const wrapper = await mountTree()
+    expect(wrapper.findComponent(NSelect).props('value')).toBe('otherdb')
+    expect(wrapper.text()).toContain('other_records')
+    expect(wrapper.text()).not.toContain('users')
+  })
+
+  it('keeps a newly renamed route database when an older database-list refresh finishes', async () => {
+    const wrapper = await mountTree()
+    let finishList!: (value: typeof databasesPayload) => void
+    mockedApi.mockImplementation(async (_method, url) => {
+      if (url === '/api/databases') return new Promise(resolve => { finishList = resolve })
+      if (url === '/api/databases/mydb/tables') return { tables }
+      if (url === '/api/databases/renamed/tables') return { tables: [{ ...tables[0], name: 'renamed_records' }] }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    useCatalogStore().databaseRevision++
+    await flushPromises()
+    route.params.db = 'renamed'
+    await flushPromises()
+    expect(wrapper.text()).toContain('renamed_records')
+    finishList(databasesPayload)
+    await flushPromises()
+    expect(wrapper.findComponent(NSelect).props('value')).toBe('renamed')
+    expect(wrapper.text()).toContain('renamed_records')
+    expect(wrapper.text()).not.toContain('users')
   })
 
   it('pushes /db/{db}/table/{name} when a table node is clicked', async () => {
@@ -179,6 +219,7 @@ describe('ObjectTree', () => {
 
     expect(mockedApi).toHaveBeenCalledWith('GET', '/api/databases/otherdb/tables')
     expect(catalog.tables).toEqual(tables)
+    expect(pushSpy).toHaveBeenCalledWith('/db/otherdb')
   })
   it('selects PostgreSQL schemas and exposes sequences, preserving schema in navigation', async () => {
     const session = useSessionStore()

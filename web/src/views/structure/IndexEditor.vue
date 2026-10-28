@@ -29,9 +29,10 @@ const props = defineProps<{
   table: string
   indexes: Index[]
   columnNames: string[]
+  draft?: boolean
 }>()
 
-const emit = defineEmits<{ saved: [] }>()
+const emit = defineEmits<{ saved: []; 'update:indexes': [indexes: Index[]]; validity: [valid: boolean] }>()
 
 const { t } = useI18n()
 const notification = useNotification()
@@ -47,6 +48,7 @@ let keySeq = 0
 watch(
   () => props.indexes,
   (next) => {
+    if (JSON.stringify(next ?? []) === JSON.stringify(rows.value.map(toIndex))) return
     rows.value = (next ?? []).map((idx) => ({
       key: ++keySeq,
       name: idx.name,
@@ -100,10 +102,15 @@ function canSave(): boolean {
   return rows.value.every(
     (r) =>
       r.columns.length > 0 &&
-      r.columns.every((c) => c.name !== '') &&
+      r.columns.every((c) => props.columnNames.includes(c.name)) &&
       (r.type === 'PRIMARY' || r.name.trim() !== ''),
   )
 }
+
+watch(rows, () => {
+  if (props.draft) emit('update:indexes', rows.value.map(toIndex))
+}, { deep: true })
+watch(() => canSave(), valid => emit('validity', valid), { immediate: true })
 
 const saving = ref(false)
 
@@ -185,6 +192,7 @@ async function save(): Promise<void> {
         {{ t('structure.addIndex') }}
       </NButton>
       <NButton
+        v-if="!draft"
         size="small"
         type="primary"
         :disabled="!canSave() || saving"

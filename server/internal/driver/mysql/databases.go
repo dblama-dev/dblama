@@ -26,18 +26,17 @@ func databaseName(name string) error {
 	return nil
 }
 
-// CreateDatabase creates a database with a verified server collation.
+// CreateDatabase creates a database with a collation validated by the server.
 func (d *MysqlDriver) CreateDatabase(ctx context.Context, name, collation string) error {
 	if err := databaseName(name); err != nil {
 		return err
 	}
 	clause := ""
 	if collation != "" {
-		var charset string
-		if err := d.db.QueryRowContext(ctx, "SELECT CHARACTER_SET_NAME FROM information_schema.COLLATIONS WHERE COLLATION_NAME = ?", collation).Scan(&charset); err != nil {
-			return fmt.Errorf("unknown database collation %q: %w", collation, err)
-		}
-		clause = " CHARACTER SET " + sqlgen.QuoteIdent(charset) + " COLLATE " + sqlgen.QuoteIdent(collation)
+		// COLLATE also selects its character set. Let the server resolve names:
+		// MariaDB exposes UCA collations in SCHEMATA under charset-qualified
+		// aliases that are absent from information_schema.COLLATIONS.
+		clause = " COLLATE " + sqlgen.QuoteIdent(collation)
 	}
 	_, err := d.db.ExecContext(ctx, "CREATE DATABASE "+sqlgen.QuoteIdent(name)+clause)
 	return err

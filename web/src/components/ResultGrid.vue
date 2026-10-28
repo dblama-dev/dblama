@@ -10,14 +10,14 @@
     <p v-if="affectedMessage !== null" class="resultgrid__affected">
       {{ affectedMessage }}
     </p>
-    <n-table v-else-if="result.columns.length > 0" size="small" :single-line="false">
+    <n-table v-else-if="columns.length > 0" size="small" :single-line="false">
       <thead>
         <tr>
-          <th v-for="meta in result.columns" :key="meta.name">{{ meta.name }}</th>
+          <th v-for="meta in columns" :key="meta.name">{{ meta.name }}</th>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="(row, i) in result.rows" :key="i">
+        <tr v-for="(row, i) in rows" :key="i">
           <td v-for="(cell, j) in row" :key="j">
             <span
               v-if="cell === null || cell === undefined"
@@ -54,10 +54,14 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
+// Go's nil slices serialize as null for DDL/DML and empty SELECT results.
+const columns = computed(() => props.result.columns ?? [])
+const rows = computed(() => props.result.rows ?? [])
+
 // A statement without rows reports what it changed instead of a table.
 const affectedMessage = computed<string | null>(() => {
   const affected = props.result.affectedRows ?? 0
-  return props.result.rows.length === 0 && affected > 0
+  return rows.value.length === 0 && affected > 0
     ? t('console.rowsAffected', { n: affected })
     : null
 })
