@@ -1867,10 +1867,9 @@ func tablesFor(format string) string {
 	return `["users"]`
 }
 
-func TestExportHandler_DriverErrorTruncates(t *testing.T) {
-	// Documented ruling 3: once the attachment headers are sent, a driver
-	// error mid-stream cannot become a JSON envelope — the connection is
-	// simply cut, so the status stays 200 with a truncated body.
+func TestExportHandler_DriverErrorBeforeBytes(t *testing.T) {
+	// An export rejected during preflight must be a JSON error rather than
+	// an apparently successful empty attachment.
 	fake := &stubDriver{info: driver.DriverInfo{Name: "FakeDB"}, exportErr: errors.New("dump: boom")}
 	h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, fake))
 	srv := httptest.NewServer(h)
@@ -1879,11 +1878,39 @@ func TestExportHandler_DriverErrorTruncates(t *testing.T) {
 
 	resp := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/databases/appdb/export",
 		`{"format":"sql","tables":[]}`, cookie)
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("POST export with driver error status = %d, want %d (headers already sent)", resp.StatusCode, http.StatusOK)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("POST export with preflight error status = %d, want %d", resp.StatusCode, http.StatusInternalServerError)
+	}
+	if got := resp.Header.Get("Content-Disposition"); got != "" {
+		t.Errorf("preflight error has attachment header %q", got)
 	}
 	if len(fake.exportCalls) != 1 {
 		t.Errorf("Export called %d times, want 1", len(fake.exportCalls))
+	}
+}
+
+type exportPartialFailureDriver struct{ *stubDriver }
+
+func (d *exportPartialFailureDriver) Export(_ context.Context, _ string, _ driver.ExportRequest, out io.Writer) error {
+	_, _ = io.WriteString(out, "partial SQL dump")
+	return errors.New("source connection lost")
+}
+
+func TestExportHandler_MidstreamErrorAbortsDownload(t *testing.T) {
+	fake := &exportPartialFailureDriver{stubDriver: &stubDriver{info: driver.DriverInfo{Name: "FakeDB"}}}
+	h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, func(context.Context, driver.ConnConfig) (driver.Driver, error) { return fake, nil })
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	cookie := loginSessionDB(t, srv, "appdb")
+
+	resp := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/databases/appdb/export",
+		`{"format":"sql","tables":[]}`, cookie)
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("stream status = %d, want 200", resp.StatusCode)
+	}
+	if _, err := io.ReadAll(resp.Body); err == nil {
+		t.Fatal("partial export completed without a transport error")
 	}
 }
 

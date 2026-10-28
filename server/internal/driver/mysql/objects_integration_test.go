@@ -33,6 +33,12 @@ func TestObjectsLifecycle(t *testing.T) {
 				t.Fatalf("views: %#v", views)
 			}
 			must(d.AlterView(ctx, db, "sample", driver.ObjectDef{Source: views[0].Source}))
+			must(d.AlterView(ctx, db, "sample", driver.ObjectDef{Source: "create view sample as select 2 as id, 'OR REPLACE' as note"}))
+			var replacedID int
+			must(d.db.QueryRowContext(ctx, "SELECT id FROM sample").Scan(&replacedID))
+			if replacedID != 2 {
+				t.Fatalf("lower-case view update returned id %d", replacedID)
+			}
 			must(d.DropView(ctx, db, "sample"))
 			must(d.CreateTrigger(ctx, db, "on_insert", driver.ObjectDef{Source: "CREATE TRIGGER on_insert BEFORE INSERT ON items FOR EACH ROW SET NEW.value = 'changed'"}))
 			triggers, err := d.ListTriggers(ctx, db)

@@ -29,3 +29,23 @@ it('requires confirmation before dropping a partition', async () => {
  const fetch = vi.fn(async () => response({ partitions: [{ name: 'p0', method: 'RANGE', expression: 'id', description: '10', rows: 1 }] })); vi.stubGlobal('fetch', fetch)
  const w = view(); await flushPromises(); await w.get('[data-partition-drop="p0"]').trigger('click'); expect(w.find('[role="alertdialog"]').exists()).toBe(true); expect(fetch.mock.calls).toHaveLength(1)
 })
+
+it('deletes the object shown at confirmation even if selection changes', async () => {
+ state.kind = 'triggers'
+ const fetch = vi.fn(async (_url: string, opts: RequestInit) =>
+  opts.method === 'GET' ? response({objects:[
+   {name:'same',kind:'TRIGGER',table:'a',source:'CREATE TRIGGER same'},
+   {name:'same',kind:'TRIGGER',table:'b',source:'CREATE TRIGGER same'},
+  ]}) : response({},204))
+ vi.stubGlobal('fetch',fetch)
+ const w=view(); await flushPromises()
+ await w.findAll('[data-object="same"]')[0]!.trigger('click')
+ await w.get('[data-delete]').trigger('click')
+ await w.findAll('[data-object="same"]')[1]!.trigger('click')
+ await w.get('[data-confirm]').trigger('click')
+ await flushPromises()
+ const deletion=fetch.mock.calls.find(([,opts])=>opts.method==='DELETE')
+ expect(deletion?.[0]).toContain('table=a')
+ expect(deletion?.[0]).not.toContain('table=b')
+ w.unmount()
+})

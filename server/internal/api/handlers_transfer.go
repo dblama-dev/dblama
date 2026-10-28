@@ -29,18 +29,25 @@ var exportFormats = map[string]struct {
 	"tsv":           {"text/tab-separated-values", "dump.tsv"},
 }
 
-// flushWriter flushes the response after every write so export chunks
-// reach the client progressively instead of buffering server-side.
-type flushWriter struct {
-	w io.Writer
-	f http.Flusher
+// exportStreamWriter delays the success status until the driver writes its
+// first byte. Preflight errors can then still become JSON errors. Every
+// actual chunk is flushed to the client.
+type exportStreamWriter struct {
+	w       http.ResponseWriter
+	started bool
 }
 
-// Write forwards to the response writer and flushes afterwards.
-func (fw flushWriter) Write(p []byte) (int, error) {
-	n, err := fw.w.Write(p)
-	if fw.f != nil {
-		fw.f.Flush()
+func (ew *exportStreamWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if !ew.started {
+		ew.w.WriteHeader(http.StatusOK)
+		ew.started = true
+	}
+	n, err := ew.w.Write(p)
+	if flusher, ok := ew.w.(http.Flusher); ok {
+		flusher.Flush()
 	}
 	return n, err
 }
@@ -52,10 +59,9 @@ func (fw flushWriter) Write(p []byte) (int, error) {
 // the wrong schema. Both are bad_request before any header is written.
 // Format (and, for delimited formats, the exactly-one-table requirement)
 // is validated before any header too, so an invalid request still gets
-// the JSON error envelope. Once the headers are sent, a driver failure
-// can no longer become JSON — the response has already begun, so the
-// error simply truncates the connection (documented ruling 3; the client
-// sees an incomplete download).
+// the JSON error envelope. The success status is sent on the first data
+// write. Errors after that point abort the response, making the browser's
+// download fail rather than silently saving a partial backup.
 func (s *apiServer) handleExport(w http.ResponseWriter, r *http.Request) {
 	sess, _ := session.FromContext(r.Context())
 	if sess.Database == "" {
@@ -100,10 +106,18 @@ func (s *apiServer) handleExport(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", meta.contentType)
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
-	w.WriteHeader(http.StatusOK)
-
-	flusher, _ := w.(http.Flusher)
-	_ = sess.Driver.Export(r.Context(), sess.Database, req, flushWriter{w: w, f: flusher})
+	out := &exportStreamWriter{w: w}
+	if err := sess.Driver.Export(r.Context(), sess.Database, req, out); err != nil {
+		if !out.started {
+			w.Header().Del("Content-Disposition")
+			writeDriverErr(w, err)
+			return
+		}
+		panic(http.ErrAbortHandler)
+	}
+	if !out.started {
+		w.WriteHeader(http.StatusOK)
+	}
 }
 
 // importProgressLine is one JSON-lines record of the import stream: the

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/hitslab/db-manager/server/internal/driver"
 	"github.com/hitslab/db-manager/server/internal/sqlgen"
@@ -187,10 +188,72 @@ func (d *MysqlDriver) saveObject(ctx context.Context, db, name, kind string, def
 
 // AlterView creates or replaces a view from explicitly edited SQL source.
 func (d *MysqlDriver) AlterView(ctx context.Context, db, name string, def driver.ObjectDef) error {
-	if !strings.Contains(strings.ToUpper(def.Source), "OR REPLACE") {
-		def.Source = strings.Replace(def.Source, "CREATE", "CREATE OR REPLACE", 1)
+	if err := driver.ValidateObjectSource(def.Source, "VIEW", db, name); err != nil {
+		return err
 	}
+	source, err := ensureViewReplacement(def.Source)
+	if err != nil {
+		return err
+	}
+	def.Source = source
 	return d.saveObject(ctx, db, name, "VIEW", def, false)
+}
+
+// ensureViewReplacement inserts OR REPLACE after the CREATE header token.
+// The body may itself contain that phrase in a literal or comment.
+func ensureViewReplacement(source string) (string, error) {
+	start, err := skipObjectTrivia(source, 0)
+	if err != nil {
+		return "", err
+	}
+	if !objectKeywordAt(source, start, "CREATE") {
+		return "", fmt.Errorf("%w: missing CREATE header", driver.ErrObjectValidation)
+	}
+	end := start + len("CREATE")
+	next, err := skipObjectTrivia(source, end)
+	if err != nil {
+		return "", err
+	}
+	if objectKeywordAt(source, next, "OR") {
+		return source, nil
+	}
+	return source[:end] + " OR REPLACE" + source[end:], nil
+}
+
+func skipObjectTrivia(source string, index int) (int, error) {
+	for index < len(source) {
+		switch {
+		case unicode.IsSpace(rune(source[index])):
+			index++
+		case strings.HasPrefix(source[index:], "/*"):
+			end := strings.Index(source[index+2:], "*/")
+			if end < 0 {
+				return 0, fmt.Errorf("%w: unterminated comment", driver.ErrObjectValidation)
+			}
+			index += end + 4
+		case strings.HasPrefix(source[index:], "--") || source[index] == '#':
+			end := strings.IndexByte(source[index:], '\n')
+			if end < 0 {
+				return len(source), nil
+			}
+			index += end + 1
+		default:
+			return index, nil
+		}
+	}
+	return index, nil
+}
+
+func objectKeywordAt(source string, index int, word string) bool {
+	end := index + len(word)
+	if index < 0 || end > len(source) || !strings.EqualFold(source[index:end], word) {
+		return false
+	}
+	if end == len(source) {
+		return true
+	}
+	next := source[end]
+	return !((next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z') || (next >= '0' && next <= '9') || next == '_' || next >= 128)
 }
 
 // CreateTrigger creates or replaces a trigger from SQL source.
