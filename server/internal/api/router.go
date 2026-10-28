@@ -92,6 +92,7 @@ func NewRouter(cfg config.Config, sessions *session.Store, drivers *driver.Regis
 					t.Patch("/rows", s.handleRowUpdate)
 					t.Delete("/rows", s.handleRowDelete)
 					t.Get("/pk", s.handlePrimaryKey)
+					t.Get("/create-sql", s.handleTableSQL)
 				})
 			})
 		})

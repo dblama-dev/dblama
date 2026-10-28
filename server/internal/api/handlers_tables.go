@@ -202,3 +202,17 @@ func (s *apiServer) handlePrimaryKey(w http.ResponseWriter, r *http.Request) {
 	}
 	WriteJSON(w, http.StatusOK, pkResponse{Columns: cols})
 }
+
+// handleTableSQL returns the definition of the table in this request's schema.
+func (s *apiServer) handleTableSQL(w http.ResponseWriter, r *http.Request) {
+	sess, _ := session.FromContext(r.Context())
+	statement, err := sess.Driver.ShowCreateTable(r.Context(), chi.URLParam(r, "db"), chi.URLParam(r, "table"))
+	if err != nil {
+		writeDriverErr(w, err)
+		return
+	}
+	type tableSQLResponse struct {
+		SQL string `json:"sql"`
+	}
+	WriteJSON(w, http.StatusOK, tableSQLResponse{SQL: statement})
+}
