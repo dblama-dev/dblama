@@ -207,6 +207,8 @@ func convertValue(v any, columnType string) any {
 			return pgArrayToJSON(val, strings.TrimSuffix(columnType, "[]"))
 		}
 		return val
+	case int64, uint64:
+		return driver.JSONSafeInteger(val)
 	default:
 		return v
 	}

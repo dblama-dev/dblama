@@ -234,6 +234,8 @@ func convertValue(v any, binary bool) any {
 			return "0x" + hex.EncodeToString(val)
 		}
 		return string(val)
+	case int64, uint64:
+		return driver.JSONSafeInteger(val)
 	default:
 		return v
 	}

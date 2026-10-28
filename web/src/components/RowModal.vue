@@ -137,7 +137,6 @@ watch(() => [props.show, props.foreignKeys, props.rowsPath] as const, async () =
 // --- Input type helpers -------------------------------------------------
 
 const NUMERIC_PREFIXES = [
-  'int',
   'smallint',
   'tinyint',
   'mediumint',
@@ -148,7 +147,10 @@ const NUMERIC_PREFIXES = [
 const LONG_TEXT_RE = /^(text|longtext|mediumtext|tinytext|blob|longblob|mediumblob|tinyblob|json)/
 
 function isNumeric(type: string): boolean {
-  return !type.endsWith('[]') && NUMERIC_PREFIXES.some((prefix) => type.startsWith(prefix))
+  const normalized = type.toLowerCase()
+  return !normalized.endsWith('[]') &&
+    ((normalized.startsWith('int') && !normalized.startsWith('interval')) ||
+      NUMERIC_PREFIXES.some((prefix) => normalized.startsWith(prefix)))
 }
 
 function isLongText(type: string): boolean {

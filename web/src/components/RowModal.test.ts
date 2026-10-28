@@ -343,6 +343,23 @@ describe('RowModal', () => {
     })
   })
 
+  it('keeps PostgreSQL interval values as text', async () => {
+    mockedApi.mockResolvedValue(undefined)
+    const wrapper = mountModal({
+      mode: 'edit',
+      columns: [{ name: 'duration', type: 'interval', nullable: false }],
+      row: { duration: '2 days 03:04:05' },
+      rowPk: { id: 1 },
+    })
+    setString(wrapper, 'duration', '3 days 04:05:06')
+    await saveButton(wrapper)?.trigger('click')
+    await flushPromises()
+    expect(mockedApi).toHaveBeenCalledWith('PATCH', rowsPath, {
+      where: { id: 1 },
+      values: { duration: '3 days 04:05:06' },
+    })
+  })
+
   it('keeps in-progress input when the columns prop is enriched after the modal opened', async () => {
     const wrapper = mountModal()
 
