@@ -350,8 +350,8 @@ func isNumericElemType(t string) bool {
 // single server-generated column (serial or identity, detected once and
 // cached — Ruling 2), the statement carries RETURNING <col> and the
 // generated id is remembered in the driver instance for LastInsertID;
-// otherwise no id is generated and LastInsertID reads 0. An empty db or
-// table name, or an empty values set, fails before any statement.
+// otherwise no id is generated and LastInsertID reads 0. An empty values
+// set inserts server defaults; an empty db or table name fails before SQL.
 func (d *PostgresDriver) InsertRow(ctx context.Context, db, table string, vals driver.RowValues) error {
 	if err := d.checkDatabase(db); err != nil {
 		return err
@@ -361,9 +361,6 @@ func (d *PostgresDriver) InsertRow(ctx context.Context, db, table string, vals d
 	}
 	if table == "" {
 		return fmt.Errorf("insert row: %w: table name", sqlgen.ErrEmptyIdentifier)
-	}
-	if len(vals) == 0 {
-		return fmt.Errorf("insert row into %s.%s: no values", d.schemaFor(ctx), table)
 	}
 	schema := d.schemaFor(ctx)
 	vals, err := d.normalizeValues(ctx, schema, table, vals, true)

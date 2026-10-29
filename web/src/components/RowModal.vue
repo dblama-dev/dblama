@@ -10,7 +10,7 @@
             <n-select v-if="singleFK(col.name)" :id="`row-${col.name}`" :value="selectValue(col.name)" :options="fkOptions(col.name)" remote filterable tag :disabled="disabled(col)" :loading="parentLoading[col.name]" size="small" class="row-modal__input" @search="searchParent(col.name, $event)" @update:value="setValue(col.name, $event)" />
             <n-input-number v-else-if="isRowNumeric(col.type)" :id="`row-${col.name}`" :value="numberValue(col.name)" :disabled="disabled(col)" size="small" class="row-modal__input" @update:value="setValue(col.name, $event)" />
             <n-select v-else-if="col.enumValues?.length || isRowBoolean(col.type)" :id="`row-${col.name}`" :value="isRowBoolean(col.type) ? stringValue(col.name) : selectValue(col.name)" :options="valueOptions(col)" :disabled="disabled(col)" size="small" class="row-modal__input" @update:value="setValue(col.name, $event)" />
-            <input v-else-if="dateType(col)" :id="`row-${col.name}`" :type="dateType(col)" :value="stringValue(col.name).replace(' ', 'T')" :disabled="disabled(col)" step="any" class="row-modal__input row-modal__date" @input="setValue(col.name, ($event.target as HTMLInputElement).value)">
+            <input v-else-if="dateType(col)" :id="`row-${col.name}`" :type="dateType(col)" :value="dateDisplayValue(col)" :disabled="disabled(col)" step="any" class="row-modal__input row-modal__date" @input="setValue(col.name, ($event.target as HTMLInputElement).value)">
             <n-input v-else :id="`row-${col.name}`" :value="stringValue(col.name)" :type="/text|json|blob|bytea/i.test(col.type) ? 'textarea' : 'text'" :disabled="disabled(col)" size="small" class="row-modal__input" @update:value="setValue(col.name, $event)" />
             <n-button v-if="isRowJSON(col.type)" size="tiny" :disabled="disabled(col)" @click="formatJSON(col)">{{ text.format }}</n-button>
             <template v-if="isRowBinary(col.type)">
@@ -78,6 +78,12 @@ function setValue(name: string, value: RowValue): void {
 function setMode(name: string, mode: RowMode): void { if (fields[name]) fields[name].mode = mode }
 function disabled(col: ColumnDef): boolean { return saving.value || fields[col.name]?.mode !== 'value' }
 function valueOptions(col: ColumnDef) { return isRowBoolean(col.type) ? [{ label: 'true', value: 'true' }, { label: 'false', value: 'false' }] : (col.enumValues ?? []).map(value => ({ label: value, value })) }
+function dateDisplayValue(col: ColumnDef): string {
+ const value = stringValue(col.name)
+ // PostgreSQL DATE transport is RFC3339. Keep its calendar day for display;
+ // the untouched original value remains in fields and the edit snapshot.
+ return /^date$/i.test(col.type) ? value.match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? value : value.replace(' ', 'T')
+}
 function dateType(col: ColumnDef): 'date' | 'time' | 'datetime-local' | undefined {
  if (/^date$/i.test(col.type)) return 'date'
  if (/^time(?:\(\d+\))?$/i.test(col.type)) return 'time'

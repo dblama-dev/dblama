@@ -809,3 +809,13 @@ it('finds an FK record by name beyond the first 200 rows while preserving the se
  expect(mockedApi).toHaveBeenCalledWith('PATCH', '/api/databases/mydb/tables/child/rows', { where: { id: 1 }, values: { parent_id: '9007199254740995' } })
  wrapper.unmount()
 })
+
+it('displays PostgreSQL RFC3339 DATE values without changing the original payload snapshot', async () => {
+ mockedApi.mockReset(); mockedApi.mockResolvedValue(undefined)
+ const wrapper = mountModal({ mode: 'edit', columns: [{ name: 'day', type: 'date', nullable: false }, { name: 'notes', type: 'text', nullable: false }], row: { day: '2026-10-29T00:00:00Z', notes: '' }, rowPk: { id: 1 } })
+ expect((fieldOf(wrapper, 'day').find('input[type=date]').element as HTMLInputElement).value).toBe('2026-10-29')
+ setString(wrapper, 'notes', 'changed')
+ await flushPromises(); await saveButton(wrapper)?.trigger('click'); await flushPromises()
+ expect(mockedApi).toHaveBeenCalledWith('PATCH', rowsPath, { where: { id: 1 }, values: { notes: 'changed' } })
+ wrapper.unmount()
+})
