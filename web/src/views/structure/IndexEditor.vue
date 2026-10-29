@@ -32,7 +32,7 @@ const props = defineProps<{
   draft?: boolean
 }>()
 
-const emit = defineEmits<{ saved: []; 'update:indexes': [indexes: Index[]]; validity: [valid: boolean] }>()
+const emit = defineEmits<{ saved: [submitted?: Index[]]; 'update:indexes': [indexes: Index[]]; validity: [valid: boolean] }>()
 
 const { t } = useI18n()
 const notification = useNotification()
@@ -116,14 +116,15 @@ const saving = ref(false)
 
 async function save(): Promise<void> {
   saving.value = true
+  const submitted = rows.value.map(toIndex)
   try {
     await api(
       'POST',
       catalog.path(`/api/databases/${encodeURIComponent(props.db)}/tables/${encodeURIComponent(props.table)}/indexes`),
-      rows.value.map(toIndex),
+      submitted,
     )
     notification.success({ content: t('structure.saved'), duration: 3000 })
-    emit('saved')
+    emit('saved', submitted)
   } catch (err) {
     const message = err instanceof ApiError ? err.message : String(err)
     notification.error({ content: message, duration: 5000 })

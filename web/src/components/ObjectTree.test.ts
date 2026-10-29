@@ -280,4 +280,19 @@ it('keeps schema unchanged when navigation is cancelled',async()=>{
  wrapper.unmount()
 })
 
+it('separates favorite tables for different connection ports',async()=>{
+ localStorage.clear()
+ const session=useSessionStore()
+ session.sessionInfo!.driver.port='3306'
+ route.params={db:'mydb',t:'users'}
+ const wrapper=await mountTree()
+ await wrapper.get('button[aria-label$=": users"]').trigger('click');await flushPromises()
+ expect(wrapper.find('.object-tree__saved strong').exists()).toBe(true)
+ session.sessionInfo!.driver.port='3307';await flushPromises()
+ expect(wrapper.find('.object-tree__saved strong').exists()).toBe(false)
+ session.sessionInfo!.driver.port='3306';await flushPromises()
+ expect(wrapper.find('.object-tree__saved strong').exists()).toBe(true)
+ wrapper.unmount();localStorage.clear()
+})
+
 })

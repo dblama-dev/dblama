@@ -124,7 +124,7 @@ const selectedKeys = computed(() => {
  return action && ['console','export','import'].includes(action) ? [action] : []
 })
 const preferences=ref(readNavigationPreferences())
-const scope=computed(()=>JSON.stringify(session.sessionInfo?{driver:session.sessionInfo.driver.flavor,host:session.sessionInfo.driver.host,user:session.sessionInfo.driver.user}:{}))
+const scope=computed(()=>JSON.stringify(session.sessionInfo?{driver:session.sessionInfo.driver.flavor,host:session.sessionInfo.driver.host,port:session.sessionInfo.driver.port ?? '',user:session.sessionInfo.driver.user}:{}))
 const recentTables=computed(()=>preferences.value.recent.filter(item=>item.scope===scope.value))
 const favoriteTables=computed(()=>preferences.value.favorites.filter(item=>item.scope===scope.value))
 function location(table:string):TableLocation{return {scope:scope.value,db:db.value??'',table,schema:catalog.schemaAware?catalog.schema:null}}

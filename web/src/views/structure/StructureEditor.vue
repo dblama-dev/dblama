@@ -135,7 +135,7 @@ function beforeUnload(event:BeforeUnloadEvent):void {if(dirty.value){event.preve
 window.addEventListener('beforeunload',beforeUnload)
 onBeforeUnmount(()=>{removeGuard?.();window.removeEventListener('beforeunload',beforeUnload)})
 async function snapshotAll():Promise<void>{await nextTick();columnBaseline.value=columnsSnapshot();indexBaseline.value=JSON.stringify(indexes.value);fkBaseline.value=JSON.stringify(foreignKeys.value)}
-async function indexesSaved():Promise<void>{indexBaseline.value=JSON.stringify(indexes.value);await catalog.invalidate(props.db)}
+async function indexesSaved(submitted: Index[] = indexes.value):Promise<void>{indexBaseline.value=JSON.stringify(submitted);await catalog.invalidate(props.db)}
 async function fksSaved():Promise<void>{fkBaseline.value=JSON.stringify(foreignKeys.value);await catalog.invalidate(props.db)}
 
 function fromDef(c: ColumnDef): EditableColumn {
@@ -193,10 +193,16 @@ async function load(columnsOnly = false): Promise<void> {
     tableName.value = def.newName || props.table
     rows.value = (def.columns ?? []).map(fromDef)
     options.value = { ...def.options }
-    if(!columnsOnly){indexes.value = def.indexes ?? [];foreignKeys.value = def.foreignKeys ?? []}
+    // Preserve pending scopes, but refresh clean metadata affected by DDL
+    // (for example an index column renamed or dropped by the column save).
+    const refreshIndexes = !columnsOnly || !dirtyIndexes.value
+    const refreshForeignKeys = !columnsOnly || !dirtyFKs.value
+    if (refreshIndexes) indexes.value = def.indexes ?? []
+    if (refreshForeignKeys) foreignKeys.value = def.foreignKeys ?? []
     await nextTick()
     columnBaseline.value=columnsSnapshot()
-    if(!columnsOnly){indexBaseline.value=JSON.stringify(indexes.value);fkBaseline.value=JSON.stringify(foreignKeys.value)}
+    if (refreshIndexes) indexBaseline.value=JSON.stringify(indexes.value)
+    if (refreshForeignKeys) fkBaseline.value=JSON.stringify(foreignKeys.value)
   } catch (err) {
     notifyError(err)
   } finally {

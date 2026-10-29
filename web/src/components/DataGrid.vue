@@ -71,6 +71,7 @@
       :row-key="rowKey"
       :pagination="pagination"
       :scroll-x="scrollWidth"
+      max-height="max(240px, calc(100vh - 360px))"
       :checked-row-keys="checkedKeys"
       class="datagrid__table"
       @update:checked-row-keys="onCheckedRowKeys"
@@ -80,6 +81,7 @@
     />
     <div class="datagrid__total">{{ t('grid.total') }}: {{ totalRows }}</div>
     <n-modal v-model:show="inspectorShow" preset="card" :title="`${t('grid.preview')}: ${inspectedColumn}`" style="width: min(800px, 96vw)">
+      <n-select v-if="inspectedRow" data-testid="grid-inspect-column" :value="inspectedColumn" :aria-label="t('structure.columns')" :options="columnOptions" @update:value="selectInspectedColumn" />
       <pre class="datagrid__full-value" data-testid="grid-inspected-value" tabindex="0" style="white-space: pre-wrap; overflow: auto; max-height: 70vh; overflow-wrap: anywhere">{{ inspectedValue }}</pre>
     </n-modal>
   </div>
@@ -192,6 +194,7 @@ function rowKey(row: GridRow): string {
 // monospace, truncated by CSS, with the full value on hover.
 const HEX_RE = /^0x[0-9a-fA-F]+$/
 
+const inspectedRow = ref<GridRow | null>(null)
 const inspectedValue = ref('')
 const inspectedColumn = ref('')
 const inspectorShow = ref(false)
@@ -211,7 +214,18 @@ function cellPreview(text: string): string {
   return `${text.replace(/\s+/g, ' ').slice(0, CELL_PREVIEW_LENGTH)}…`
 }
 
-function renderCell(value: unknown, column: string): ReturnType<typeof h> | string {
+function inspectCell(row: GridRow, column: string): void {
+  inspectedRow.value = { ...row }
+  inspectedColumn.value = column
+  inspectedValue.value = cellText(row[column])
+  inspectorShow.value = true
+}
+function selectInspectedColumn(column: string): void {
+  if (inspectedRow.value) inspectCell(inspectedRow.value, column)
+}
+
+function renderCell(row: GridRow, column: string): ReturnType<typeof h> | string {
+  const value = row[column]
   if (value === null || value === undefined) {
     return h('span', { class: 'datagrid__null', style: 'font-style: italic' }, t('grid.null'))
   }
@@ -239,11 +253,7 @@ function renderCell(value: unknown, column: string): ReturnType<typeof h> | stri
       class: 'datagrid__inspect',
       style: { flexShrink: '0' },
       'aria-label': `${t('grid.preview')}: ${column}`,
-      onClick: () => {
-        inspectedValue.value = text
-        inspectedColumn.value = column
-        inspectorShow.value = true
-      },
+      onClick: () => inspectCell(row, column),
     }, t('grid.preview')),
   ])
 }
@@ -260,7 +270,7 @@ const gridColumns = computed<DataTableColumns<GridRow>>(() => {
       sortOrder:
         props.sort?.column === meta.name ? (props.sort.desc ? 'descend' : 'ascend') : false,
       cellProps: (row) => ({ 'aria-label': cellPreview(cellText(row[meta.name])) }),
-      render: (row) => renderCell(row[meta.name], meta.name),
+      render: (row) => renderCell(row, meta.name),
     })
   }
   {
@@ -271,6 +281,7 @@ const gridColumns = computed<DataTableColumns<GridRow>>(() => {
       fixed: 'right',
       render: (row) =>
         h('span', { class: 'datagrid__row-actions' }, [
+          h(NButton, {size:'tiny',quaternary:true,'data-testid':'row-inspect',disabled:props.columns.length===0,onClick:()=>inspectCell(row,props.columns[0]!.name)}, {default:()=>t('grid.preview')}),
           h(NButton, { size: 'tiny', quaternary: true, 'data-testid': 'copy-row', onClick: () => emit('copy-row', row) }, { default: () => t('grid.copy') }),
           h(
             NButton,

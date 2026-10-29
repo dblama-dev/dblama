@@ -556,3 +556,49 @@ it('keeps unsaved index and FK models after saving columns/options',async()=>{
  expect(wrapper.findComponent(ForeignKeyEditor).props('modelValue')).toEqual(pendingFK)
  wrapper.unmount()
 })
+it('refreshes clean indexes and foreign keys after a saved column rename',async()=>{
+ let current=def
+ mockedApi.mockImplementation(async(method,url)=>{
+  if(method==='GET'&&url===defUrl)return current
+  if(method==='GET'&&url===tablesUrl)return {tables:[]}
+  if(method==='PUT'){
+   current={...def,columns:def.columns.map(column=>column.name==='id'?{...column,name:'renamed_id',oldName:'renamed_id'}:column),indexes:[{name:'PRIMARY',type:'PRIMARY',columns:[{name:'renamed_id'}]}],foreignKeys:[{name:'fk_renamed',columns:['renamed_id'],refTable:'parent',refColumns:['id']}]}
+   return
+  }
+ })
+ const wrapper=await mountLoaded()
+ setString(rowByName(wrapper,'id'),'struct-field--name','renamed_id')
+ await clickSave(wrapper)
+ const {default:IndexEditor}=await import('./IndexEditor.vue')
+ const {default:ForeignKeyEditor}=await import('./ForeignKeyEditor.vue')
+ expect(wrapper.findComponent(IndexEditor).props('indexes')).toEqual(current.indexes)
+ expect(wrapper.findComponent(ForeignKeyEditor).props('modelValue')).toEqual(current.foreignKeys)
+ const unload=new Event('beforeunload',{cancelable:true});window.dispatchEvent(unload)
+ expect(unload.defaultPrevented).toBe(false)
+ wrapper.unmount()
+})
+it('keeps an index edit dirty when it was made during an in-flight save',async()=>{
+ let finish!:()=>void
+ mockedApi.mockImplementation(async(method,url)=>{
+  if(method==='GET'&&url===defUrl)return {...def,indexes:[{name:'original',type:'INDEX',columns:[{name:'id'}]}]}
+  if(method==='GET'&&url===tablesUrl)return {tables:[]}
+  if(method==='POST'&&url===`${defUrl}/indexes`)return new Promise<void>(resolve=>{finish=resolve})
+ })
+ const {routerKey}=await import('vue-router')
+ let guard!: (to:{fullPath:string},from:{fullPath:string})=>boolean
+ const pinia=createPinia();setActivePinia(pinia)
+ const wrapper=mount(defineComponent({setup:()=>()=>h(NNotificationProvider,null,{default:()=>h(StructureEditor,{db:'mydb',table:'users'})})}),{global:{plugins:[pinia,i18n],provide:{[routerKey as symbol]:{beforeEach:(fn:typeof guard)=>{guard=fn;return ()=>{}}}}}})
+ await flushPromises()
+ const {default:IndexEditor}=await import('./IndexEditor.vue')
+ const editor=wrapper.findComponent(IndexEditor)
+ const indexName=editor.findComponent(NInput)
+ indexName.vm.$emit('update:value','submitted_A');await flushPromises()
+ await editor.get('[data-testid=index-save]').trigger('click')
+ indexName.vm.$emit('update:value','unsaved_B');await flushPromises()
+ finish();await flushPromises()
+ const confirm=vi.spyOn(window,'confirm').mockReturnValue(false)
+ expect(guard({fullPath:'/other'},{fullPath:'/structure'})).toBe(false)
+ expect(confirm).toHaveBeenCalledOnce()
+ expect(indexName.props('value')).toBe('unsaved_B')
+ wrapper.unmount();confirm.mockRestore()
+})

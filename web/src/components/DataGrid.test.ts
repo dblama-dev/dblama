@@ -446,3 +446,24 @@ it('applies compact overflow bounds to the actual rendered cell nodes', async ()
   expect(getComputedStyle(full).overflow).toBe('auto')
   wrapper.unmount()
 })
+
+it('offers keyboard-operable row inspection for clipped values below 120 characters', async () => {
+  const value = 'https://example.test/a/long/path/that/exceeds/a/narrow/cell'
+  const wrapper = mountGrid({ rows: [[1, value]] })
+  const row = wrapper.get('tbody tr')
+  expect(row.findAll('td')[1]!.text()).toBe('1')
+  expect(row.findAll('td')[2]!.text()).toBe(value)
+  await row.get('[data-testid="row-inspect"]').trigger('click')
+  await flushPromises()
+  const picker = wrapper.findAllComponents(NSelect).find(select => select.attributes('data-testid') === 'grid-inspect-column')!
+  picker.vm.$emit('update:value', 'name')
+  await flushPromises()
+  expect(document.body.querySelector('[data-testid="grid-inspected-value"]')?.textContent).toBe(value)
+  expect(row.findAll('td')[2]!.text()).toBe(value)
+  wrapper.unmount()
+})
+it('keeps the table body viewport bounded so its horizontal scrollbar stays reachable', () => {
+  const wrapper = mountGrid({ rows: Array.from({length:50}, (_, i) => [i, 'row']) })
+  expect(wrapper.findComponent(NDataTable).props('maxHeight')).toBe('max(240px, calc(100vh - 360px))')
+  wrapper.unmount()
+})
