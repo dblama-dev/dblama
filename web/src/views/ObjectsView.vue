@@ -5,7 +5,7 @@
     <template v-else>
       <p v-if="error" role="alert" class="error">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
       <template v-if="kind === 'partitions'">
-        <label>{{ t('objects.table') }}<select v-model="table"><option value="">{{ t('objects.selectTable') }}</option><option v-for="item in catalog.tables.filter(v => !v.isView)" :key="item.name" :value="item.name">{{ item.name }}</option></select></label>
+        <label>{{ t('objects.table') }}<select :value="table" @change="changeTable"><option value="">{{ t('objects.selectTable') }}</option><option v-for="item in catalog.tables.filter(v => !v.isView)" :key="item.name" :value="item.name">{{ item.name }}</option></select></label>
         <table v-if="table" class="catalog-table"><thead><tr><th>{{ t('objects.name') }}</th><th>{{ t('objects.method') }}</th><th>{{ t('objects.expression') }}</th><th>{{ t('objects.boundary') }}</th><th>{{ t('objects.rows') }}</th><th></th></tr></thead><tbody><tr v-for="part in partitions" :key="part.name"><td>{{ part.name }}</td><td>{{ part.method }}</td><td>{{ part.expression }}</td><td>{{ part.description }}</td><td>{{ part.rows }}</td><td class="actions"><n-button :disabled="busy" @click="scheduleOperation('truncate', part.name)">{{ t('objects.truncate') }}</n-button><n-button :data-partition-drop="part.name" :disabled="busy" @click="scheduleOperation('partition-drop', part.name)">{{ t('objects.remove') }}</n-button></td></tr></tbody></table>
         <label>{{ t('objects.partitionSource') }}<textarea v-model="source" data-source rows="4" :disabled="busy"></textarea></label><p class="hint">{{ t('objects.partitionHint') }}</p><n-button data-save :disabled="busy || !table || !source.trim()" @click="save">{{ t('objects.addPartition') }}</n-button>
       </template>
@@ -51,14 +51,19 @@ const filteredObjects = computed(() => objects.value.filter(o => o.name.toLowerC
 let request = 0
 function endpoint(suffix = '') { return catalog.path(base.value + suffix) }
 const baseline = ref('')
-function snapshot() { return JSON.stringify([name.value,source.value,objectTable.value,routineKind.value]) }
-const discard = useDirtyGuard(()=>editing.value && snapshot() !== baseline.value,()=>t('sqlWorkflows.discard'))
+function snapshot() { return kind.value === 'partitions' ? source.value : JSON.stringify([name.value,source.value,objectTable.value,routineKind.value]) }
+const discard = useDirtyGuard(()=>(kind.value === 'partitions' || editing.value) && snapshot() !== baseline.value,()=>t('sqlWorkflows.discard'))
 function refresh() { if(discard())void load() }
+function changeTable(event: Event) {
+ const select = event.target as HTMLSelectElement
+ if (!discard()) { select.value = table.value; return }
+ table.value = select.value
+}
 function newObject() { if(!discard())return; selected.value = null; editing.value = true; name.value = ''; source.value = ''; objectTable.value = ''; routineKind.value = 'FUNCTION'; results.value = []; notice.value = ''; error.value = ''; baseline.value=snapshot() }
 function selectObject(item: DbObject) { if(!discard())return; selected.value = item; editing.value = true; name.value = item.name; source.value = item.source; objectTable.value = item.table ?? ''; routineKind.value = item.kind; results.value = []; notice.value = ''; error.value = ''; baseline.value=snapshot() }
 async function load() {
  const current = ++request
- objects.value = []; partitions.value = []; selected.value = null; editing.value = false; pending.value = null; results.value = []; source.value = ''; error.value = ''
+ objects.value = []; partitions.value = []; selected.value = null; editing.value = false; pending.value = null; results.value = []; source.value = ''; error.value = ''; baseline.value = snapshot()
  if (!supported.value || (kind.value === 'partitions' && !table.value)) { busy.value = false; return }
  busy.value = true
  try { const body = await api<{ objects?: DbObject[]; partitions?: Partition[] }>('GET', endpoint()); if (current !== request) return; objects.value = body.objects ?? []; partitions.value = body.partitions ?? [] }
@@ -95,7 +100,7 @@ function scheduleOperation(operation: PendingOperation['operation'], targetName:
  pending.value = { operation, path: endpoint(suffix), label }
 }
 function confirmOperation() {
- const operation = pending.value; if (!operation) return
+ const operation = pending.value; if (!operation || !discard()) return
  void mutate(() => api(operation.operation === 'truncate' ? 'POST' : 'DELETE', operation.path), 'objects.deleted')
 }
 async function call() {
