@@ -1,28 +1,31 @@
 <template>
   <section class="objects-view">
-    <header><h2>{{ t(`objects.${kind}`) }}</h2><button :disabled="busy || !supported" @click="load">{{ t('objects.refresh') }}</button></header>
+    <header><h2>{{ t(`objects.${kind}`) }}</h2><n-button :disabled="busy || !supported" @click="refresh">{{ t('objects.refresh') }}</n-button></header>
     <p v-if="!supported" role="status">{{ t('objects.unsupported') }}</p>
     <template v-else>
       <p v-if="error" role="alert" class="error">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
       <template v-if="kind === 'partitions'">
         <label>{{ t('objects.table') }}<select v-model="table"><option value="">{{ t('objects.selectTable') }}</option><option v-for="item in catalog.tables.filter(v => !v.isView)" :key="item.name" :value="item.name">{{ item.name }}</option></select></label>
-        <table v-if="table" class="catalog-table"><thead><tr><th>{{ t('objects.name') }}</th><th>{{ t('objects.method') }}</th><th>{{ t('objects.expression') }}</th><th>{{ t('objects.boundary') }}</th><th>{{ t('objects.rows') }}</th><th></th></tr></thead><tbody><tr v-for="part in partitions" :key="part.name"><td>{{ part.name }}</td><td>{{ part.method }}</td><td>{{ part.expression }}</td><td>{{ part.description }}</td><td>{{ part.rows }}</td><td class="actions"><button :disabled="busy" @click="scheduleOperation('truncate', part.name)">{{ t('objects.truncate') }}</button><button :data-partition-drop="part.name" :disabled="busy" @click="scheduleOperation('partition-drop', part.name)">{{ t('objects.remove') }}</button></td></tr></tbody></table>
-        <label>{{ t('objects.partitionSource') }}<textarea v-model="source" data-source rows="4" :disabled="busy"></textarea></label><p class="hint">{{ t('objects.partitionHint') }}</p><button data-save :disabled="busy || !table || !source.trim()" @click="save">{{ t('objects.addPartition') }}</button>
+        <table v-if="table" class="catalog-table"><thead><tr><th>{{ t('objects.name') }}</th><th>{{ t('objects.method') }}</th><th>{{ t('objects.expression') }}</th><th>{{ t('objects.boundary') }}</th><th>{{ t('objects.rows') }}</th><th></th></tr></thead><tbody><tr v-for="part in partitions" :key="part.name"><td>{{ part.name }}</td><td>{{ part.method }}</td><td>{{ part.expression }}</td><td>{{ part.description }}</td><td>{{ part.rows }}</td><td class="actions"><n-button :disabled="busy" @click="scheduleOperation('truncate', part.name)">{{ t('objects.truncate') }}</n-button><n-button :data-partition-drop="part.name" :disabled="busy" @click="scheduleOperation('partition-drop', part.name)">{{ t('objects.remove') }}</n-button></td></tr></tbody></table>
+        <label>{{ t('objects.partitionSource') }}<textarea v-model="source" data-source rows="4" :disabled="busy"></textarea></label><p class="hint">{{ t('objects.partitionHint') }}</p><n-button data-save :disabled="busy || !table || !source.trim()" @click="save">{{ t('objects.addPartition') }}</n-button>
       </template>
       <div v-else class="object-workspace">
-        <aside><input v-model="filter" :aria-label="t('objects.search')" :placeholder="t('objects.search')"><button :disabled="busy" @click="newObject">{{ t('objects.create') }}</button><p v-if="!objects.length">{{ t('objects.empty') }}</p><ul><li v-for="item in filteredObjects" :key="`${item.name}|${item.identity}|${item.table}`"><button :data-object="item.name" :class="{ active: selected === item }" :disabled="busy" @click="selectObject(item)">{{ item.name }}<small>{{ item.kind }} {{ item.identity }} {{ item.table }}</small></button></li></ul></aside>
+        <aside><input v-model="filter" :aria-label="t('objects.search')" :placeholder="t('objects.search')"><n-button :disabled="busy" @click="newObject">{{ t('objects.create') }}</n-button><p v-if="!objects.length">{{ t('objects.empty') }}</p><ul><li v-for="item in filteredObjects" :key="`${item.name}|${item.identity}|${item.table}`"><n-button :data-object="item.name" :class="{ active: selected === item }" :disabled="busy" @click="selectObject(item)">{{ item.name }}<small>{{ item.kind }} {{ item.identity }} {{ item.table }}</small></n-button></li></ul></aside>
         <article v-if="editing"><div class="fields"><label>{{ t('objects.name') }}<input v-model="name" :disabled="busy || !!selected" data-name></label><label v-if="kind === 'routines'">{{ t('objects.kind') }}<select v-model="routineKind" :disabled="busy || !!selected"><option value="FUNCTION">FUNCTION</option><option v-if="session.sessionInfo?.caps.procedures" value="PROCEDURE">PROCEDURE</option></select></label><label v-if="kind === 'triggers'">{{ t('objects.table') }}<input v-model="objectTable" :disabled="busy"></label></div>
-          <label>{{ t('objects.source') }}<textarea v-model="source" data-source rows="18" spellcheck="false" :disabled="busy"></textarea></label><p class="hint">{{ t('objects.sourceHint') }}</p><div class="actions"><button data-save :disabled="busy || !name || !source.trim()" @click="save">{{ t('objects.save') }}</button><button v-if="selected" data-delete :disabled="busy" @click="scheduleOperation('object-drop', name)">{{ t('objects.remove') }}</button></div>
-          <div v-if="selected?.kind === 'PROCEDURE' && session.sessionInfo?.caps.procedures" class="procedure-call"><label>{{ t('objects.parameters') }}<textarea v-model="argumentsJSON" data-arguments rows="3" :disabled="busy"></textarea></label><p class="hint">{{ t('objects.parameterHint') }}</p><button data-call :disabled="busy" @click="call">{{ t('objects.call') }}</button><ResultGrid v-for="(result, index) in results" :key="index" :result="result" :index="index + 1" /></div>
+          <label>{{ t('objects.source') }}<SqlEditor v-model="source" :dialect="session.sessionInfo?.driver.flavor" :label="t('objects.source')" :disabled="busy" /></label><p class="hint">{{ t('objects.sourceHint') }}</p><div class="actions"><n-button data-save :disabled="busy || !name || !source.trim()" @click="save">{{ t('objects.save') }}</n-button><n-button v-if="selected" data-delete :disabled="busy" @click="scheduleOperation('object-drop', name)">{{ t('objects.remove') }}</n-button></div>
+          <div v-if="selected?.kind === 'PROCEDURE' && session.sessionInfo?.caps.procedures" class="procedure-call"><label>{{ t('objects.parameters') }}<textarea v-model="argumentsJSON" data-arguments rows="3" :disabled="busy"></textarea></label><p class="hint">{{ t('objects.parameterHint') }}</p><n-button data-call :disabled="busy" @click="call">{{ t('objects.call') }}</n-button><ResultGrid v-for="(result, index) in results" :key="index" :result="result" :index="index + 1" /></div>
         </article><p v-else>{{ t('objects.select') }}</p>
       </div>
-      <div v-if="pending" role="alertdialog" aria-modal="true" :aria-label="t('objects.confirm')" class="confirmation"><p>{{ t(pending.operation === 'object-drop' ? 'objects.deleteConfirm' : 'objects.partitionConfirm') }} <strong>{{ pending.label }}</strong></p><button :disabled="busy" @click="pending = null">{{ t('objects.cancel') }}</button><button :disabled="busy" data-confirm @click="confirmOperation">{{ t('objects.confirm') }}</button></div>
+      <div v-if="pending" role="alertdialog" aria-modal="true" :aria-label="t('objects.confirm')" class="confirmation"><p>{{ t(pending.operation === 'object-drop' ? 'objects.deleteConfirm' : 'objects.partitionConfirm') }} <strong>{{ pending.label }}</strong></p><n-button :disabled="busy" @click="pending = null">{{ t('objects.cancel') }}</n-button><n-button :disabled="busy" data-confirm @click="confirmOperation">{{ t('objects.confirm') }}</n-button></div>
     </template>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { NButton } from 'naive-ui'
+import SqlEditor from '../components/SqlEditor.vue'
+import { useDirtyGuard } from '../lib/useDirtyGuard'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { api } from '../api/client'
@@ -47,8 +50,12 @@ const pending = ref<PendingOperation | null>(null)
 const filteredObjects = computed(() => objects.value.filter(o => o.name.toLowerCase().includes(filter.value.toLowerCase())))
 let request = 0
 function endpoint(suffix = '') { return catalog.path(base.value + suffix) }
-function newObject() { selected.value = null; editing.value = true; name.value = ''; source.value = ''; objectTable.value = ''; routineKind.value = 'FUNCTION'; results.value = []; notice.value = ''; error.value = '' }
-function selectObject(item: DbObject) { selected.value = item; editing.value = true; name.value = item.name; source.value = item.source; objectTable.value = item.table ?? ''; routineKind.value = item.kind; results.value = []; notice.value = ''; error.value = '' }
+const baseline = ref('')
+function snapshot() { return JSON.stringify([name.value,source.value,objectTable.value,routineKind.value]) }
+const discard = useDirtyGuard(()=>editing.value && snapshot() !== baseline.value,()=>t('sqlWorkflows.discard'))
+function refresh() { if(discard())void load() }
+function newObject() { if(!discard())return; selected.value = null; editing.value = true; name.value = ''; source.value = ''; objectTable.value = ''; routineKind.value = 'FUNCTION'; results.value = []; notice.value = ''; error.value = ''; baseline.value=snapshot() }
+function selectObject(item: DbObject) { if(!discard())return; selected.value = item; editing.value = true; name.value = item.name; source.value = item.source; objectTable.value = item.table ?? ''; routineKind.value = item.kind; results.value = []; notice.value = ''; error.value = ''; baseline.value=snapshot() }
 async function load() {
  const current = ++request
  objects.value = []; partitions.value = []; selected.value = null; editing.value = false; pending.value = null; results.value = []; source.value = ''; error.value = ''

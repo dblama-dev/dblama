@@ -11,9 +11,9 @@ function storageKey(serverKey: string): string {
 /** Reads the stored history for one server, newest first. A corrupted
  * payload (or another tab's junk) counts as an empty history. */
 export function loadHistory(serverKey: string): string[] {
-  const raw = localStorage.getItem(storageKey(serverKey))
-  if (raw === null) return []
   try {
+    const raw = localStorage.getItem(storageKey(serverKey))
+    if (raw === null) return []
     const parsed: unknown = JSON.parse(raw)
     return Array.isArray(parsed) ? parsed.filter((e): e is string => typeof e === 'string') : []
   } catch {
@@ -30,5 +30,6 @@ export function pushHistory(serverKey: string, sql: string): void {
   const history = loadHistory(serverKey)
   if (history[0] === entry) return
   history.unshift(entry)
-  localStorage.setItem(storageKey(serverKey), JSON.stringify(history.slice(0, CAP)))
+  try { localStorage.setItem(storageKey(serverKey), JSON.stringify(history.slice(0, CAP))) }
+  catch { /* Storage failure must never turn a successful SQL operation into an error. */ }
 }

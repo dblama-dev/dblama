@@ -2,34 +2,35 @@
   <section class="admin-view">
     <h2>{{ t('admin.users') }}</h2>
     <p v-if="error" role="alert">{{ error }}</p><p v-if="message" role="status">{{ message }}</p>
-    <button :disabled="busy" @click="load">{{ t('admin.refresh') }}</button>
+    <n-button :disabled="busy" @click="load">{{ t('admin.refresh') }}</n-button>
     <form data-test="create-form" class="toolbar" @submit.prevent="create">
       <label>{{ t('admin.user') }}<input v-model="newUser" data-test="create-user" :required="!createAnonymous" :disabled="createAnonymous" autocomplete="off"></label>
       <label>{{ t('admin.host') }}<input v-model="newHost" data-test="create-host" required autocomplete="off"></label>
       <label>{{ t('admin.password') }}<input v-model="newPassword" data-test="create-password" type="password" autocomplete="new-password"></label>
-      <label><input v-model="createAnonymous" data-test="create-anonymous" type="checkbox">{{ t('admin.anonymous') }}</label><button :disabled="busy">{{ t('admin.create') }}</button>
+      <label><input v-model="createAnonymous" data-test="create-anonymous" type="checkbox">{{ t('admin.anonymous') }}</label><n-button :disabled="busy">{{ t('admin.create') }}</n-button>
     </form>
-    <table><thead><tr><th>{{ t('admin.user') }}</th><th>{{ t('admin.host') }}</th><th>{{ t('admin.plugin') }}</th><th></th></tr></thead><tbody><tr v-for="u in users" :key="`${u.user}@${u.host}`"><td>{{ u.user || t('admin.anonymous') }}</td><td>{{ u.host }}</td><td>{{ u.plugin }}</td><td><button data-test="select-user" :disabled="busy" @click="select(u)">{{ t('admin.select') }}</button></td></tr></tbody></table>
+    <table><thead><tr><th>{{ t('admin.user') }}</th><th>{{ t('admin.host') }}</th><th>{{ t('admin.plugin') }}</th><th></th></tr></thead><tbody><tr v-for="u in users" :key="`${u.user}@${u.host}`"><td>{{ u.user || t('admin.anonymous') }}</td><td>{{ u.host }}</td><td>{{ u.plugin }}</td><td><n-button data-test="select-user" :disabled="busy" @click="select(u)">{{ t('admin.select') }}</n-button></td></tr></tbody></table>
     <p v-if="!users.length">{{ t('admin.empty') }}</p>
     <section v-if="selected" class="editor">
       <h3>{{ selected.user || t('admin.anonymous') }}@{{ selected.host }}</h3>
-      <fieldset :disabled="busy"><legend>{{ t('admin.rename') }}</legend><form class="toolbar" @submit.prevent="rename"><label>{{ t('admin.newUser') }}<input v-model="renameUser" required></label><label>{{ t('admin.newHost') }}<input v-model="renameHost" required></label><button>{{ t('admin.save') }}</button></form></fieldset>
-      <fieldset :disabled="busy"><legend>{{ t('admin.changePassword') }}</legend><form class="toolbar" @submit.prevent="changePassword"><label>{{ t('admin.password') }}<input v-model="password" type="password" autocomplete="new-password"></label><button>{{ t('admin.save') }}</button></form></fieldset>
-      <fieldset :disabled="busy"><legend>{{ t('admin.limits') }}</legend><form class="toolbar" @submit.prevent="saveLimits"><label v-for="key in limitKeys" :key="key">{{ t(`admin.${key}`) }}<input v-model.number="limits[key]" type="number" min="0" max="4294967295" required></label><button>{{ t('admin.save') }}</button></form></fieldset>
+      <fieldset :disabled="busy"><legend>{{ t('admin.rename') }}</legend><form class="toolbar" @submit.prevent="rename"><label>{{ t('admin.newUser') }}<input v-model="renameUser" required></label><label>{{ t('admin.newHost') }}<input v-model="renameHost" required></label><n-button>{{ t('admin.save') }}</n-button></form></fieldset>
+      <fieldset :disabled="busy"><legend>{{ t('admin.changePassword') }}</legend><form class="toolbar" @submit.prevent="changePassword"><label>{{ t('admin.password') }}<input v-model="password" type="password" autocomplete="new-password"></label><n-button>{{ t('admin.save') }}</n-button></form></fieldset>
+      <fieldset :disabled="busy"><legend>{{ t('admin.limits') }}</legend><form class="toolbar" @submit.prevent="saveLimits"><label v-for="key in limitKeys" :key="key">{{ t(`admin.${key}`) }}<input v-model.number="limits[key]" type="number" min="0" max="4294967295" required></label><n-button>{{ t('admin.save') }}</n-button></form></fieldset>
       <fieldset :disabled="busy"><legend>{{ t('admin.privileges') }}</legend>
         <p v-if="grants.some(g => !g.editable)">{{ t('admin.unsupportedGrants') }}</p>
         <div class="toolbar"><label>{{ t('admin.scope') }}<select v-model="level"><option value="global">{{ t('admin.global') }}</option><option value="database">{{ t('admin.database') }}</option><option value="table">{{ t('admin.table') }}</option></select></label><label v-if="level !== 'global'">{{ t('admin.database') }}<input v-model="database"></label><label v-if="level === 'table'">{{ t('admin.table') }}<input v-model="table"></label></div>
         <div class="privilege-matrix"><label v-for="p in availablePrivileges" :key="p.name"><input v-model="desiredPrivileges" :data-test="`privilege-${p.name}`" :disabled="scopeHasUnsupported || !catalog.length" type="checkbox" :value="p.name">{{ p.name }}</label></div>
         <label><input v-model="grantOption" :disabled="scopeHasUnsupported || !catalog.length" type="checkbox">{{ t('admin.grantOption') }}</label>
-        <button data-test="save-grants" :disabled="!validScope || scopeHasUnsupported || !catalog.length" @click="saveGrants">{{ t('admin.saveGrants') }}</button>
+        <n-button data-test="save-grants" :disabled="!validScope || scopeHasUnsupported || !catalog.length" @click="saveGrants">{{ t('admin.saveGrants') }}</n-button>
         <table><tbody><tr v-for="(g, i) in grants" :key="i"><td>{{ g.scope.level }} {{ g.scope.database }} {{ g.scope.table }}</td><td>{{ g.privileges.join(', ') }}</td><td>{{ g.grantOption ? 'GRANT OPTION' : '' }}</td></tr></tbody></table>
       </fieldset>
-      <button :disabled="busy" @click="confirmDrop = true">{{ t('admin.drop') }}</button>
-      <div v-if="confirmDrop" role="alertdialog" :aria-label="t('admin.confirmDrop')"><p>{{ t('admin.confirmDrop') }}: {{ selected.user }}@{{ selected.host }}</p><button :disabled="busy" @click="drop">{{ t('admin.confirm') }}</button><button @click="confirmDrop = false">{{ t('admin.cancel') }}</button></div>
+      <n-button :disabled="busy" @click="confirmDrop = true">{{ t('admin.drop') }}</n-button>
+      <div v-if="confirmDrop" role="alertdialog" :aria-label="t('admin.confirmDrop')"><p>{{ t('admin.confirmDrop') }}: {{ selected.user }}@{{ selected.host }}</p><n-button :disabled="busy" @click="drop">{{ t('admin.confirm') }}</n-button><n-button @click="confirmDrop = false">{{ t('admin.cancel') }}</n-button></div>
     </section>
   </section>
 </template>
 <script setup lang="ts">
+import { NButton } from 'naive-ui'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '../api/client'

@@ -1,3 +1,8 @@
+import { searchWorkflowMessages } from './searchWorkflows'
+import { sqlWorkflowMessages } from './sqlWorkflows'
+import { rowWorkflowMessages } from './rowWorkflows'
+import { navigationWorkflowMessages } from './navigationWorkflows'
+import { transferWorkflowMessages } from './transferWorkflows'
 import { watch } from 'vue'
 import { createI18n } from 'vue-i18n'
 
@@ -13,18 +18,19 @@ import en from './locales/en'
 // the app switches locale.
 const LOCALE_KEY = 'dbm-locale'
 
-const stored = localStorage.getItem(LOCALE_KEY)
+let stored: string | null = null
+try { stored = localStorage.getItem(LOCALE_KEY) } catch { /* Browser storage may be unavailable. */ }
 const i18n = createI18n({
   legacy: false,
   locale: stored === 'en' ? 'en' : 'ru',
   fallbackLocale: 'en',
-  messages: { ru: { ...ru, ...adminMessages.ru, ...objectMessages.ru, ...databaseMessages.ru, ...foreignKeyMessages.ru }, en: { ...en, ...adminMessages.en, ...objectMessages.en, ...databaseMessages.en, ...foreignKeyMessages.en } },
+  messages: { ru: { ...ru, ...adminMessages.ru, ...objectMessages.ru, ...databaseMessages.ru, ...foreignKeyMessages.ru, ...sqlWorkflowMessages.ru, ...rowWorkflowMessages.ru, ...navigationWorkflowMessages.ru, ...transferWorkflowMessages.ru, ...searchWorkflowMessages.ru }, en: { ...en, ...adminMessages.en, ...objectMessages.en, ...databaseMessages.en, ...foreignKeyMessages.en, ...sqlWorkflowMessages.en, ...rowWorkflowMessages.en, ...navigationWorkflowMessages.en, ...transferWorkflowMessages.en, ...searchWorkflowMessages.en } },
 })
 
 watch(
   i18n.global.locale,
   (locale) => {
-    localStorage.setItem(LOCALE_KEY, locale)
+    try { localStorage.setItem(LOCALE_KEY, locale) } catch { /* Locale still works for this session. */ }
   },
 )
 

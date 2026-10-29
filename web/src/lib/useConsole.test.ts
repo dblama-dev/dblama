@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ref } from 'vue'
 
 import { api } from '../api/client'
 import type { QueryResult } from '../api/types'
@@ -239,4 +240,39 @@ describe('useConsole', () => {
     expect(calls[0].body).toEqual({ db: DB, sql: 'SELECT 1' })
     expect(c.results.value).toEqual([results[0]])
   })
+})
+
+it('restores unexecuted drafts within database and schema scope', async () => {
+  const first = useConsole({ db: () => 'app', serverKey: SERVER_KEY, schema: () => 'public' })
+  first.sql.value = 'SELECT unsaved'
+  const restored = useConsole({ db: () => 'app', serverKey: SERVER_KEY, schema: () => 'public' })
+  expect(restored.sql.value).toBe('SELECT unsaved')
+  expect(useConsole({ db: () => 'other', serverKey: SERVER_KEY, schema: () => 'public' }).sql.value).toBe('')
+  expect(useConsole({ db: () => 'app', serverKey: SERVER_KEY, schema: () => 'private' }).sql.value).toBe('')
+})
+
+it('SQL execution still succeeds when local storage is unavailable', async () => {
+  routeApi()
+  const storage = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('storage denied') })
+  try {
+    const c = makeConsole()
+    c.sql.value = 'SELECT 42'
+    expect(await c.execute()).toBe(true)
+    expect(c.results.value).toEqual(results)
+  } finally { storage.mockRestore() }
+})
+
+it('does not put an old database result into a new database workspace', async () => {
+  const db = ref('first')
+  let finish!: (value: unknown) => void
+  mockedApi.mockImplementation(() => new Promise(resolve => {finish=resolve}))
+  const c = useConsole({db:()=>db.value,serverKey:SERVER_KEY})
+  c.sql.value='SELECT private_data'
+  const pending=c.execute()
+  db.value='second'
+  finish({results})
+  await pending
+  expect(c.results.value).toBeNull()
+  expect(c.sql.value).toBe('')
+  expect(c.executing.value).toBe(false)
 })

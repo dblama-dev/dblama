@@ -1,4 +1,5 @@
-import { ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { loadDraft, saveDraft } from './sqlWorkspace'
 
 import { withSchema } from './schema'
 import { api } from '../api/client'
@@ -17,7 +18,24 @@ export interface ConsoleScope {
  * per-server history cycle behind Alt+Up/Down. Extracted from
  * ConsoleView so the orchestration is testable without the editor. */
 export function useConsole(scope: ConsoleScope) {
-  const sql = ref('')
+  const draftKey = computed(() => JSON.stringify([scope.serverKey,scope.db(),scope.schema?.() ?? '']))
+  const sql = ref(loadDraft(draftKey.value) ?? '')
+  const draftSaved = ref(true)
+  let switchingScope = false
+  let requestVersion = 0
+  watch(draftKey, key => {
+    switchingScope = true
+    sql.value = loadDraft(key) ?? ''
+    switchingScope = false
+    results.value = null
+    error.value = ''
+    executing.value = false
+    queryID.value = ''
+    requestVersion++
+  }, {flush:'sync'})
+  watch(sql, value => {
+    if (!switchingScope) draftSaved.value = saveDraft(draftKey.value,value)
+  }, {flush:'sync'})
   const executing = ref(false)
   const results = ref<QueryResult[] | null>(null)
   const error = ref('')
@@ -46,6 +64,7 @@ export function useConsole(scope: ConsoleScope) {
     const trimmed = text.trim()
     if (trimmed === '' || executing.value) return false
     executing.value = true
+    const request = ++requestVersion
     error.value = ''
     results.value = null
     queryID.value = crypto.randomUUID()
@@ -56,15 +75,16 @@ export function useConsole(scope: ConsoleScope) {
         withSchema(`/api/databases/${encodeURIComponent(scope.db())}/query`, scope.schema?.() ?? null, true),
         { sql: trimmed, queryID: queryID.value },
       )
+      if (request !== requestVersion) return false
       results.value = payload.results ?? []
       pushHistory(scope.serverKey, trimmed)
       history.value = loadHistory(scope.serverKey)
       return true
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
+      if (request === requestVersion) error.value = e instanceof Error ? e.message : String(e)
       return false
     } finally {
-      executing.value = false
+      if (request === requestVersion) executing.value = false
     }
   }
 
@@ -81,6 +101,7 @@ export function useConsole(scope: ConsoleScope) {
     const trimmed = (hasSelection ? selection : sql.value).trim()
     if (trimmed === '' || executing.value) return false
     executing.value = true
+    const request = ++requestVersion
     error.value = ''
     results.value = null
     resetHistoryCycle()
@@ -89,13 +110,14 @@ export function useConsole(scope: ConsoleScope) {
         db: scope.db(),
         sql: trimmed,
       })
+      if (request !== requestVersion) return false
       results.value = payload.result === null ? [] : [payload.result]
       return true
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
+      if (request === requestVersion) error.value = e instanceof Error ? e.message : String(e)
       return false
     } finally {
-      executing.value = false
+      if (request === requestVersion) executing.value = false
     }
   }
 
@@ -130,6 +152,8 @@ export function useConsole(scope: ConsoleScope) {
   }
 
   return {
+    draftKey,
+    draftSaved,
     sql,
     executing,
     results,
