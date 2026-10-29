@@ -219,13 +219,13 @@ describe('RowModal', () => {
     })
   })
 
-  it('is disabled while a non-nullable field is empty', () => {
+  it('allows an explicit empty NOT NULL text value', () => {
     const wrapper = mountModal()
 
-    expect(saveButton(wrapper)?.props('disabled')).toBe(true)
+    expect(saveButton(wrapper)?.props('disabled')).toBe(false)
   })
 
-  it('exempts an untouched auto-increment column from the required check and sends null', async () => {
+  it('omits an untouched auto-increment column from the insert', async () => {
     mockedApi.mockResolvedValue({ lastInsertId: 1 })
     const wrapper = mountModal()
 
@@ -246,7 +246,6 @@ describe('RowModal', () => {
       role: '',
       bio: '',
       email: 'x@y.z',
-      id: null,
     })
     wrapper.unmount()
   })
@@ -396,7 +395,7 @@ describe('RowModal', () => {
     const wrapper = mountModal({ columns: cols })
 
     expect(fieldOf(wrapper, 'status').findComponent(NInput).props('value')).toBe('active')
-    expect(fieldOf(wrapper, 'created').findComponent(NInput).props('value')).toBe('')
+    expect((fieldOf(wrapper, 'created').find('input').element as HTMLInputElement).value).toBe('')
   })
 
   it('shows a notification with the ApiError message and keeps the modal open on failure', async () => {
@@ -552,7 +551,7 @@ describe('TableView row modal and stale-response guard', () => {
     await save?.trigger('click')
     await flushPromises()
 
-    expect(mockedApi).toHaveBeenCalledWith('POST', rowsUrl, { id: null, name: '' })
+    expect(mockedApi).toHaveBeenCalledWith('POST', rowsUrl, { name: '' })
     expect(modal.emitted('saved')).toHaveLength(1)
     wrapper.unmount()
   })
@@ -656,5 +655,157 @@ it('copies exact decimal and binary values without numeric rounding or text rein
  expect(fieldOf(wrapper,'amount').findComponent(NInput).props('value')).toBe('9007199254740993.12')
  await saveButton(wrapper)?.trigger('click');await flushPromises()
  expect(mockedApi).toHaveBeenCalledWith('POST',rowsPath,{amount:'9007199254740993.12',data:{$binaryHex:'00ff'}})
+ wrapper.unmount()
+})
+
+it('allows an existing empty NOT NULL string while PATCHing only changed notes', async () => {
+ mockedApi.mockResolvedValue(undefined)
+ const wrapper=mountModal({mode:'edit',columns:[{name:'name',type:'varchar',nullable:false},{name:'notes',type:'text',nullable:false}],row:{name:'',notes:''},rowPk:{id:'9007199254740993'}})
+ setString(wrapper,'notes','changed')
+ await flushPromises()
+ expect(saveButton(wrapper)?.props('disabled')).toBe(false)
+ await saveButton(wrapper)?.trigger('click'); await flushPromises()
+ expect(mockedApi).toHaveBeenCalledWith('PATCH',rowsPath,{where:{id:'9007199254740993'},values:{notes:'changed'}})
+ wrapper.unmount()
+})
+
+it('omits generated identity and literal or expression defaults on insert', async () => {
+ mockedApi.mockResolvedValue({lastInsertId:1})
+ const wrapper=mountModal({columns:[{name:'id',type:'bigint',nullable:false,autoIncrement:true},{name:'status',type:'varchar',nullable:false,default:{value:'active'}},{name:'created',type:'timestamp',nullable:false,default:{value:'CURRENT_TIMESTAMP',isSqlExpression:true}},{name:'derived',type:'int',nullable:false,generated:'id + 1'}]})
+ await saveButton(wrapper)?.trigger('click');await flushPromises()
+ expect(mockedApi).toHaveBeenCalledWith('POST',rowsPath,{})
+ wrapper.unmount()
+})
+
+it('preserves explicit empty string and NULL instead of server defaults', async () => {
+ mockedApi.mockResolvedValue({lastInsertId:1})
+ const wrapper=mountModal({columns:[{name:'status',type:'varchar',nullable:false,default:{value:'active'}},{name:'notes',type:'text',nullable:true,default:{value:'note'}}]})
+ fieldOf(wrapper,'status').find('.row-modal__mode').findComponent(NSelect).vm.$emit('update:value','value')
+ setString(wrapper,'status','')
+ checkNull(wrapper,'notes')
+ await flushPromises();await saveButton(wrapper)?.trigger('click');await flushPromises()
+ expect(mockedApi).toHaveBeenCalledWith('POST',rowsPath,{status:'',notes:null})
+ wrapper.unmount()
+})
+
+it('preserves untouched BIGINT, DECIMAL and binary when editing another field',async()=>{
+ mockedApi.mockResolvedValue(undefined)
+ const wrapper=mountModal({mode:'edit',columns:[{name:'id',type:'bigint',nullable:false},{name:'amount',type:'decimal',nullable:false},{name:'data',type:'bytea',nullable:false},{name:'notes',type:'text',nullable:false}],row:{id:'9007199254740993',amount:'9007199254740993.123',data:'0x00ff',notes:''},rowPk:{id:'9007199254740993'}})
+ setString(wrapper,'notes','new');await flushPromises();await saveButton(wrapper)?.trigger('click');await flushPromises()
+ expect(mockedApi).toHaveBeenCalledWith('PATCH',rowsPath,{where:{id:'9007199254740993'},values:{notes:'new'}})
+ wrapper.unmount()
+})
+
+it('shows an actionable JSON validation error without sending invalid input',async()=>{
+ const wrapper=mountModal({columns:[{name:'data',type:'json',nullable:false}]})
+ setString(wrapper,'data','{bad');await flushPromises();await saveButton(wrapper)?.trigger('click');await flushPromises()
+ expect(mockedApi).not.toHaveBeenCalled()
+ expect(wrapper.text()).toMatch(/JSON/)
+ expect(wrapper.find('.row-modal__error').text()).toMatch(/data/)
+ wrapper.unmount()
+})
+
+it('searches remote FK keys while keeping the selected exact manual ID available',async()=>{
+ mockedApi.mockResolvedValue({columns:[{name:'id',type:'bigint',nullable:false},{name:'name',type:'text',nullable:false}],rows:[['8','Eight']],totalRows:1})
+ const wrapper=mount(defineComponent({setup:()=>()=>h(NNotificationProvider,null,{default:()=>h(RowModal,{show:true,mode:'edit',rowsPath:'/api/databases/mydb/tables/child/rows?schema=public',columns:[{name:'parent_id',type:'bigint',nullable:false}],row:{parent_id:'9007199254740993'},rowPk:{id:1},foreignKeys:[{name:'fk',columns:['parent_id'],refSchema:'other',refTable:'parents',refColumns:['id']}]})})}),{global:{plugins:[createPinia(),i18n],stubs:{teleport:true}}})
+ await flushPromises()
+ const select=fieldOf(wrapper,'parent_id').findComponent(NSelect)
+ expect(select.props('options')).toContainEqual({label:'9007199254740993',value:'9007199254740993'})
+ expect(select.props('options')).toContainEqual({label:'Eight (8)',value:'8'})
+ fieldOf(wrapper,'parent_id').find('.row-modal__fk-search-mode').findComponent(NSelect).vm.$emit('update:value','key')
+ select.vm.$emit('search','999')
+ await new Promise(resolve=>setTimeout(resolve,350));await flushPromises()
+ const searches=mockedApi.mock.calls.filter(([method,url])=>method==='GET'&&new URL(String(url),'http://test').searchParams.has('filter'))
+ expect(searches.length).toBeGreaterThan(0)
+ expect(new URL(String(searches.at(-1)?.[1]),'http://test').searchParams.get('filter')).toBe('id:=:999')
+ wrapper.unmount()
+})
+
+it('renders boolean choices with a selected false value and preserves boolean payloads', async()=>{
+ mockedApi.mockResolvedValue(undefined)
+ const wrapper=mountModal({mode:'edit',columns:[{name:'enabled',type:'boolean',nullable:false}],row:{enabled:false},rowPk:{id:1}})
+ const select=fieldOf(wrapper,'enabled').findComponent(NSelect)
+ expect(select.props('value')).toBe('false')
+ select.vm.$emit('update:value','true');await flushPromises();await saveButton(wrapper)?.trigger('click');await flushPromises()
+ expect(mockedApi).toHaveBeenCalledWith('PATCH',rowsPath,{where:{id:1},values:{enabled:true}})
+ wrapper.unmount()
+})
+
+it('renders date, time and local timestamp editors without rewriting untouched timestamps',async()=>{
+ mockedApi.mockResolvedValue(undefined)
+ const wrapper=mountModal({mode:'edit',columns:[{name:'day',type:'date',nullable:false},{name:'clock',type:'time',nullable:false},{name:'created',type:'timestamp',nullable:false}],row:{day:'2026-10-29',clock:'14:15:16',created:'2026-10-29 14:15:16.123456'},rowPk:{id:1}})
+ expect(fieldOf(wrapper,'day').find('input').attributes('type')).toBe('date')
+ expect(fieldOf(wrapper,'clock').find('input').attributes('type')).toBe('time')
+ expect(fieldOf(wrapper,'created').find('input').attributes('type')).toBe('datetime-local')
+ await fieldOf(wrapper,'day').find('input').setValue('2026-10-30')
+ await saveButton(wrapper)?.trigger('click');await flushPromises()
+ expect(mockedApi).toHaveBeenCalledWith('PATCH',rowsPath,{where:{id:1},values:{day:'2026-10-30'}})
+ wrapper.unmount()
+})
+
+it('builds referenced table navigation with encoded identifiers and PostgreSQL schema',async()=>{
+ mockedApi.mockResolvedValue({columns:[],rows:[],totalRows:0})
+ const pinia=createPinia()
+ const {useCatalogStore}=await import('../stores/catalog')
+ useCatalogStore(pinia).schemaAware=true
+ const wrapper=mount(defineComponent({setup:()=>()=>h(NNotificationProvider,null,{default:()=>h(RowModal,{show:true,mode:'insert',rowsPath:'/api/databases/my%20db/tables/child/rows?schema=public',columns:[{name:'parent_id',type:'int',nullable:true}],row:null,rowPk:null,foreignKeys:[{name:'fk',columns:['parent_id'],refSchema:'other schema',refTable:'parent/table',refColumns:['id']}]})})}),{global:{plugins:[pinia,i18n],stubs:{teleport:true}}})
+ await flushPromises()
+ expect(wrapper.find('.row-modal__related a').attributes('href')).toBe('/db/my%20db/table/parent%2Ftable?schema=other+schema')
+ const request=String(mockedApi.mock.calls[0]?.[1])
+ expect(new URL(request,'http://test').searchParams.get('schema')).toBe('other schema')
+ expect(request).toContain('/my%20db/tables/parent%2Ftable/rows')
+ wrapper.unmount()
+})
+
+it('uploads exact binary file bytes using binary transport',async()=>{
+ mockedApi.mockResolvedValue({lastInsertId:1})
+ const wrapper=mountModal({columns:[{name:'data',type:'bytea',nullable:false}]})
+ const file=fieldOf(wrapper,'data').find('input[type=file]')
+ Object.defineProperty(file.element,'files',{value:[{arrayBuffer:async()=>new Uint8Array([0,255,128]).buffer}]})
+ await file.trigger('change');await flushPromises();await saveButton(wrapper)?.trigger('click');await flushPromises()
+ expect(mockedApi).toHaveBeenCalledWith('POST',rowsPath,{data:{$binaryHex:'00ff80'}})
+ wrapper.unmount()
+})
+
+it('does not let an old FK response overwrite a newer search', async () => {
+ let oldResponse!: (page: Page) => void
+ const parentColumns = [{ name: 'id', type: 'bigint', nullable: false }]
+ mockedApi.mockReset()
+ mockedApi.mockResolvedValueOnce({ columns: parentColumns, rows: [['initial']], totalRows: 1 })
+  .mockImplementationOnce(() => new Promise<Page>(resolve => { oldResponse = resolve }))
+  .mockResolvedValue({ columns: parentColumns, rows: [['new']], totalRows: 1 })
+ const wrapper = mount(defineComponent({ setup: () => () => h(NNotificationProvider, null, { default: () => h(RowModal, { show: true, mode: 'insert', rowsPath: '/api/databases/mydb/tables/child/rows', columns: [{ name: 'parent_id', type: 'bigint', nullable: true }], row: null, rowPk: null, foreignKeys: [{ name: 'fk', columns: ['parent_id'], refTable: 'parents', refColumns: ['id'] }] }) }) }), { global: { plugins: [createPinia(), i18n], stubs: { teleport: true } } })
+ await flushPromises()
+ const select = fieldOf(wrapper, 'parent_id').findComponent(NSelect)
+ select.vm.$emit('search', 'old'); await new Promise(resolve => setTimeout(resolve, 300)); await flushPromises()
+ select.vm.$emit('search', 'new'); await new Promise(resolve => setTimeout(resolve, 300)); await flushPromises()
+ oldResponse({ columns: parentColumns, rows: [['old']], totalRows: 1 }); await flushPromises()
+ expect(select.props('options')).toEqual([{ label: 'new', value: 'new' }])
+ wrapper.unmount()
+})
+
+it('finds an FK record by name beyond the first 200 rows while preserving the selected exact ID', async () => {
+ mockedApi.mockReset()
+ const parentColumns = [{ name: 'id', type: 'bigint', nullable: false }, { name: 'name', type: 'varchar', nullable: false }]
+ const firstPage = Array.from({ length: 200 }, (_, index) => [String(index + 1), `Person ${index + 1}`])
+ const search = 'Wild%_!name'
+ mockedApi.mockImplementation(async (method, url) => {
+  if (method === 'PATCH') return undefined
+  const filter = new URL(String(url), 'http://test').searchParams.get('filter')
+  return { columns: parentColumns, rows: filter === `name:CONTAINS:${search}` ? [['9007199254740995', `The ${search} record`]] : filter ? [] : firstPage, totalRows: filter ? 1 : 201 }
+ })
+ const wrapper = mount(defineComponent({ setup: () => () => h(NNotificationProvider, null, { default: () => h(RowModal, { show: true, mode: 'edit', rowsPath: '/api/databases/mydb/tables/child/rows', columns: [{ name: 'parent_id', type: 'bigint', nullable: false }], row: { parent_id: '9007199254740993' }, rowPk: { id: 1 }, foreignKeys: [{ name: 'fk', columns: ['parent_id'], refTable: 'parents', refColumns: ['id'] }] }) }) }), { global: { plugins: [createPinia(), i18n], stubs: { teleport: true } } })
+ await flushPromises()
+ const picker = fieldOf(wrapper, 'parent_id').findComponent(NSelect)
+ expect(picker.props('options')).not.toContainEqual(expect.objectContaining({ value: '9007199254740995' }))
+ picker.vm.$emit('search', search)
+ await new Promise(resolve => setTimeout(resolve, 300)); await flushPromises()
+ const requests = mockedApi.mock.calls.filter(([method, url]) => method === 'GET' && new URL(String(url), 'http://test').searchParams.has('filter'))
+ expect(new URL(String(requests.at(-1)?.[1]), 'http://test').searchParams.get('filter')).toBe(`name:CONTAINS:${search}`)
+ expect(picker.props('options')).toEqual([{ label: '9007199254740993', value: '9007199254740993' }, { label: `The ${search} record (9007199254740995)`, value: '9007199254740995' }])
+ expect(picker.props('value')).toBe('9007199254740993')
+ picker.vm.$emit('update:value', '9007199254740995')
+ await flushPromises(); await saveButton(wrapper)?.trigger('click'); await flushPromises()
+ expect(mockedApi).toHaveBeenCalledWith('PATCH', '/api/databases/mydb/tables/child/rows', { where: { id: 1 }, values: { parent_id: '9007199254740995' } })
  wrapper.unmount()
 })
