@@ -18,8 +18,15 @@ func TestTransferExportSelectedMySQLDatabase(t *testing.T) {
 			defer srv.Close()
 			cookie := loginSessionDB(t, srv, login)
 			resp := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/databases/selected/export", `{"format":"sql","mode":"data"}`, cookie)
-			defer resp.Body.Close()
-			body, _ := io.ReadAll(resp.Body)
+			defer func() {
+				if err := resp.Body.Close(); err != nil {
+					t.Errorf("close response body: %v", err)
+				}
+			}()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("read response body: %v", err)
+			}
 			if resp.StatusCode != 200 {
 				t.Fatalf("status %d: %s", resp.StatusCode, body)
 			}
@@ -35,7 +42,11 @@ func TestTransferExportRejectInvalidMode(t *testing.T) {
 	defer srv.Close()
 	cookie := loginSessionDB(t, srv, "appdb")
 	resp := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/databases/appdb/export", `{"format":"sql","mode":"bad"}`, cookie)
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	}()
 	if resp.StatusCode != 400 || len(fake.exportCalls) != 0 {
 		t.Fatalf("status %d, calls %d", resp.StatusCode, len(fake.exportCalls))
 	}
@@ -57,8 +68,14 @@ func TestTransferCSVColumnsMultipart(t *testing.T) {
 			defer srv.Close()
 			cookie := loginSessionDB(t, srv, "appdb")
 			resp := multipartImport(t, srv, cookie, map[string]string{"type": "csv", "table": "items", "columns": tc.mapping}, []byte("rows.csv"), []byte("name,ignored,1\n"))
-			defer resp.Body.Close()
-			io.ReadAll(resp.Body)
+			defer func() {
+				if err := resp.Body.Close(); err != nil {
+					t.Errorf("close response body: %v", err)
+				}
+			}()
+			if _, err := io.ReadAll(resp.Body); err != nil {
+				t.Fatalf("read response body: %v", err)
+			}
 			if resp.StatusCode != tc.status {
 				t.Fatalf("status %d", resp.StatusCode)
 			}
@@ -85,15 +102,23 @@ func TestTransferCSVEncodingValidation(t *testing.T) {
 	defer srv.Close()
 	cookie := loginSessionDB(t, srv, "appdb")
 	response := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/databases/appdb/export", `{"format":"csv","tables":["t"],"csvEncoding":"unknown"}`, cookie)
-	io.ReadAll(response.Body)
-	response.Body.Close()
+	if _, err := io.ReadAll(response.Body); err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if err := response.Body.Close(); err != nil {
+		t.Errorf("close response body: %v", err)
+	}
 	if response.StatusCode != 400 || len(fake.exportCalls) != 0 {
 		t.Fatalf("invalid encoding export status=%d calls=%d", response.StatusCode, len(fake.exportCalls))
 	}
 	for _, encoding := range []string{"literal", "escaped", "unknown"} {
 		resp := multipartImport(t, srv, cookie, map[string]string{"type": "csv", "table": "t", "columns": `["value"]`, "csvEncoding": encoding}, []byte("rows.csv"), []byte("value\n"))
-		io.ReadAll(resp.Body)
-		resp.Body.Close()
+		if _, err := io.ReadAll(resp.Body); err != nil {
+			t.Fatalf("read response body: %v", err)
+		}
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
 		if encoding == "unknown" {
 			if resp.StatusCode != 400 {
 				t.Fatalf("invalid import encoding status=%d", resp.StatusCode)
