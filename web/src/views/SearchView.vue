@@ -64,9 +64,19 @@ async function start(): Promise<void> {
   } catch (err) { if (run === id) { error.value = localError(err instanceof Error ? err.message : String(err)); status.value = 'idle' } }
   finally { if (run === id) busy.value = false }
 }
-watch([db, () => catalog.schema], () => {
+watch([db, () => catalog.schema, () => route.query.table], async (_scope, _previous, onCleanup) => {
+  let current = true
+  onCleanup(() => { current = false })
   stop(); run++; busy.value = false; status.value = 'idle'; selected.value = []; results.value = []; errors.value = []; error.value = ''
-  void catalog.fetchTables(db.value)
+  const table = typeof route.query.table === 'string' ? route.query.table : null
+  const initialSelection = selected.value
+  const loading = catalog.fetchTables(db.value)
+  const requestID = catalog.requestID
+  await loading
+  // Apply URL context once, after this scope's successful catalog load. A
+  // later response or selection change must never reset the user's scope.
+  if (!current || requestID !== catalog.requestID || catalog.error || selected.value !== initialSelection) return
+  if (table && catalog.tables.some(item => item.name === table)) selected.value = [table]
 }, { immediate: true })
 onBeforeUnmount(() => { stop(); run++ })
 </script>

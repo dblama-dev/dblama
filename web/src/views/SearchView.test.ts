@@ -1,11 +1,14 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { reactive } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { useCatalogStore } from '../stores/catalog'
 import { searchWorkflowMessages } from '../i18n/searchWorkflows'
 import SearchView from './SearchView.vue'
-vi.mock('vue-router',()=>({useRoute:()=>({params:{db:'app /%'},query:{schema:'Odd schema'}}),useRouter:()=>({push:vi.fn()})}))
+const routeState = reactive({ params: { db: 'app /%' }, query: { schema: 'Odd schema' } as Record<string,string> })
+vi.mock('vue-router',()=>({useRoute:()=>routeState,useRouter:()=>({push:vi.fn()})}))
+beforeEach(()=>{routeState.params.db='app /%';routeState.query={schema:'Odd schema'}})
 afterEach(()=>vi.unstubAllGlobals())
 function setup(){
  const pinia=createPinia();setActivePinia(pinia);const catalog=useCatalogStore();catalog.schema='Odd schema';catalog.schemaAware=true
@@ -36,5 +39,37 @@ it('cancels active requests and shows cancellation instead of success',async()=>
  await wrapper.get('[data-search-stop]').trigger('click');await flushPromises()
  expect(wrapper.text()).toContain('Search cancelled')
  expect(wrapper.text()).not.toContain('Search complete')
+ wrapper.unmount()
+})
+
+const tableInfo = (name:string) => ({name,rows:0,sizeBytes:0,engine:'InnoDB',comment:'',isView:false})
+it.each([['a /%',true],['missing table',false]])('preselects only an available exact table context: %s',async(table,checked)=>{
+ routeState.query.table=table
+ const paths:string[]=[]
+ vi.stubGlobal('fetch',vi.fn(async(path:string)=>{paths.push(path);return reply({tables:[tableInfo('a /%')]})}))
+ const wrapper=setup();await flushPromises()
+ expect((wrapper.get('input[type=checkbox]').element as HTMLInputElement).checked).toBe(checked)
+ expect(paths).toEqual(['/api/databases/app%20%2F%25/tables?schema=Odd%20schema'])
+ if(checked){
+  await wrapper.get('input[type=checkbox]').setValue(false)
+  await useCatalogStore().fetchTables('app /%');await flushPromises()
+  expect((wrapper.get('input[type=checkbox]').element as HTMLInputElement).checked).toBe(false)
+ }
+ wrapper.unmount()
+})
+it('ignores a stale scope response after a newer context loads and the user changes selection',async()=>{
+ routeState.query.table='first'
+ let resolveFirst!:(response:Response)=>void
+ vi.stubGlobal('fetch',vi.fn((path:string)=>path.includes('/app%20%2F%25/')?new Promise<Response>(resolve=>{resolveFirst=resolve}):Promise.resolve(reply({tables:[tableInfo('second'),tableInfo('manual'),tableInfo('first')]}))))
+ const wrapper=setup()
+ routeState.params.db='new db';routeState.query.table='second'
+ await flushPromises()
+ const boxes=wrapper.findAll('input[type=checkbox]')
+ expect((boxes[0]!.element as HTMLInputElement).checked).toBe(true)
+ await boxes[0]!.setValue(false);await boxes[1]!.setValue(true)
+ resolveFirst(reply({tables:[tableInfo('first')]}));await flushPromises()
+ expect((boxes[0]!.element as HTMLInputElement).checked).toBe(false)
+ expect((boxes[1]!.element as HTMLInputElement).checked).toBe(true)
+ expect((boxes[2]!.element as HTMLInputElement).checked).toBe(false)
  wrapper.unmount()
 })
