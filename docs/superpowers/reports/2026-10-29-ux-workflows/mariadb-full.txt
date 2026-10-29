@@ -1,0 +1,58 @@
+cd web && npm run build
+
+> db-manager-web@0.1.0 build
+> vite build
+
+vite v8.3.5 building client environment for production...
+transforming...
+✓ 2927 modules transformed.
+rendering chunks...
+computing gzip size...
+../server/web/index.html                     0.39 kB │ gzip:   0.26 kB
+../server/web/assets/index-DiezHiDS.css     15.96 kB │ gzip:   3.46 kB
+../server/web/assets/index-UIV5m81O.js   1,603.17 kB │ gzip: 478.63 kB
+
+✓ built in 1.07s
+[plugin builtin:vite-reporter]
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+cd server && CGO_ENABLED=0 go build -o dbmanager ./cmd/dbmanager
+
+> db-manager-web@0.1.0 test:e2e
+> playwright test
+
+[WebServer] 2026/10/29 12:34:23 listening on 127.0.0.1:18089
+
+Running 24 tests using 1 worker
+
+(node:764964) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   1 [mariadb] › e2e/admin.spec.ts:21:1 › database create, rename with data, and exact-name drop confirmation (6.8s)
+  ✓   2 [mariadb] › e2e/admin.spec.ts:104:1 › SQL view creation, source editing, result queries, and cancelled deletion (7.1s)
+  ✓   3 [mariadb] › e2e/admin.spec.ts:157:1 › monitor shows live processes, status and variables, with filtering and refresh (2.5s)
+  ✓   4 [mariadb] › e2e/data.spec.ts:43:1 › row CRUD preserves NULL, empty text and exact numeric values (7.4s)
+  ✓   5 [mariadb] › e2e/data.spec.ts:88:1 › copy rows generates new IDs and bulk upsert updates a conflict (7.0s)
+  ✓   6 [mariadb] › e2e/data.spec.ts:132:1 › filters, sorting and page deletion keep results and exported selection consistent (9.6s)
+  ✓   7 [mariadb] › e2e/data.spec.ts:176:1 › SQL console handles multiple statements, errors, selection and explain (3.4s)
+  ✓   8 [mariadb] › e2e/data.spec.ts:207:1 › SQL export and import restore schema, NULL, empty text and exact numbers (7.2s)
+  ✓   9 [mariadb] › e2e/data.spec.ts:234:1 › CSV export and import roundtrip commas, quotes, Unicode and multiline text (7.6s)
+  ✓  10 [mariadb] › e2e/final-regressions.spec.ts:5:1 › direct operations load resolves a view with the sidebar collapsed (4.5s)
+  ✓  11 [mariadb] › e2e/final-regressions.spec.ts:30:1 › a selected duplicate keyless row cannot start a bulk update (3.9s)
+  ✓  12 [mariadb] › e2e/final-regressions.spec.ts:46:1 › MySQL and MariaDB TIME durations remain visible and editable through row forms (7.8s)
+  ✓  13 [mariadb] › e2e/final-regressions.spec.ts:84:1 › search URL context survives a competing sidebar catalog load and later manual selection (3.6s)
+  ✓  14 [mariadb] › e2e/session.spec.ts:3:1 › session survives reload; logout protects pages; wrong password allows recovery (5.0s)
+  ✓  15 [mariadb] › e2e/structure.spec.ts:12:1 › autoincrement can be turned off by a second click and moved to another column (4.5s)
+  ✓  16 [mariadb] › e2e/structure.spec.ts:29:1 › create generated primary key, insert without ID, edit structure and reload (11.6s)
+  ✓  17 [mariadb] › e2e/structure.spec.ts:72:1 › existing table can disable autoincrement and retain its primary key (4.4s)
+  ✓  18 [mariadb] › e2e/ux.spec.ts:3:1 › default insert, empty NOT NULL edit, filters survive tabs and reload (6.8s)
+  ✓  19 [mariadb] › e2e/ux.spec.ts:36:1 › SQL draft, saved query and keyboard execution survive navigation (3.7s)
+  ✓  20 [mariadb] › e2e/ux.spec.ts:57:1 › database search treats wildcard characters literally and opens persistent filter (3.9s)
+  ✓  21 [mariadb] › e2e/ux.spec.ts:76:1 › default-only insert and confirmed bulk edit work through real endpoints (6.2s)
+  ✓  22 [mariadb] › e2e/ux.spec.ts:104:1 › CSV mapping, export modes and confirmed table operations (11.0s)
+  ✓  23 [mariadb] › e2e/ux.spec.ts:147:1 › long values stay compact and open an exact full-value inspector (4.5s)
+  ✓  24 [mariadb] › e2e/ux.spec.ts:164:1 › account form buttons submit create and rename (2.2s)
+[WebServer] 2026/10/29 12:36:46 shutting down
+
+  24 passed (2.4m)

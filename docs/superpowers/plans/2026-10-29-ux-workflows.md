@@ -33,11 +33,11 @@
 
 **Interfaces:** RowModal retains existing props/events; full metadata must be ready before parent opens it. Optional `loading` prop may protect transitional state. BulkEdit props: `show`, `rowsPath`, `columns:ColumnDef[]`, `rowKeys:Record<string,unknown>[]`; emits `update:show`, `saved`. Existing PATCH row endpoint is used sequentially; parent refreshes after `saved` including partial writes. Local i18n module may be consumed directly using computed locale text helper until coordinator registers it.
 
-- [ ] Write failing tests: edit `{name:'',notes:''}` with NOT NULL name saves only changed notes; insert defaults omit generated ID/status/timestamp; explicit empty string and NULL are preserved; untouched DECIMAL/BIGINT/binary remain exact; JSON invalid input gives actionable error; FK search requests a filter and includes selected/manual ID; bulk failure after one success reports one applied and stops.
-- [ ] Run `npm --prefix web test -- src/components/RowModal.test.ts src/components/BulkEdit.test.ts` (missing new file may initially fail discovery; existing regression must fail behaviorally). Record RED.
-- [ ] Implement `RowModal` value/NULL/DEFAULT controls and typed editors; reuse small pure payload helpers. Add remote debounced FK filtering with stale response guard and label/key options, referenced-table link and safe manual fallback. Implement confirmed BulkEdit; no new backend transaction claim.
-- [ ] Run focused tests and frontend full unit suite; report unrelated concurrent failures by name, do not edit others' files.
-- [ ] Self-review and write task report with changed files/TDD evidence. Coordinator commits after integration.
+- [x] Write failing tests: edit `{name:'',notes:''}` with NOT NULL name saves only changed notes; insert defaults omit generated ID/status/timestamp; explicit empty string and NULL are preserved; untouched DECIMAL/BIGINT/binary remain exact; JSON invalid input gives actionable error; FK search requests a filter and includes selected/manual ID; bulk failure after one success reports one applied and stops.
+- [x] Run `npm --prefix web test -- src/components/RowModal.test.ts src/components/BulkEdit.test.ts` (missing new file may initially fail discovery; existing regression must fail behaviorally). Record RED.
+- [x] Implement `RowModal` value/NULL/DEFAULT controls and typed editors; reuse small pure payload helpers. Add remote debounced FK filtering with stale response guard and label/key options, referenced-table link and safe manual fallback. Implement confirmed BulkEdit; no new backend transaction claim.
+- [x] Run focused tests and frontend full unit suite; report unrelated concurrent failures by name, do not edit others' files.
+- [x] Self-review and write task report with changed files/TDD evidence. Coordinator commits after integration.
 
 ### Task 2: Database-aware export and usable CSV import
 
@@ -45,11 +45,11 @@
 
 **Interfaces:** ExportRequest adds optional `mode:'all'|'structure'|'data'`. CSV mapping adds multipart `columns` JSON array of target column names in source-field order; empty target means ignored source column, duplicate/nonexistent names rejected. Mapping omitted preserves current positional behavior. `runImport(db,form,onProgress,schema?,signal?:AbortSignal)` requires terminal success. `table` route query preselects import/export.
 
-- [ ] Add failing Go tests for export of other MySQL database, PostgreSQL mismatch, all/structure/data SQL content and invalid mode; CSV mapped/reordered/ignored columns, unknown/duplicate mapping and quoted Unicode rows. Add frontend tests for CSV quoted comma/newline parser, preselection, abort and premature EOF rejection.
-- [ ] Run focused Go/frontend tests and record RED before implementation.
-- [ ] Implement selected-database routing with driver-safe qualification/connection scope. Default mode is all; data skips DDL and views; structure skips data. Validate mapping server-side, preserve schema and exact values. Add bounded preview and mapping UI with CSV presets, cancellation and partial-work explanation.
-- [ ] Run Go unit suite and frontend tests, plus targeted disposable DB integration tests for changed import/export behavior (coordinate build/E2E with root). Record GREEN.
-- [ ] Self-review and report changed files and residual limits. Coordinator commits.
+- [x] Add failing Go tests for export of other MySQL database, PostgreSQL mismatch, all/structure/data SQL content and invalid mode; CSV mapped/reordered/ignored columns, unknown/duplicate mapping and quoted Unicode rows. Add frontend tests for CSV quoted comma/newline parser, preselection, abort and premature EOF rejection.
+- [x] Run focused Go/frontend tests and record RED before implementation.
+- [x] Implement selected-database routing with driver-safe qualification/connection scope. Default mode is all; data skips DDL and views; structure skips data. Validate mapping server-side, preserve schema and exact values. Add bounded preview and mapping UI with CSV presets, cancellation and partial-work explanation.
+- [x] Run Go unit suite and frontend tests, plus targeted disposable DB integration tests for changed import/export behavior (coordinate build/E2E with root). Record GREEN.
+- [x] Self-review and report changed files and residual limits. Coordinator commits.
 
 ### Task 3: Navigation, grid state, compact structure and existing operations
 
@@ -57,12 +57,12 @@
 
 **Interfaces:** Export/import routes use query `table`; console query `table` identifies context. Query keys `filters` (JSON RowsFilter[]), `sort` (JSON RowsSort), `page`, `pageSize` retain state; preserve unrelated query keys incl schema/view. DataGrid takes controlled `filters` and emits existing apply-filters. Add `edit-rows` carrying captured row keys; parent renders Task 1 BulkEdit. TableOperations uses existing truncate/drop endpoints. New DB search link `/db/:db/search` implemented by Task 5.
 
-- [ ] Add failing behavior tests for restored visible filter after tab switch, parsed route query/back, schema-preserving context links, default metadata loaded before opening insert, confirm-before-single-delete, select-all bulk table operations and capability-gated partitions. Test corrupt preference storage fallback and selection derived from route.
-- [ ] Run focused component/helper tests and record RED.
-- [ ] Implement route-backed query state; await full definition before opening row forms; add BulkEdit integration without changing its file. Make grid cells bounded/full-inspectable with useful widths/local scroll, sticky controls and pagination/count top/bottom. Provide accessible labels and Enter-to-filter.
-- [ ] Implement context actions and clickable breadcrumbs, database list filtering/sorting/badges/quick actions, single/bulk truncate/drop with confirmation; make Sidebar collapse/resize and recent/favorites safe local preferences. Keep global links above long trees. Compact structure overview with expandable edits, guard dirty changes and independent save scopes without wiping other pending edits.
-- [ ] Run focused and full frontend tests/type checking; report cross-task missing components while work is in progress. Document UI choices and any outstanding integration needs.
-- [ ] Self-review and report; coordinator commits.
+- [x] Add failing behavior tests for restored visible filter after tab switch, parsed route query/back, schema-preserving context links, default metadata loaded before opening insert, confirm-before-single-delete, select-all bulk table operations and capability-gated partitions. Test corrupt preference storage fallback and selection derived from route.
+- [x] Run focused component/helper tests and record RED.
+- [x] Implement route-backed query state; await full definition before opening row forms; add BulkEdit integration without changing its file. Make grid cells bounded/full-inspectable with useful widths/local scroll, sticky controls and pagination/count top/bottom. Provide accessible labels and Enter-to-filter.
+- [x] Implement context actions and clickable breadcrumbs, database list filtering/sorting/badges/quick actions, single/bulk truncate/drop with confirmation; make Sidebar collapse/resize and recent/favorites safe local preferences. Keep global links above long trees. Compact structure overview with expandable edits, guard dirty changes and independent save scopes without wiping other pending edits.
+- [x] Run focused and full frontend tests/type checking; report cross-task missing components while work is in progress. Document UI choices and any outstanding integration needs.
+- [x] Self-review and report; coordinator commits.
 
 ### Task 4: SQL drafts, bookmarks, completion and common SQL editing
 
@@ -70,10 +70,10 @@
 
 **Interfaces:** SQL storage scope includes driver flavor/host/user/database/schema; connection host should include available port. Persistent local drafts load by scope, save on input, and handle storage exceptions. Console `table` query provides quoted starter SELECT only with no existing draft and never executes. Shared SqlEditor props `modelValue`, `dialect`, `schema?`; emits `update:modelValue`, `execute` with selected SQL or undefined. Object editors use the same editor with dirty navigation guard.
 
-- [ ] Add failing tests for draft isolation/restoration/storage failure, bookmark save/replace/remove, keyboard selection execution and no overwrite after delayed completion metadata.
-- [ ] Run focused tests and record RED.
-- [ ] Implement bounded drafts/bookmarks and dialect-aware schema completion; integrate existing history, formatting, explain/cancel and Ctrl/Cmd+Enter. Add reusable SqlEditor to object sources and preserve accessible test locators where possible. Unify control styling in touched administrative screens.
-- [ ] Run focused/full frontend tests and type checking; commit this task's owned files after other workers are ready or by exact paths.
+- [x] Add tests for draft isolation/restoration/storage failure, bookmark save/replace/remove, keyboard selection execution and no overwrite after delayed completion metadata. RED verified for storage/scope/guards; the initial shared-editor RED was not established (see verification note).
+- [x] Run focused tests and record RED.
+- [x] Implement bounded drafts/bookmarks and dialect-aware schema completion; integrate existing history, formatting, explain/cancel and Ctrl/Cmd+Enter. Add reusable SqlEditor to object sources and preserve accessible test locators where possible. Unify control styling in touched administrative screens.
+- [x] Run focused/full frontend tests and type checking; commit this task's owned files after other workers are ready or by exact paths.
 
 ### Task 5: Bounded database-wide text search
 
@@ -81,17 +81,19 @@
 
 **Interfaces:** Uses existing catalog/table definition/rows endpoints with encoded paths and catalog.schema. `searchDatabase` accepts selected tables and search text, onResult callback and AbortSignal; concurrency 2, max 20 selected tables per run, max 20 matches per text-column query, request timeout/stop bounded. Result includes table,column,rows and filter link using Task 3 query `filters` JSON. Literal `%`, `_`, and backslash escaped for LIKE. Reject empty query and clearly show per-column limits.
 
-- [ ] Write failing tests: names containing spaces/%/slash keep correct URLs; literal search escapes metacharacters; selecting 21 tables is rejected; cancellation prevents subsequent work; one inaccessible table reports an error while others continue; result link preserves schema/filter.
-- [ ] Run `npm --prefix web test -- src/lib/databaseSearch.test.ts src/views/SearchView.test.ts` and record RED.
-- [ ] Implement bounded sequential-per-worker text searches with existing parameterized API and cancellation. Render selectable tables, visible scope/limit explanation, progress, errors, matching rows and table links. Restrict to supported text columns, never execute arbitrary generated SQL.
-- [ ] Run focused tests/type checking and commit owned files.
+- [x] Write failing tests: names containing spaces/%/slash keep correct URLs; literal search escapes metacharacters; selecting 21 tables is rejected; cancellation prevents subsequent work; one inaccessible table reports an error while others continue; result link preserves schema/filter.
+- [x] Run `npm --prefix web test -- src/lib/databaseSearch.test.ts src/views/SearchView.test.ts` and record RED.
+- [x] Implement bounded sequential-per-worker text searches with existing parameterized API and cancellation. Render selectable tables, visible scope/limit explanation, progress, errors, matching rows and table links. Restrict to supported text columns, never execute arbitrary generated SQL.
+- [x] Run focused tests/type checking and commit owned files.
 
 ### Task 6: Integration, browser regressions, review and delivery
 
 **Files:** `web/e2e/ux.spec.ts`, shared fixtures only as needed, README/CHANGELOG and this plan, `docs/superpowers/reports/2026-10-29-ux-workflows.md`; no changes to existing test expectations merely to hide regressions.
 
-- [ ] Integrate all translation modules and interfaces; add E2E regressions for A1–A6, default row insertion, bulk edit, table operations, SQL draft/bookmark and transfer modes/mapping. Existing behavior must continue to work on all three engines.
-- [ ] Run `make backend-test web-test lint`, `make backend-integration`, `make build`; fix actual failures, then run `scripts/check-e2e.sh mysql`, `mariadb`, `postgres` sequentially.
-- [ ] Conduct browser inspection using disposable database only: grid long TEXT at 1366×768 and narrow window, compact structure, table navigation, modal types and SQL editor. Save before/after screenshots to report directory, stop temporary resources.
-- [ ] Obtain fresh task reviews and whole-branch review per superpowers; fix Important/Critical issues and rerun affected validation. Record minor residual limitations explicitly.
-- [ ] Update implementation report, check every spec outcome against changes/tests, commit changes and retain local reviewable branch. Do not push/publish. Return concrete results, verified test counts and artifact paths.
+- [x] Integrate all translation modules and interfaces; add E2E regressions for A1–A6, default row insertion, bulk edit, table operations, SQL draft/bookmark and transfer modes/mapping. Existing behavior must continue to work on all three engines.
+- [x] Run `make backend-test web-test lint`, `make backend-integration`, `make build`; fix actual failures, then run `scripts/check-e2e.sh mysql`, `mariadb`, `postgres` sequentially.
+- [x] Conduct browser inspection using disposable database only: grid long TEXT at 1366×768 and narrow window, compact structure, table navigation, modal types and SQL editor. Save before/after screenshots to report directory, stop temporary resources.
+- [x] Obtain fresh task reviews and whole-branch review per superpowers; fix Important/Critical issues and rerun affected validation. Record minor residual limitations explicitly.
+- [x] Update implementation report, check every spec outcome against changes/tests, commit changes and retain local reviewable branch. Do not push/publish. Return concrete results, verified test counts and artifact paths.
+
+Verification note: Task 4 observed RED for storage, stale scope and object guards. The initial shared editor run overlapped implementation; it is not claimed as a verified RED run. Later selection/theme regressions and review fixes have separate recorded evidence.
