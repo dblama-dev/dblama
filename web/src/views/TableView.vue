@@ -341,7 +341,8 @@ async function onEditRow(row: EditableRow): Promise<void> {
 const bulkShow = ref(false)
 const bulkKeys = ref<Record<string,unknown>[]>([])
 async function onEditRows(keys: Record<string,unknown>[]): Promise<void> {
-  const captured = keys.map(key => ({...key}))
+  if (!pkColumns.value.length || !keys.length || keys.some(key => pkColumns.value.some(name => key[name] === null || key[name] === undefined))) return
+  const captured = keys.map(key => Object.fromEntries(pkColumns.value.map(name => [name, key[name]])))
   if (!await fetchDef()) return
   bulkKeys.value=captured; bulkShow.value=true
 }

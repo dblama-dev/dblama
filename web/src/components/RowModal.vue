@@ -46,6 +46,7 @@ import { useI18n } from 'vue-i18n'
 import { NButton, NCheckbox, NInput, NInputNumber, NModal, NSelect, useNotification } from 'naive-ui'
 import { api } from '../api/client'
 import { useCatalogStore } from '../stores/catalog'
+import { useSessionStore } from '../stores/session'
 import type { ColumnDef, ForeignKey, Page } from '../api/types'
 import { isRowNumeric, isRowBinary, isRowJSON, isRowBoolean, rowField, rowPayload, rowJSONError, rowValueError, type RowField, type RowMode, type RowValue } from '../lib/rowValues'
 import { rowWorkflowMessages } from '../i18n/rowWorkflows'
@@ -55,6 +56,7 @@ const { t, locale } = useI18n()
 const text = computed(() => rowWorkflowMessages[locale.value === 'ru' ? 'ru' : 'en'].rowWorkflows)
 const notification = useNotification()
 const catalog = useCatalogStore()
+const session = useSessionStore()
 const fields = reactive<Record<string, RowField>>({})
 let original: Record<string, unknown> = {}
 const saving = ref(false)
@@ -86,7 +88,9 @@ function dateDisplayValue(col: ColumnDef): string {
 }
 function dateType(col: ColumnDef): 'date' | 'time' | 'datetime-local' | undefined {
  if (/^date$/i.test(col.type)) return 'date'
- if (/^time(?:\(\d+\))?$/i.test(col.type)) return 'time'
+ // MySQL/MariaDB TIME also stores signed durations beyond 24 hours.
+ // Use a clock control only when the engine is known to use clock TIME.
+ if (/^time(?:\(\d+\))?$/i.test(col.type) && session.sessionInfo?.driver.flavor === 'postgres') return 'time'
  if (/^(datetime|timestamp)(?:\(\d+\))?$/i.test(col.type) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(stringValue(col.name))) return 'datetime-local'
  return undefined
 }

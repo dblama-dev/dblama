@@ -17,6 +17,8 @@ import i18n from '../i18n'
 import RowModal from './RowModal.vue'
 import DataGrid from './DataGrid.vue'
 import TableView from '../views/TableView.vue'
+import { useSessionStore } from '../stores/session'
+import type { SessionInfo } from '../api/types'
 
 vi.mock('../api/client', () => ({
   api: vi.fn(),
@@ -77,10 +79,12 @@ const ModalInProvider = defineComponent({
 
 // Teleport is stubbed so the modal content stays inside the wrapper and
 // the field wrappers can be located per column.
-function mountModal(props: Record<string, unknown> = {}) {
+function mountModal(props: Record<string, unknown> = {}, flavor = 'postgres') {
+  const pinia = createPinia()
+  useSessionStore(pinia).sessionInfo = { driver: { flavor } } as SessionInfo
   return mount(ModalInProvider, {
     props,
-    global: { plugins: [createPinia(), i18n], stubs: { teleport: true } },
+    global: { plugins: [pinia, i18n], stubs: { teleport: true } },
   })
 }
 
@@ -144,7 +148,7 @@ describe('RowModal', () => {
     expect(wrapper.findAllComponents(NCheckbox)).toHaveLength(4)
     expect(fieldOf(wrapper, 'email').findComponent(NCheckbox).exists()).toBe(false)
     expect(fieldOf(wrapper, 'id').findComponent(NCheckbox).exists()).toBe(false)
-    expect(wrapper.text()).toContain('обязательно')
+    expect(fieldOf(wrapper, 'email').get('.row-modal__required').attributes('title')).toContain('NOT NULL')
   })
 
   it('disables the input and sends null when the NULL toggle is checked', async () => {
@@ -818,4 +822,29 @@ it('displays PostgreSQL RFC3339 DATE values without changing the original payloa
  await flushPromises(); await saveButton(wrapper)?.trigger('click'); await flushPromises()
  expect(mockedApi).toHaveBeenCalledWith('PATCH', rowsPath, { where: { id: 1 }, values: { notes: 'changed' } })
  wrapper.unmount()
+})
+
+it.each(['mysql', 'mariadb'])('keeps %s TIME durations visible, editable and insertable without submitting untouched values', async flavor => {
+ const durationColumns = [{ name: 'elapsed', type: 'time(6)', nullable: false }, { name: 'notes', type: 'text', nullable: false }]
+ for (const elapsed of ['36:00:00.123456', '-01:30:00.000001']) {
+  mockedApi.mockReset(); mockedApi.mockResolvedValue(undefined)
+  const wrapper = mountModal({ mode: 'edit', columns: durationColumns, row: { elapsed, notes: '' }, rowPk: { id: 1 } }, flavor)
+  const duration = fieldOf(wrapper, 'elapsed').get('input')
+  expect(duration.attributes('type')).toBe('text')
+  expect((duration.element as HTMLInputElement).value).toBe(elapsed)
+  setString(wrapper, 'notes', 'changed'); await flushPromises()
+  await saveButton(wrapper)!.trigger('click'); await flushPromises()
+  expect(mockedApi).toHaveBeenCalledWith('PATCH', rowsPath, { where: { id: 1 }, values: { notes: 'changed' } })
+  mockedApi.mockClear()
+  await duration.setValue('-36:10:11.123456')
+  await saveButton(wrapper)!.trigger('click'); await flushPromises()
+  expect(mockedApi).toHaveBeenCalledWith('PATCH', rowsPath, { where: { id: 1 }, values: { elapsed: '-36:10:11.123456', notes: 'changed' } })
+  wrapper.unmount()
+ }
+ mockedApi.mockClear()
+ const insert = mountModal({ columns: durationColumns }, flavor)
+ await fieldOf(insert, 'elapsed').get('input').setValue('48:01:02.123456')
+ await saveButton(insert)!.trigger('click'); await flushPromises()
+ expect(mockedApi).toHaveBeenCalledWith('POST', rowsPath, { elapsed: '48:01:02.123456', notes: '' })
+ insert.unmount()
 })

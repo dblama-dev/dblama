@@ -6,13 +6,14 @@ test('default insert, empty NOT NULL edit, filters survive tabs and reload', asy
   await runSQL(page, `CREATE TABLE ${table} (id ${engine === 'postgres' ? 'SERIAL' : 'INT AUTO_INCREMENT'} PRIMARY KEY, title VARCHAR(80) NOT NULL DEFAULT '', note TEXT, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP); INSERT INTO ${table}(title,note) VALUES ('','first'),('second','other');`)
   await page.goto(tablePath(db,table))
   const rows=page.locator('.datagrid tbody tr')
-  await rows.first().getByRole('button',{name:'Edit',exact:true}).click()
+  const firstRow=rows.filter({has:page.getByRole('cell',{name:'1',exact:true})})
+  await firstRow.getByRole('button',{name:'Edit',exact:true}).click()
   const modal=page.locator('.row-modal')
   const note=modal.locator('.row-modal__field').filter({has:page.locator('.row-modal__label').getByText('note',{exact:true})})
   await note.locator('textarea').fill('updated')
   await modal.getByRole('button',{name:'Save',exact:true}).click()
   await expect(modal).toBeHidden()
-  await expect(rows.first()).toContainText('updated')
+  await expect(firstRow).toContainText('updated')
   await page.getByRole('button',{name:'Add row',exact:true}).click()
   await modal.getByRole('button',{name:'Save',exact:true}).click()
   await expect(modal).toBeHidden()
@@ -100,7 +101,7 @@ test('default-only insert and confirmed bulk edit work through real endpoints',a
  }finally{await runSQL(page,`DROP TABLE IF EXISTS ${table}`)}
 })
 
-test('CSV mapping, export modes and confirmed table operations',async({page,db,prefix})=>{
+test('CSV mapping, export modes and confirmed table operations',async({page,db,engine,prefix})=>{
  const table=`${prefix}_transfer`
  try{
   await runSQL(page,`CREATE TABLE ${table}(id INTEGER PRIMARY KEY, title VARCHAR(100) NOT NULL, note VARCHAR(100) NOT NULL DEFAULT 'server default');`)
@@ -139,7 +140,7 @@ test('CSV mapping, export modes and confirmed table operations',async({page,db,p
   await page.locator('.n-tabs-tab').filter({hasText:/^Operations$/}).click()
   await page.getByRole('button',{name:'Drop',exact:true}).click()
   await page.locator('.n-popconfirm').getByRole('button',{name:/^(Confirm|OK)$/}).click()
-  await expect(page).toHaveURL(dbPath(db))
+  await expect(page).toHaveURL(`${dbPath(db)}${engine==='postgres'?'?schema=public':''}`)
  }finally{await runSQL(page,`DROP TABLE IF EXISTS ${table}`)}
 })
 

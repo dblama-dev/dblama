@@ -20,7 +20,8 @@
         <template #trigger><n-button size="small">{{ t('grid.copySelected') }} ({{ checkedKeys.length }})</n-button></template>
         {{ t('grid.copyConfirm') }}
       </n-popconfirm>
-      <n-button v-if="checkedKeys.length" size="small" @click="editSelected">{{ t('navigationWorkflows.editSelected') }} ({{ checkedKeys.length }})</n-button>
+      <n-button v-if="checkedKeys.length" size="small" :disabled="!canBulkEdit" @click="editSelected">{{ t('navigationWorkflows.editSelected') }} ({{ checkedKeys.length }})</n-button>
+      <small v-if="checkedKeys.length && !canBulkEdit" data-bulk-edit-unavailable>{{ t('navigationWorkflows.bulkNeedsPk') }}</small>
       <n-button size="small" quaternary @click="emit('refresh')">
         {{ t('grid.refresh') }}
       </n-button>
@@ -334,10 +335,15 @@ function copySelected(): void {
 }
 
 function editSelected(): void {
+  if (!canBulkEdit.value) return
   const selected=new Set(checkedKeys.value)
   const keys=tableData.value.filter(row=>selected.has(row.__key)).map(row=>row.__pk).filter((key): key is Record<string,unknown>=>key!==null)
   if(keys.length) emit('edit-rows',keys.map(key=>({...key})))
 }
+const canBulkEdit = computed(() => hasPk.value && checkedKeys.value.length > 0 && checkedKeys.value.every(key => {
+  const row = tableData.value.find(row => row.__key === key)
+  return row && props.pkColumns.every(name => row.__pk?.[name] !== null && row.__pk?.[name] !== undefined)
+}))
 const scrollWidth = computed(() => 280 + props.columns.reduce((sum,meta)=>sum+Math.max(140,Math.min(300,meta.name.length*9+70)),0))
 
 // --- Pagination and sorting --------------------------------------------

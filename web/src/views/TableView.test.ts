@@ -9,6 +9,7 @@ import i18n from '../i18n'
 import TableView from './TableView.vue'
 import DataGrid from '../components/DataGrid.vue'
 import RowModal from '../components/RowModal.vue'
+import BulkEdit from '../components/BulkEdit.vue'
 vi.mock('../api/client', () => ({ api: vi.fn(), ApiError: class extends Error {} }))
 let route = reactive({ params: { db: 'app', t: 'items' }, query: {} as Record<string, string> })
 const push = vi.fn()
@@ -181,4 +182,25 @@ it('opens top-level insert while data is already the active route',async()=>{
  await add.trigger('click');await flushPromises()
  expect(wrapper.findComponent(RowModal).props('show')).toBe(true)
  expect(push).not.toHaveBeenCalled();wrapper.unmount()
+})
+
+it('rejects a bulk-edit event when reliable primary keys are unavailable', async () => {
+ const wrapper = openTable(); await flushPromises()
+ vi.mocked(api).mockImplementation(async (_method, path) => path.includes('/pk') ? { columns: [] } : { columns: [], rows: [], totalRows: 0 })
+ route.params.t = 'keyless'; await flushPromises()
+ vi.mocked(api).mockClear()
+ wrapper.findComponent(DataGrid).vm.$emit('edit-rows', [{ name: 'duplicate' }])
+ await flushPromises()
+ expect(wrapper.findComponent(BulkEdit).props('show')).toBe(false)
+ expect(api).not.toHaveBeenCalled()
+ wrapper.unmount()
+})
+
+it('rejects incomplete bulk identities even when primary-key metadata is available', async () => {
+ const wrapper = openTable(); await flushPromises(); vi.mocked(api).mockClear()
+ wrapper.findComponent(DataGrid).vm.$emit('edit-rows', [{ name: 'wrong key' }])
+ await flushPromises()
+ expect(wrapper.findComponent(BulkEdit).props('show')).toBe(false)
+ expect(api).not.toHaveBeenCalled()
+ wrapper.unmount()
 })

@@ -64,21 +64,23 @@ async function start(): Promise<void> {
   } catch (err) { if (run === id) { error.value = localError(err instanceof Error ? err.message : String(err)); status.value = 'idle' } }
   finally { if (run === id) busy.value = false }
 }
-watch([db, () => catalog.schema, () => route.query.table], async (_scope, _previous, onCleanup) => {
-  let current = true
-  onCleanup(() => { current = false })
+let pendingContext: { path: string; table: string | null; selection: string[] } | undefined
+watch([db, () => catalog.schema, () => catalog.schemaAware, () => route.query.table], () => {
   stop(); run++; busy.value = false; status.value = 'idle'; selected.value = []; results.value = []; errors.value = []; error.value = ''
   const table = typeof route.query.table === 'string' ? route.query.table : null
-  const initialSelection = selected.value
-  const loading = catalog.fetchTables(db.value)
-  const requestID = catalog.requestID
-  await loading
-  // Apply URL context once, after this scope's successful catalog load. A
-  // later response or selection change must never reset the user's scope.
-  if (!current || requestID !== catalog.requestID || catalog.error || selected.value !== initialSelection) return
-  if (table && catalog.tables.some(item => item.name === table)) selected.value = [table]
+  pendingContext = { path: catalog.path(`/api/databases/${encodeURIComponent(db.value)}/tables`), table, selection: selected.value }
+  void catalog.fetchTables(db.value)
 }, { immediate: true })
-onBeforeUnmount(() => { stop(); run++ })
+watch(() => [catalog.loading, catalog.tablesPath, catalog.tables, catalog.error], () => {
+  const context = pendingContext
+  if (!context || catalog.loading || catalog.error || catalog.tablesPath !== context.path) return
+  pendingContext = undefined
+  // Another loader may supersede our request in the same scope. Initialize
+  // from its successful catalog once, without resetting manual selections.
+  if (selected.value !== context.selection) return
+  if (context.table && catalog.tables.some(item => item.name === context.table)) selected.value = [context.table]
+})
+onBeforeUnmount(() => { pendingContext = undefined; stop(); run++ })
 </script>
 <style scoped>
 .search-view{display:flex;flex-direction:column;gap:12px;max-width:100%;}.search-view h2,.search-view p{margin:0;}.search-view__form{display:flex;flex-direction:column;gap:12px;}.search-view__form>label{display:flex;flex-direction:column;gap:6px;max-width:560px;}.search-view__form input[type=text]{font:inherit;padding:8px;border:1px solid #8888;border-radius:4px;background:transparent;color:inherit;}.search-view__tables{display:flex;gap:8px 20px;flex-wrap:wrap;max-height:220px;overflow:auto;}.search-view__tables label{display:flex;gap:6px;align-items:center;overflow-wrap:anywhere;}fieldset{border:1px solid #8888;border-radius:4px;min-width:0;}.search-view__result{border-top:1px solid #8885;padding-top:8px;min-width:0;}.search-view__result pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;}small{font-weight:normal;}

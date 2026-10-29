@@ -73,3 +73,22 @@ it('ignores a stale scope response after a newer context loads and the user chan
  expect((boxes[2]!.element as HTMLInputElement).checked).toBe(false)
  wrapper.unmount()
 })
+
+it('applies URL context after a competing same-scope catalog request supersedes its own request', async () => {
+ routeState.query.table = 'target'
+ const completions: ((response: Response) => void)[] = []
+ vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => completions.push(resolve))))
+ const wrapper = setup()
+ const competing = useCatalogStore().fetchTables('app /%')
+ completions[0]!(reply({ tables: [tableInfo('target')] })); await flushPromises()
+ expect(wrapper.findAll('input[type=checkbox]')).toHaveLength(0)
+ completions[1]!(reply({ tables: [tableInfo('target'), tableInfo('manual')] })); await competing; await flushPromises()
+ const boxes = wrapper.findAll('input[type=checkbox]')
+ expect((boxes[0]!.element as HTMLInputElement).checked).toBe(true)
+ await boxes[0]!.setValue(false); await boxes[1]!.setValue(true)
+ const refresh = useCatalogStore().fetchTables('app /%')
+ completions[2]!(reply({ tables: [tableInfo('target'), tableInfo('manual')] })); await refresh; await flushPromises()
+ expect((boxes[0]!.element as HTMLInputElement).checked).toBe(false)
+ expect((boxes[1]!.element as HTMLInputElement).checked).toBe(true)
+ wrapper.unmount()
+})

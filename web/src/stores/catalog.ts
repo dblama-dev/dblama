@@ -13,6 +13,7 @@ export const useCatalogStore = defineStore('catalog', {
     loading: false,
     error: null as string | null,
     requestID: 0,
+    tablesPath: null as string | null,
     databaseRevision: 0,
     // Schema support (PostgreSQL): the current schema (null = driver
     // default "public") and whether the driver is schema-aware at all.
@@ -28,18 +29,16 @@ export const useCatalogStore = defineStore('catalog', {
      * message and tables keep their previous value. */
     async fetchTables(db: string): Promise<void> {
       const requestID = ++this.requestID
+      const path = this.path(`/api/databases/${encodeURIComponent(db)}/tables`)
       this.loading = true
       try {
         const body = await api<{ tables: TableInfo[] }>(
           'GET',
-          withSchema(
-            `/api/databases/${encodeURIComponent(db)}/tables`,
-            this.schema,
-            this.schemaAware,
-          ),
+          path,
         )
         if (requestID !== this.requestID) return
         this.tables = body.tables
+        this.tablesPath = path
         this.error = null
       } catch (err) {
         if (requestID !== this.requestID) return

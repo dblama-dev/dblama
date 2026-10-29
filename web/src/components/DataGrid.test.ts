@@ -401,6 +401,27 @@ it('clears captured selection when rows are replaced in a keyless table',async()
  wrapper.unmount()
 })
 
+it('disables bulk editing of one selected duplicate in a keyless table', async () => {
+ const wrapper = mountGrid({ pkColumns: [], rows: [[1, 'same'], [1, 'same']] })
+ wrapper.findComponent(NDataTable).vm.$emit('update:checked-row-keys', ['__idx_0'])
+ await flushPromises()
+ const edit = wrapper.findAll('button').find(button => button.text().startsWith('Изменить выбранные'))!
+ expect(edit.attributes('disabled')).toBeDefined()
+ expect(wrapper.get('[data-bulk-edit-unavailable]').text()).toContain('первичный ключ')
+ await edit.trigger('click')
+ expect(wrapper.emitted('edit-rows')).toBeUndefined()
+ wrapper.unmount()
+})
+
+it('emits only complete composite primary keys for a captured bulk selection', async () => {
+ const wrapper = mountGrid({ pkColumns: ['id', 'name'] })
+ wrapper.findComponent(NDataTable).vm.$emit('update:checked-row-keys', ['[1,"alice"]'])
+ await flushPromises()
+ await wrapper.findAll('button').find(button => button.text().startsWith('Изменить выбранные'))!.trigger('click')
+ expect(wrapper.emitted('edit-rows')).toEqual([[[{ id: 1, name: 'alice' }]]])
+ wrapper.unmount()
+})
+
 it('keeps short cell values as plain, exact text with meaningful cell names', () => {
   const wrapper = mountGrid({ rows: [['9007199254740993', '12345678901234567890.123456'], [2, '']] })
   const cells = wrapper.findAll('tbody tr')[0]!.findAll('td')
