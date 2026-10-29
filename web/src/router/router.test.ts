@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { SessionInfo } from '../api/types'
 import { useSessionStore } from '../stores/session'
+import { useCatalogStore } from '../stores/catalog'
 import router from './index'
 
 // res builds a minimal Response double: the client only reads ok, status
@@ -110,4 +111,21 @@ describe('router guard', () => {
     expect(router.currentRoute.value.path).toBe('/db/mydb')
     expect(router.currentRoute.value.params).toMatchObject({ db: 'mydb' })
   })
+})
+
+it('preserves schema until navigation is confirmed and resolves database search', async () => {
+  setActivePinia(createPinia())
+  useSessionStore().sessionInfo = { ...sessionInfo, caps: { ...sessionInfo.caps, schemas: true } }
+  await router.push('/db/app?schema=first')
+  const catalog = useCatalogStore()
+  expect(catalog.schema).toBe('first')
+  const removeGuard = router.beforeResolve(to => to.query.schema === 'blocked' ? false : true)
+  try {
+    await router.push('/db/app/search?schema=blocked')
+    expect(catalog.schema).toBe('first')
+    expect(router.currentRoute.value.query.schema).toBe('first')
+    await router.push('/db/app/search?schema=second')
+    expect(catalog.schema).toBe('second')
+    expect(router.currentRoute.value.name).toBe('db-search')
+  } finally { removeGuard() }
 })

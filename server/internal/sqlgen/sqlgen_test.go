@@ -50,7 +50,7 @@ func TestQuoteIdentPg(t *testing.T) {
 func TestAllowedOperators(t *testing.T) {
 	want := map[string]bool{
 		"=": true, "!=": true, "<": true, ">": true, "<=": true, ">=": true,
-		"LIKE": true, "NOT LIKE": true, "REGEXP": true, "NOT REGEXP": true,
+		"LIKE": true, "NOT LIKE": true, "REGEXP": true, "NOT REGEXP": true, "CONTAINS": true,
 		"IN": true, "NOT IN": true, "IS NULL": true, "IS NOT NULL": true,
 	}
 	got := AllowedOperators()

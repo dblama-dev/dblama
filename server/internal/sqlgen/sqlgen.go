@@ -60,6 +60,7 @@ var allowedOperators = map[string]bool{
 	"<=":          true,
 	">=":          true,
 	"LIKE":        true,
+	"CONTAINS":    true,
 	"NOT LIKE":    true,
 	"REGEXP":      true,
 	"NOT REGEXP":  true,
@@ -121,7 +122,7 @@ func (p *dialectPlaceholder) next() string {
 
 // QuoteIdent wraps name in MySQL backticks, doubling any inner backtick so
 // it cannot break out of the quoted identifier. It does not validate
-// emptiness: QuoteIdent("") returns "``" and callers must reject empty
+// emptiness: QuoteIdent("") returns "“" and callers must reject empty
 // identifiers with ErrEmptyIdentifier.
 func QuoteIdent(name string) string {
 	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
@@ -324,6 +325,14 @@ func buildFilter(d Dialect, ph *dialectPlaceholder, f Filter) (string, []any, er
 	}
 
 	switch f.Operator {
+	case "CONTAINS":
+		if f.Value == "" {
+			return "", nil, fmt.Errorf("sqlgen: filter %s on %q requires a non-empty value", f.Operator, f.Column)
+		}
+		// An explicit non-backslash escape works in every MySQL SQL mode
+		// and PostgreSQL. Only the pattern is transformed; it stays bound.
+		value := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(f.Value)
+		return d.QuoteIdent(f.Column) + " LIKE " + ph.next() + " ESCAPE '!'", []any{"%" + value + "%"}, nil
 	case "IS NULL", "IS NOT NULL":
 		// No placeholder: the operator itself expresses the condition.
 		return d.QuoteIdent(f.Column) + " " + f.Operator, nil, nil
