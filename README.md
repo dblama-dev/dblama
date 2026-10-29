@@ -98,7 +98,7 @@ make lint
 make backend-integration
 ```
 
-Integration tests use testcontainers and require Docker, with the MySQL/MariaDB/PostgreSQL images above. `make lint` also requires `golangci-lint` v2. Frontend tests use two workers to keep resource usage predictable.
+Integration tests use testcontainers and require Docker, with the MySQL/MariaDB/PostgreSQL images above. The integration target allows 30 minutes per Go package because each scenario starts fresh database containers. `make lint` also requires `golangci-lint` v2. Frontend tests use two workers to keep resource usage predictable.
 
 ## Release preparation
 
