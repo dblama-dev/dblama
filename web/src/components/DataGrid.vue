@@ -79,6 +79,9 @@
       @update:sorter="onSorter"
     />
     <div class="datagrid__total">{{ t('grid.total') }}: {{ totalRows }}</div>
+    <n-modal v-model:show="inspectorShow" preset="card" :title="`${t('grid.preview')}: ${inspectedColumn}`" style="width: min(800px, 96vw)">
+      <pre class="datagrid__full-value" data-testid="grid-inspected-value" tabindex="0" style="white-space: pre-wrap; overflow: auto; max-height: 70vh; overflow-wrap: anywhere">{{ inspectedValue }}</pre>
+    </n-modal>
   </div>
 </template>
 
@@ -92,6 +95,7 @@ import {
   NButton,
   NDataTable,
   NInput,
+  NModal,
   NPopconfirm,
   NPagination,
   NSelect,
@@ -188,15 +192,60 @@ function rowKey(row: GridRow): string {
 // monospace, truncated by CSS, with the full value on hover.
 const HEX_RE = /^0x[0-9a-fA-F]+$/
 
-function renderCell(value: unknown): ReturnType<typeof h> | string {
+const inspectedValue = ref('')
+const inspectedColumn = ref('')
+const inspectorShow = ref(false)
+const CELL_PREVIEW_LENGTH = 120
+
+function cellText(value: unknown): string {
+  if (value === null || value === undefined) return t('grid.null')
+  return typeof value === 'object' ? JSON.stringify(value) : String(value)
+}
+
+function needsInspector(text: string): boolean {
+  return text.length > CELL_PREVIEW_LENGTH || text.split(/\r?\n/).length > 3
+}
+
+function cellPreview(text: string): string {
+  if (!needsInspector(text)) return text
+  return `${text.replace(/\s+/g, ' ').slice(0, CELL_PREVIEW_LENGTH)}…`
+}
+
+function renderCell(value: unknown, column: string): ReturnType<typeof h> | string {
   if (value === null || value === undefined) {
     return h('span', { class: 'datagrid__null', style: 'font-style: italic' }, t('grid.null'))
   }
   if (typeof value === 'string' && HEX_RE.test(value)) {
     return h(BlobValue, { hex: value })
   }
-  const text = typeof value === 'object' ? JSON.stringify(value) : String(value)
-  return h('details', {class:'datagrid__cell'}, [h('summary',{title:text},text),h('pre', {tabindex:0},text)])
+  const text = cellText(value)
+  if (!needsInspector(text)) {
+    return h('span', {
+      class: 'datagrid__cell-short',
+      style: { display: 'block', maxWidth: '260px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+    }, text)
+  }
+  // The full text lives in the inspector outside the table. Keeping it out
+  // of a hidden cell subtree avoids duplicate text and unnamed group cells.
+  return h('span', {
+    class: 'datagrid__cell-preview',
+    style: { display: 'flex', alignItems: 'center', gap: '6px', maxWidth: '260px', minWidth: '0' },
+  }, [
+    h('span', {
+      style: { flex: '1 1 auto', minWidth: '0', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' },
+    }, cellPreview(text)),
+    h('button', {
+      type: 'button',
+      class: 'datagrid__inspect',
+      style: { flexShrink: '0' },
+      'aria-label': `${t('grid.preview')}: ${column}`,
+      onClick: () => {
+        inspectedValue.value = text
+        inspectedColumn.value = column
+        inspectorShow.value = true
+      },
+    }, t('grid.preview')),
+  ])
 }
 
 const gridColumns = computed<DataTableColumns<GridRow>>(() => {
@@ -210,7 +259,8 @@ const gridColumns = computed<DataTableColumns<GridRow>>(() => {
       sorter: 'default',
       sortOrder:
         props.sort?.column === meta.name ? (props.sort.desc ? 'descend' : 'ascend') : false,
-      render: (row) => renderCell(row[meta.name]),
+      cellProps: (row) => ({ 'aria-label': cellPreview(cellText(row[meta.name])) }),
+      render: (row) => renderCell(row[meta.name], meta.name),
     })
   }
   {
@@ -356,8 +406,7 @@ function resetFilters(): void {
 .datagrid__pagination {display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;}
 .datagrid__toolbar {position:sticky;top:0;z-index:2;background:var(--n-color,#fff);padding:6px 0;}
 .datagrid__table {max-width:100%;overflow:auto;}
-.datagrid__cell summary {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;max-width:260px;}
-.datagrid__cell pre {white-space:pre-wrap;overflow:auto;max-height:240px;max-width:300px;word-break:break-word;}
+:deep(.datagrid__inspect) {font:inherit;color:inherit;background:transparent;border:0;padding:0;cursor:pointer;text-decoration:underline;}
 .datagrid {
   display: flex;
   flex-direction: column;

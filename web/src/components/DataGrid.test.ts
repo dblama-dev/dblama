@@ -400,3 +400,49 @@ it('clears captured selection when rows are replaced in a keyless table',async()
  expect(wrapper.findComponent(NDataTable).props('checkedRowKeys')).toEqual([])
  wrapper.unmount()
 })
+
+it('keeps short cell values as plain, exact text with meaningful cell names', () => {
+  const wrapper = mountGrid({ rows: [['9007199254740993', '12345678901234567890.123456'], [2, '']] })
+  const cells = wrapper.findAll('tbody tr')[0]!.findAll('td')
+  expect(cells[1]!.text()).toBe('9007199254740993')
+  expect(cells[2]!.text()).toBe('12345678901234567890.123456')
+  expect(cells[1]!.find('details').exists()).toBe(false)
+  expect(cells[1]!.attributes('aria-label')).toBe('9007199254740993')
+  expect(cells[2]!.find('pre').exists()).toBe(false)
+  expect(wrapper.findAll('tbody tr')[1]!.findAll('td')[2]!.text()).toBe('')
+  wrapper.unmount()
+})
+
+it('bounds long previews and opens the exact full value outside the cell', async () => {
+  const value = 'Long Unicode value 世界\n'.repeat(40)
+  const wrapper = mountGrid({ rows: [[1, value]] })
+  const cell = wrapper.find('tbody tr')!.findAll('td')[2]!
+  expect(cell.text().length).toBeLessThan(160)
+  expect(cell.find('pre').exists()).toBe(false)
+  expect(cell.attributes('aria-label')).toContain('Long Unicode value')
+  const preview = cell.find('button')
+  expect(preview.attributes('aria-label')).toContain('name')
+  await preview.trigger('click')
+  await flushPromises()
+  const full = document.body.querySelector('[data-testid="grid-inspected-value"]')
+  expect(full?.textContent).toBe(value)
+  expect(cell.text().length).toBeLessThan(160)
+  wrapper.unmount()
+})
+
+it('applies compact overflow bounds to the actual rendered cell nodes', async () => {
+  const wrapper = mountGrid({ rows: [[1, 'Long notes with newlines\n'.repeat(15)]] })
+  const short = wrapper.get('.datagrid__cell-short').element
+  const preview = wrapper.get('.datagrid__cell-preview > span').element
+  expect(getComputedStyle(short).whiteSpace).toBe('nowrap')
+  expect(getComputedStyle(short).overflow).toBe('hidden')
+  expect(getComputedStyle(preview).whiteSpace).toBe('nowrap')
+  expect(getComputedStyle(preview).overflow).toBe('hidden')
+  expect(wrapper.get('.datagrid__cell-preview > span').text()).not.toContain('\n')
+  await wrapper.get('.datagrid__inspect').trigger('click')
+  await flushPromises()
+  const full = document.body.querySelector('[data-testid="grid-inspected-value"]')!
+  expect(Number.parseFloat(getComputedStyle(full).maxHeight)).toBeCloseTo(window.innerHeight * 0.7)
+  expect(getComputedStyle(full).overflow).toBe('auto')
+  wrapper.unmount()
+})
