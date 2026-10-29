@@ -99,6 +99,10 @@ const csvBatchSize = 100
 // Progress reports only successfully applied batches, total=0 until EOF.
 // Earlier batches remain applied if parsing, execution or cancellation fails.
 func (d *MysqlDriver) ImportCSV(ctx context.Context, db, table string, r io.Reader, opts driver.CSVImportOpts, progress func(done, total int64)) error {
+	if opts.CSVEncoding != "" && opts.CSVEncoding != "escaped" && opts.CSVEncoding != "literal" {
+		return fmt.Errorf("import csv: invalid csvEncoding %q", opts.CSVEncoding)
+	}
+
 	if db == "" {
 		return fmt.Errorf("import csv: %w: database name", sqlgen.ErrEmptyIdentifier)
 	}
@@ -206,6 +210,10 @@ func (d *MysqlDriver) ImportCSV(ctx context.Context, db, table string, r io.Read
 		for i, source := range indexes {
 			f := rec[source]
 			if opts.Columns != nil {
+				if opts.CSVEncoding == "literal" {
+					args = append(args, f)
+					continue
+				}
 				if f == `\N` {
 					args = append(args, nil)
 				} else {

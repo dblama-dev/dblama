@@ -83,6 +83,10 @@ func (d *PostgresDriver) ImportSQL(ctx context.Context, db string, r io.Reader, 
 // are escaped. The first failing batch aborts with
 // its row range, earlier batches stay applied (one statement each).
 func (d *PostgresDriver) ImportCSV(ctx context.Context, db, table string, r io.Reader, opts driver.CSVImportOpts, progress func(done, total int64)) error {
+	if opts.CSVEncoding != "" && opts.CSVEncoding != "escaped" && opts.CSVEncoding != "literal" {
+		return fmt.Errorf("import csv: invalid csvEncoding %q", opts.CSVEncoding)
+	}
+
 	if db == "" || table == "" {
 		return fmt.Errorf("import csv: %w", sqlgen.ErrEmptyIdentifier)
 	}
@@ -170,6 +174,10 @@ func (d *PostgresDriver) ImportCSV(ctx context.Context, db, table string, r io.R
 		}
 		for i, source := range indexes {
 			field := record[source]
+			if opts.CSVEncoding == "literal" {
+				args = append(args, field)
+				continue
+			}
 			if field == `\N` {
 				args = append(args, nil)
 				continue

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -125,6 +126,66 @@ func TestTransferModesAndMapping(t *testing.T) {
 				t.Fatalf("missing connection port: %s", infoJSON)
 			}
 
+		})
+	}
+}
+
+func TestTransferEscapedCSVRoundTrip(t *testing.T) {
+	for _, image := range testImages {
+		t.Run(image.image, func(t *testing.T) {
+			cfg := startDB(t, image.image)
+			d := connectOK(t, cfg).(*MysqlDriver)
+			ctx := context.Background()
+			execDDL(t, cfg, "CREATE TABLE csv_source(id INT PRIMARY KEY, value TEXT NULL, bin VARBINARY(16))")
+			execDDL(t, cfg, "CREATE TABLE csv_target LIKE csv_source")
+			values := []struct {
+				text any
+				bin  any
+			}{{nil, nil}, {"", []byte{}}, {`\N`, []byte{0, 255}}, {`\prefix`, nil}, {`\\prefix`, nil}, {"Привет,\nмир", nil}}
+			for i, value := range values {
+				if _, err := d.db.ExecContext(ctx, "INSERT INTO csv_source VALUES (?,?,?)", i+1, value.text, value.bin); err != nil {
+					t.Fatal(err)
+				}
+			}
+			source, err := d.SelectRows(ctx, cfg.Database, "csv_source", driver.SelectQuery{Limit: 20, Sorts: []sqlgen.Sort{{Column: "id"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, selection := range []bool{false, true} {
+				t.Run(fmt.Sprint(selection), func(t *testing.T) {
+					execDDL(t, cfg, "TRUNCATE TABLE csv_target")
+					var req driver.ExportRequest
+					if err := json.Unmarshal([]byte(`{"format":"csv","tables":["csv_source"],"csvEncoding":"escaped"}`), &req); err != nil {
+						t.Fatal(err)
+					}
+					if selection {
+						req.Query = &driver.SelectQuery{Sorts: []sqlgen.Sort{{Column: "id"}}}
+					}
+					var output bytes.Buffer
+					if err := d.Export(ctx, cfg.Database, req, &output); err != nil {
+						t.Fatal(err)
+					}
+					if err := d.ImportCSV(ctx, cfg.Database, "csv_target", strings.NewReader(output.String()), driver.CSVImportOpts{Columns: []string{"id", "value", "bin"}, SkipHeader: true}, nil); err != nil {
+						t.Fatal(err)
+					}
+					restored, err := d.SelectRows(ctx, cfg.Database, "csv_target", driver.SelectQuery{Limit: 20, Sorts: []sqlgen.Sort{{Column: "id"}}})
+					if err != nil || !reflect.DeepEqual(restored.Rows, source.Rows) {
+						t.Fatalf("CSV %q\nsource=%#v\nrestored=%#v err=%v", output.String(), source.Rows, restored.Rows, err)
+					}
+				})
+			}
+			t.Run("literal mapped external CSV", func(t *testing.T) {
+				execDDL(t, cfg, "TRUNCATE TABLE csv_target")
+				var opts driver.CSVImportOpts
+				json.Unmarshal([]byte(`{"columns":["id","value"],"csvEncoding":"literal"}`), &opts)
+				if err := d.ImportCSV(ctx, cfg.Database, "csv_target", strings.NewReader("1,\\N\n2,\\\\prefix\n3,\n"), opts, nil); err != nil {
+					t.Fatal(err)
+				}
+				page, err := d.SelectRows(ctx, cfg.Database, "csv_target", driver.SelectQuery{Limit: 10, Sorts: []sqlgen.Sort{{Column: "id"}}})
+				if err != nil || len(page.Rows) != 3 || page.Rows[0][1] != `\N` || page.Rows[1][1] != `\\prefix` || page.Rows[2][1] != "" {
+					t.Fatalf("literal rows=%#v error=%v", page.Rows, err)
+				}
+			})
 		})
 	}
 }

@@ -11,9 +11,10 @@ import (
 
 // WriteSelection streams the structured query in bounded batches. Limit zero
 // exports all matching rows; a positive limit preserves a selected page/range.
+// escapedCSV enables the reversible NULL/backslash value encoding.
 func WriteSelection(ctx context.Context, table, format string, query driver.SelectQuery, out io.Writer,
 	read func(context.Context, driver.SelectQuery) (driver.Page, error), quote func(string) string,
-	literal func(any, string) string, postgres bool) error {
+	literal func(any, string) string, escapedCSV bool) error {
 	if table == "" || query.Limit < 0 || query.Offset < 0 {
 		return fmt.Errorf("invalid export selection")
 	}
@@ -59,16 +60,10 @@ func WriteSelection(ctx context.Context, table, format string, query driver.Sele
 			}
 			if csv != nil {
 				values := row
-				if postgres {
-					values = append([]any(nil), row...)
-					for i, v := range values {
-						if v == nil {
-							values[i] = `\N`
-						} else if text, ok := v.(string); ok && strings.HasPrefix(text, `\`) {
-							values[i] = `\` + text
-						}
-					}
+				if escapedCSV {
+					values = EscapedCSVRow(row)
 				}
+
 				if err := csv.WriteRow(values); err != nil {
 					return err
 				}

@@ -27,6 +27,7 @@ export interface ImportCsvOptions {
   /** Target table; required for csv (validated by the caller). */
   table: string
   columns?: string[]
+  csvEncoding?: 'escaped' | 'literal'
   /** Field separator, a single character; "" keeps the server default. */
   separator: string
   /** Double-quote enclosure; "" retains the same standard parsing. */
@@ -49,6 +50,7 @@ export function buildImportFormData(type: 'sql' | 'csv', file: File, csv: Import
     form.append('separator', csv.separator)
     form.append('enclosure', csv.enclosure)
     form.append('skipHeader', String(csv.skipHeader))
+    if (csv.csvEncoding !== undefined) form.append('csvEncoding', csv.csvEncoding)
     if (csv.columns !== undefined) form.append('columns', JSON.stringify(csv.columns))
   }
   form.append('file', file)

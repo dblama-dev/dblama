@@ -100,6 +100,7 @@ describe('ExportView', () => {
     }
     fetchMock = mockFetch(exportRes())
     vi.stubGlobal('fetch', fetchMock)
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     URL.createObjectURL = vi.fn(() => 'blob:mock')
     URL.revokeObjectURL = vi.fn()
   })
@@ -196,7 +197,7 @@ describe('ExportView', () => {
       }),
     )
     const body = JSON.parse(String(fetchMock.mock.calls[1][1].body))
-    expect(body).toEqual({ format: 'csv', tables: ['users'], includeViews: false, dropIfExists: false, ifNotExists: false, gzip: false })
+    expect(body).toEqual({ format: 'csv', csvEncoding: 'escaped', tables: ['users'], includeViews: false, dropIfExists: false, ifNotExists: false, gzip: false })
     // The dump reaches the browser as a download and the UI confirms it.
     expect(URL.createObjectURL).toHaveBeenCalled()
     // Notifications render into a document.body portal.

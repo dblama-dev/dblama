@@ -61,7 +61,11 @@
         <template v-if="previewRows.length && !previewError">
           <p>{{ t('transferWorkflows.previewHint') }}</p>
           <n-checkbox v-model:checked="mappingEnabled" :disabled="importing" data-testid="csv-mapping-enabled">{{ t('transferWorkflows.mapping') }}</n-checkbox>
-          <p v-if="mappingEnabled">{{ t('transferWorkflows.mappingHint') }}</p>
+          <label v-if="mappingEnabled" class="import-view__field">
+            <span>{{ t('transferWorkflows.csvEncoding') }}</span>
+            <n-select v-model:value="csvEncoding" :disabled="importing" :options="encodingOptions" data-testid="csv-value-encoding" />
+          </label>
+          <p v-if="mappingEnabled">{{ t(csvEncoding === 'escaped' ? 'transferWorkflows.mappingHint' : 'transferWorkflows.literalHint') }}</p>
           <div class="import-view__preview" data-testid="csv-preview">
             <table>
               <thead><tr><th v-for="(name, index) in previewRows[0]" :key="index">
@@ -155,6 +159,7 @@ const columns = ref<ColumnDef[]>([])
 const columnsError = ref('')
 const mapping = ref<string[]>([])
 const mappingEnabled = ref(true)
+const csvEncoding = ref<'escaped' | 'literal'>('escaped')
 let controller: AbortController | null = null
 let previewID = 0
 let columnsID = 0
@@ -180,6 +185,10 @@ const presetOptions = computed<SelectOption[]>(() => [
   { value: ',', label: t('transferWorkflows.commaPreset') },
   { value: ';', label: t('transferWorkflows.semicolonPreset') },
   { value: '\t', label: t('transferWorkflows.tabPreset') },
+])
+const encodingOptions = computed<SelectOption[]>(() => [
+  { value: 'escaped', label: t('transferWorkflows.encodingEscaped') },
+  { value: 'literal', label: t('transferWorkflows.encodingLiteral') },
 ])
 const columnOptions = computed<SelectOption[]>(() => [
   { value: '', label: t('transferWorkflows.ignoreColumn') },
@@ -224,13 +233,14 @@ watch([db, () => catalog.schema, table], async () => {
     if (id === columnsID) { columnsLoading.value = false; resetMapping() }
   }
 })
-watch([file, type, separator, enclosure], async () => {
+watch([file, type, separator, enclosure, () => catalog.schemaAware], async () => {
   const id = ++previewID; previewRows.value = []; previewError.value = ''
   if (!file.value || type.value !== 'csv') { previewLoading.value = false; return }
   previewLoading.value = true
   const selectedFile = file.value
   try {
     const text = await readCsvPreview(selectedFile)
+    if (catalog.schemaAware && !['', ',', ';', '\t'].includes(separator.value)) throw new Error(t('transferWorkflows.postgresSeparator'))
     const parsed = parseCsvPreview(text, separator.value, enclosure.value, selectedFile.size > CSV_PREVIEW_BYTES)
     if (id !== previewID) return
     if (!parsed.rows.length) throw new Error(t('transferWorkflows.noPreviewRows'))
@@ -275,7 +285,7 @@ async function submit(): Promise<void> {
       separator: separator.value,
       enclosure: enclosure.value,
       skipHeader: skipHeader.value,
-      ...(mappingEnabled.value && type.value === 'csv' ? { columns: [...mapping.value] } : {}),
+      ...(mappingEnabled.value && type.value === 'csv' ? { columns: [...mapping.value], csvEncoding: csvEncoding.value } : {}),
     })
     await runImport(operationDB, form, (lineDone, lineTotal) => {
       progressStarted.value = true

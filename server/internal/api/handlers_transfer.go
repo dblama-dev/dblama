@@ -74,6 +74,10 @@ func (s *apiServer) handleExport(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, ErrBadRequest("mode must be all, structure or data"))
 		return
 	}
+	if req.CSVEncoding != "" && req.CSVEncoding != "escaped" && req.CSVEncoding != "legacy" {
+		WriteErr(w, http.StatusBadRequest, ErrBadRequest("csvEncoding must be escaped or legacy"))
+		return
+	}
 	meta, ok := exportFormats[req.Format]
 	if !ok {
 		WriteErr(w, http.StatusBadRequest, ErrBadRequest("unsupported export format "+req.Format))
@@ -145,10 +149,10 @@ func (s *apiServer) handleImport(w http.ResponseWriter, r *http.Request) {
 	// that order): parts are streamed in order and the file part is
 	// kept open for the driver, so anything after it is ignored.
 	var (
-		fileType, table, separator, enclosure string
-		columns                               []string
-		skipHeader                            bool
-		file                                  io.Reader
+		fileType, table, separator, enclosure, csvEncoding string
+		columns                                            []string
+		skipHeader                                         bool
+		file                                               io.Reader
 	)
 	for {
 		p, err := mr.NextPart()
@@ -177,6 +181,8 @@ func (s *apiServer) handleImport(w http.ResponseWriter, r *http.Request) {
 			separator = string(val)
 		case "enclosure":
 			enclosure = string(val)
+		case "csvEncoding":
+			csvEncoding = string(val)
 		case "columns":
 			if err := json.Unmarshal(val, &columns); err != nil || columns == nil {
 				WriteErr(w, http.StatusBadRequest, ErrBadRequest("columns must be a JSON array of target names"))
@@ -202,6 +208,11 @@ func (s *apiServer) handleImport(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, ErrBadRequest("table is required for csv import"))
 		return
 	}
+	if fileType == "csv" && csvEncoding != "" && csvEncoding != "escaped" && csvEncoding != "literal" {
+		WriteErr(w, http.StatusBadRequest, ErrBadRequest("csvEncoding must be escaped or literal"))
+		return
+	}
+
 	if file == nil {
 		WriteErr(w, http.StatusBadRequest, ErrBadRequest("file is required"))
 		return
@@ -230,7 +241,7 @@ func (s *apiServer) handleImport(w http.ResponseWriter, r *http.Request) {
 	if fileType == "sql" {
 		impErr = sess.Driver.ImportSQL(r.Context(), chi.URLParam(r, "db"), file, progress)
 	} else {
-		opts := driver.CSVImportOpts{Separator: separator, Enclosure: enclosure, SkipHeader: skipHeader, Columns: columns}
+		opts := driver.CSVImportOpts{Separator: separator, Enclosure: enclosure, SkipHeader: skipHeader, Columns: columns, CSVEncoding: csvEncoding}
 		impErr = sess.Driver.ImportCSV(r.Context(), chi.URLParam(r, "db"), table, file, opts, progress)
 	}
 	if impErr != nil {

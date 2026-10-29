@@ -47,6 +47,10 @@ func (d *PostgresDriver) ShowCreateTable(ctx context.Context, db, table string) 
 // LIMIT/OFFSET (documented caveat). Nothing but the current row and
 // statement is ever buffered.
 func (d *PostgresDriver) Export(ctx context.Context, db string, req driver.ExportRequest, w io.Writer) error {
+	if req.CSVEncoding != "" && req.CSVEncoding != "escaped" && req.CSVEncoding != "legacy" {
+		return fmt.Errorf("export: invalid csvEncoding %q", req.CSVEncoding)
+	}
+
 	if req.Mode != "" && req.Mode != "all" && req.Mode != "structure" && req.Mode != "data" {
 		return fmt.Errorf("export: invalid mode %q", req.Mode)
 	}
@@ -135,6 +139,18 @@ func (d *PostgresDriver) Export(ctx context.Context, db string, req driver.Expor
 		}
 	}
 
+	if isSQL && req.Query == nil && req.Mode == "data" {
+		var err error
+		tables, definitions, err = d.prepareTableExport(ctx, tables)
+		if err != nil {
+			return err
+		}
+		tables, err = orderDataTables(tables, definitions)
+		if err != nil {
+			return err
+		}
+	}
+
 	var generated map[string]bool
 	if isSQL && req.Query != nil && len(tables) == 1 {
 		var err error
@@ -172,7 +188,7 @@ func (d *PostgresDriver) Export(ctx context.Context, db string, req driver.Expor
 					return dump.WritablePage(page, generated)
 				}
 				return page, nil
-			}, sqlgen.QuoteIdentPg, sqlLiteralPg, true)
+			}, sqlgen.QuoteIdentPg, sqlLiteralPg, req.CSVEncoding != "legacy")
 	} else if isSQL {
 		if req.DropIfExists {
 			err = dropViewsSQL(out, views)
@@ -184,7 +200,7 @@ func (d *PostgresDriver) Export(ctx context.Context, db string, req driver.Expor
 			err = writeViewsSQL(out, views, req)
 		}
 	} else {
-		err = d.exportDelimited(ctx, tables[0], sep, out)
+		err = d.exportDelimited(ctx, tables[0], sep, req.CSVEncoding != "legacy", out)
 	}
 	if cerr := closeOut(); err == nil {
 		err = cerr
@@ -321,8 +337,9 @@ func (d *PostgresDriver) exportTableSQLRows(ctx context.Context, table string, o
 }
 
 // exportDelimited writes one table as delimited text via the shared CSV
-// writer: header row, NULL → \N; leading backslashes are escaped.
-func (d *PostgresDriver) exportDelimited(ctx context.Context, table string, sep rune, out io.Writer) error {
+// writer: header row, default NULL → \N and escaped leading backslashes.
+// Explicit legacy encoding retains raw fields with NULL as empty.
+func (d *PostgresDriver) exportDelimited(ctx context.Context, table string, sep rune, escapedCSV bool, out io.Writer) error {
 	columns, err := d.selectColumns(ctx, d.schemaFor(ctx), table, nil)
 	if err != nil {
 		return fmt.Errorf("export: %w", err)
@@ -343,16 +360,11 @@ func (d *PostgresDriver) exportDelimited(ctx context.Context, table string, sep 
 	}
 	if err := d.exportPages(ctx, table, pk, func(page driver.Page) error {
 		for _, row := range page.Rows {
-			encoded := make([]any, len(row))
-			for i, v := range row {
-				if v == nil {
-					encoded[i] = `\N`
-				} else if text, ok := v.(string); ok && strings.HasPrefix(text, `\`) {
-					encoded[i] = `\` + text
-				} else {
-					encoded[i] = v
-				}
+			encoded := row
+			if escapedCSV {
+				encoded = dump.EscapedCSVRow(row)
 			}
+
 			if err := cw.WriteRow(encoded); err != nil {
 				return err
 			}

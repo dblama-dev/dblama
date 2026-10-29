@@ -33,7 +33,7 @@ export async function downloadExport(db: string, body: ExportRequest, schema: st
         'Content-Type': 'application/json',
       },
       credentials: 'same-origin',
-      body: JSON.stringify(body),
+      body: JSON.stringify(body.format === 'sql' ? body : { ...body, csvEncoding: body.csvEncoding ?? 'escaped' }),
     })
   } catch {
     throw new ApiError('internal', 'network error', 0)

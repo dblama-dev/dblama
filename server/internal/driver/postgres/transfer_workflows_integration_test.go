@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -115,4 +116,107 @@ func TestTransferModesAndMapping(t *testing.T) {
 	if !strings.Contains(string(infoJSON), `"port":"`+cfg.Port+`"`) {
 		t.Fatalf("missing connection port: %s", infoJSON)
 	}
+}
+
+func TestTransferStructureThenDataWithForeignKeys(t *testing.T) {
+	cfg := startDB(t)
+	d := connectOK(t, cfg).(*PostgresDriver)
+	ctx := context.Background()
+	execDDL(t, d, `CREATE SCHEMA fk_source`)
+	execDDL(t, d, `CREATE TABLE fk_source.z_parent(id BIGINT PRIMARY KEY)`)
+	execDDL(t, d, `CREATE TABLE fk_source.a_child(id BIGINT PRIMARY KEY, parent_id BIGINT NOT NULL REFERENCES fk_source.z_parent(id))`)
+	execDDL(t, d, `INSERT INTO fk_source.z_parent VALUES(9007199254740993)`)
+	execDDL(t, d, `INSERT INTO fk_source.a_child VALUES(1,9007199254740993)`)
+	sourceCtx := driver.WithSchema(ctx, "fk_source")
+	for i, tables := range [][]string{{"a_child", "z_parent"}, {"a_child"}, nil} {
+		t.Run(fmt.Sprint(i), func(t *testing.T) {
+			target := fmt.Sprintf("fk_target_%d", i)
+			execDDL(t, d, "CREATE SCHEMA "+target)
+			var structure, data bytes.Buffer
+			if err := d.Export(sourceCtx, cfg.Database, driver.ExportRequest{Format: "sql", Mode: "structure", Tables: tables}, &structure); err != nil {
+				t.Fatal(err)
+			}
+			if err := d.Export(sourceCtx, cfg.Database, driver.ExportRequest{Format: "sql", Mode: "data", Tables: tables}, &data); err != nil {
+				t.Fatal(err)
+			}
+			targetCtx := driver.WithSchema(ctx, target)
+			if err := d.ImportSQL(targetCtx, cfg.Database, &structure, nil); err != nil {
+				t.Fatal(err)
+			}
+			if err := d.ImportSQL(targetCtx, cfg.Database, strings.NewReader(data.String()), nil); err != nil {
+				t.Fatalf("data SQL %s\nrestore error: %v", data.String(), err)
+			}
+			var parent string
+			if err := d.db.QueryRowContext(ctx, "SELECT parent_id FROM "+target+".a_child").Scan(&parent); err != nil || parent != "9007199254740993" {
+				t.Fatalf("parent %q error %v", parent, err)
+			}
+		})
+	}
+	t.Run("cycles rejected before output", func(t *testing.T) {
+		execDDL(t, d, `CREATE SCHEMA fk_cycle`)
+		execDDL(t, d, `CREATE TABLE fk_cycle.a(id INT PRIMARY KEY, b_id INT)`)
+		execDDL(t, d, `CREATE TABLE fk_cycle.b(id INT PRIMARY KEY, a_id INT REFERENCES fk_cycle.a(id))`)
+		execDDL(t, d, `ALTER TABLE fk_cycle.a ADD FOREIGN KEY(b_id) REFERENCES fk_cycle.b(id)`)
+		var data bytes.Buffer
+		err := d.Export(driver.WithSchema(ctx, "fk_cycle"), cfg.Database, driver.ExportRequest{Format: "sql", Mode: "data"}, &data)
+		if err == nil || data.Len() != 0 || !strings.Contains(err.Error(), "cycle") {
+			t.Fatalf("cycle output %q error %v", data.String(), err)
+		}
+	})
+}
+
+func TestTransferEscapedCSVRoundTrip(t *testing.T) {
+	cfg := startDB(t)
+	d := connectOK(t, cfg).(*PostgresDriver)
+	ctx := context.Background()
+	execDDL(t, d, "CREATE TABLE csv_source(id INT PRIMARY KEY, value TEXT NULL, bin bytea)")
+	execDDL(t, d, "CREATE TABLE csv_target(LIKE csv_source INCLUDING ALL)")
+	values := []struct {
+		text any
+		bin  any
+	}{{nil, nil}, {"", []byte{}}, {`\N`, []byte{0, 255}}, {`\prefix`, nil}, {`\\prefix`, nil}, {"Привет,\nмир", nil}}
+	for i, value := range values {
+		if _, err := d.db.ExecContext(ctx, "INSERT INTO csv_source VALUES ($1,$2,$3)", i+1, value.text, value.bin); err != nil {
+			t.Fatal(err)
+		}
+	}
+	source, err := d.SelectRows(ctx, cfg.Database, "csv_source", driver.SelectQuery{Limit: 20, Sorts: []sqlgen.Sort{{Column: "id"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, selection := range []bool{false, true} {
+		t.Run(fmt.Sprint(selection), func(t *testing.T) {
+			execDDL(t, d, "TRUNCATE TABLE csv_target")
+			var req driver.ExportRequest
+			if err := json.Unmarshal([]byte(`{"format":"csv","tables":["csv_source"],"csvEncoding":"escaped"}`), &req); err != nil {
+				t.Fatal(err)
+			}
+			if selection {
+				req.Query = &driver.SelectQuery{Sorts: []sqlgen.Sort{{Column: "id"}}}
+			}
+			var output bytes.Buffer
+			if err := d.Export(ctx, cfg.Database, req, &output); err != nil {
+				t.Fatal(err)
+			}
+			if err := d.ImportCSV(ctx, cfg.Database, "csv_target", strings.NewReader(output.String()), driver.CSVImportOpts{Columns: []string{"id", "value", "bin"}, SkipHeader: true}, nil); err != nil {
+				t.Fatal(err)
+			}
+			restored, err := d.SelectRows(ctx, cfg.Database, "csv_target", driver.SelectQuery{Limit: 20, Sorts: []sqlgen.Sort{{Column: "id"}}})
+			if err != nil || !reflect.DeepEqual(restored.Rows, source.Rows) {
+				t.Fatalf("CSV %q\nsource=%#v\nrestored=%#v err=%v", output.String(), source.Rows, restored.Rows, err)
+			}
+		})
+	}
+	t.Run("literal mapped external CSV", func(t *testing.T) {
+		execDDL(t, d, "TRUNCATE TABLE csv_target")
+		var opts driver.CSVImportOpts
+		json.Unmarshal([]byte(`{"columns":["id","value"],"csvEncoding":"literal"}`), &opts)
+		if err := d.ImportCSV(ctx, cfg.Database, "csv_target", strings.NewReader("1,\\N\n2,\\\\prefix\n3,\n"), opts, nil); err != nil {
+			t.Fatal(err)
+		}
+		page, err := d.SelectRows(ctx, cfg.Database, "csv_target", driver.SelectQuery{Limit: 10, Sorts: []sqlgen.Sort{{Column: "id"}}})
+		if err != nil || len(page.Rows) != 3 || page.Rows[0][1] != `\N` || page.Rows[1][1] != `\\prefix` || page.Rows[2][1] != "" {
+			t.Fatalf("literal rows=%#v error=%v", page.Rows, err)
+		}
+	})
 }

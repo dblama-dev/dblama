@@ -2,7 +2,8 @@
  * A cut byte window may end within a record; that unfinished tail is omitted.
  */
 export function parseCsvPreview(text: string, separator = ',', enclosure = '"', inputTruncated = false): { rows: string[][]; truncated: boolean } {
-  if (![',', ';', '\t'].includes(separator)) throw new Error('Unsupported CSV separator')
+  separator ||= ','
+  if (Array.from(separator).length !== 1 || ['\0', '\r', '\n', '"', '\uFFFD'].includes(separator)) throw new Error('Unsupported CSV separator')
   if (enclosure !== '' && enclosure !== '"') throw new Error('Unsupported CSV enclosure')
   const rows: string[][] = []
   let record: string[] = []
@@ -22,7 +23,8 @@ export function parseCsvPreview(text: string, separator = ',', enclosure = '"', 
     record = []; field = ''; closed = false; started = false
   }
   for (let i = 0; i < source.length; i++) {
-    const char = source[i]!
+    const char = String.fromCodePoint(source.codePointAt(i)!)
+    if (char.length === 2) i++
     if (quoted) {
       if (char === '"') {
         if (source[i + 1] === '"') { field += '"'; i++ }

@@ -101,6 +101,10 @@ const exportBatchSize = 100
 // which on a live table may skip or duplicate rows — a documented
 // caveat, the same one mysqldump has.
 func (d *MysqlDriver) Export(ctx context.Context, db string, req driver.ExportRequest, w io.Writer) error {
+	if req.CSVEncoding != "" && req.CSVEncoding != "escaped" && req.CSVEncoding != "legacy" {
+		return fmt.Errorf("export: invalid csvEncoding %q", req.CSVEncoding)
+	}
+
 	if req.Mode != "" && req.Mode != "all" && req.Mode != "structure" && req.Mode != "data" {
 		return fmt.Errorf("export: invalid mode %q", req.Mode)
 	}
@@ -237,7 +241,7 @@ func (d *MysqlDriver) Export(ctx context.Context, db string, req driver.ExportRe
 						return dump.WritablePage(page, generated)
 					}
 					return page, nil
-				}, sqlgen.QuoteIdent, sqlLiteral, false)
+				}, sqlgen.QuoteIdent, sqlLiteral, req.CSVEncoding == "escaped")
 		}
 		if err == nil && isSQL {
 			err = writeExport(out, "SET SESSION sql_mode=@DBM_OLD_SQL_MODE;\n")
@@ -256,7 +260,7 @@ func (d *MysqlDriver) Export(ctx context.Context, db string, req driver.ExportRe
 			err = writeExport(out, "SET SESSION foreign_key_checks=@DBM_OLD_FOREIGN_KEY_CHECKS;\nSET SESSION sql_mode=@DBM_OLD_SQL_MODE;\n")
 		}
 	} else {
-		err = d.exportDelimited(ctx, db, tables[0], sep, out)
+		err = d.exportDelimited(ctx, db, tables[0], sep, req.CSVEncoding == "escaped", out)
 	}
 	if cerr := closeOut(); err == nil {
 		err = cerr
@@ -375,10 +379,11 @@ func (d *MysqlDriver) exportTableSQLRows(ctx context.Context, db, table string, 
 }
 
 // exportDelimited writes one table as delimited text: a header row of
-// column names, then one line per row. NULL renders as an empty field,
-// binary values as their "0x…" hex strings, and only fields containing
+// column names, then one line per row. Legacy NULL is an empty field;
+// escaped encoding uses \N and escapes literal leading backslashes.
+// Binary values render as "0x…" hex strings; fields containing
 // the separator, a quote or a line break are enclosed.
-func (d *MysqlDriver) exportDelimited(ctx context.Context, db, table string, sep rune, out io.Writer) error {
+func (d *MysqlDriver) exportDelimited(ctx context.Context, db, table string, sep rune, escapedCSV bool, out io.Writer) error {
 	columns, err := d.selectColumns(ctx, db, table, nil)
 	if err != nil {
 		return fmt.Errorf("export: %w", err)
@@ -399,7 +404,11 @@ func (d *MysqlDriver) exportDelimited(ctx context.Context, db, table string, sep
 	}
 	if err := d.exportPages(ctx, db, table, pk, func(page driver.Page) error {
 		for _, row := range page.Rows {
-			if err := cw.WriteRow(row); err != nil {
+			values := row
+			if escapedCSV {
+				values = dump.EscapedCSVRow(row)
+			}
+			if err := cw.WriteRow(values); err != nil {
 				return err
 			}
 		}

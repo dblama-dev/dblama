@@ -124,3 +124,18 @@ func CSVValue(v any) string {
 		return fmt.Sprint(v)
 	}
 }
+
+// EscapedCSVRow encodes the reversible CSV value convention: NULL is \N,
+// empty text stays empty, and literal leading backslashes gain one backslash.
+// Binary values already arrive as 0x hex strings from the driver's row reader.
+func EscapedCSVRow(row []any) []any {
+	values := append([]any(nil), row...)
+	for i, v := range values {
+		if v == nil {
+			values[i] = `\N`
+		} else if text, ok := v.(string); ok && strings.HasPrefix(text, `\`) {
+			values[i] = `\` + text
+		}
+	}
+	return values
+}

@@ -10,6 +10,7 @@ import { transferWorkflowMessages } from '../i18n/transferWorkflows'
 i18n.global.mergeLocaleMessage('en', transferWorkflowMessages.en)
 i18n.global.mergeLocaleMessage('ru', transferWorkflowMessages.ru)
 import ImportView from './ImportView.vue'
+import { useCatalogStore } from '../stores/catalog'
 
 const routeState = vi.hoisted(() => ({ db: 'mydb', table: '' }))
 
@@ -149,12 +150,13 @@ describe('ImportView', () => {
     const form = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/import'))![1].body as FormData
     // The server streams parts in order and keeps the file part open, so
     // every option field must precede the file.
-    expect([...form.keys()]).toEqual(['type', 'table', 'separator', 'enclosure', 'skipHeader', 'columns', 'file'])
+    expect([...form.keys()]).toEqual(['type', 'table', 'separator', 'enclosure', 'skipHeader', 'csvEncoding', 'columns', 'file'])
     expect(form.get('type')).toBe('csv')
     expect(form.get('table')).toBe('users')
     expect(form.get('separator')).toBe(';')
     expect(form.get('enclosure')).toBe('')
     expect(form.get('skipHeader')).toBe('true')
+    expect(form.get('csvEncoding')).toBe('escaped')
     expect(JSON.parse(String(form.get('columns')))).toEqual(['id', 'name'])
     expect(form.get('file')).toBeInstanceOf(File)
   })
@@ -244,6 +246,32 @@ describe('ImportView', () => {
     await view.find('[data-testid="import-submit"]').trigger('click'); await flushPromises()
     const form = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/import'))![1].body as FormData
     expect(JSON.parse(String(form.get('columns')))).toEqual(['name', '', 'id'])
+  })
+
+  it('can map ordinary external CSV without decoding NULL or backslash markers', async () => {
+    const wrapper = mountView(pinia); await flushPromises()
+    const view = wrapper.findComponent(ImportView)
+    view.findComponent(NRadioGroup).vm.$emit('update:value', 'csv'); await flushPromises()
+    view.findComponent(NSelect).vm.$emit('update:value', 'users'); await flushPromises()
+    await chooseFile(view, 'external.csv', '1,\\N\n')
+    const encoding = view.findAllComponents(NSelect).find(select => select.attributes('data-testid') === 'csv-value-encoding')!
+    encoding.vm.$emit('update:value', 'literal'); await flushPromises()
+    await view.find('[data-testid="import-submit"]').trigger('click'); await flushPromises()
+    const form = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/import'))![1].body as FormData
+    expect(form.get('csvEncoding')).toBe('literal')
+  })
+
+  it('accepts MySQL pipe delimiters and rejects them after switching to PostgreSQL', async () => {
+    const wrapper = mountView(pinia); await flushPromises()
+    const view = wrapper.findComponent(ImportView)
+    view.findComponent(NRadioGroup).vm.$emit('update:value', 'csv'); await flushPromises()
+    view.findComponent(NSelect).vm.$emit('update:value', 'users'); await flushPromises()
+    await view.findAllComponents(NInput)[0]!.find('input').setValue('|')
+    await chooseFile(view, 'external.csv', '1|value\n')
+    expect(view.find('[data-testid="csv-preview-error"]').exists()).toBe(false)
+    useCatalogStore().schemaAware = true
+    await new Promise(resolve => setTimeout(resolve, 30)); await flushPromises()
+    expect(view.find('[data-testid="csv-preview-error"]').text()).toContain('PostgreSQL')
   })
 
   it('blocks malformed CSV and duplicate target mappings', async () => {

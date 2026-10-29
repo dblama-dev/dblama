@@ -17,3 +17,9 @@ it('limits preview records and ignores an incomplete bounded tail', () => {
 it('bounds unusually wide records before rendering mapping controls', () => {
  expect(() => parseCsvPreview(Array.from({length:201},()=>'field').join(','))).toThrow(/columns|fields|wide/i)
 })
+it('supports MySQL single-rune separators, including pipe and Unicode', () => {
+ expect(parseCsvPreview('id|value\n1|"pipe|value"\n','|').rows).toEqual([['id','value'],['1','pipe|value']])
+ expect(parseCsvPreview('id🦄value\n1🦄Привет\n','🦄').rows).toEqual([['id','value'],['1','Привет']])
+ expect(parseCsvPreview('a,b\n1,2\n','').rows).toEqual([['a','b'],['1','2']])
+ for (const separator of ['||','\n','\r','"','\0']) expect(()=>parseCsvPreview('input',separator)).toThrow(/separator/i)
+})

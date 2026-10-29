@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { runImport } from './importFile'
+import { buildImportFormData, runImport } from './importFile'
 afterEach(() => vi.unstubAllGlobals())
 it('rejects EOF without terminal success even after progress', async () => {
  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"done":100,"total":0}\n')))
@@ -25,4 +25,10 @@ it('rejects cancellation while reading and releases the response reader', async 
  await expect(runImport('db',new FormData(),()=>{},null,controller.signal)).rejects.toMatchObject({name:'AbortError'})
  expect(cancel).toHaveBeenCalledOnce()
  expect(releaseLock).toHaveBeenCalledOnce()
+})
+it('sends explicit literal CSV encoding before the uploaded file', () => {
+ const csv = {table:'t',separator:',',enclosure:'"',skipHeader:false,columns:['value'],csvEncoding:'literal' as const}
+ const form=buildImportFormData('csv',new File(['\\N'],'rows.csv'),csv)
+ expect(form.get('csvEncoding')).toBe('literal')
+ expect([...form.keys()].indexOf('csvEncoding')).toBeLessThan([...form.keys()].indexOf('file'))
 })

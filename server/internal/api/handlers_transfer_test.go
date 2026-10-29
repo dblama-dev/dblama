@@ -78,3 +78,33 @@ func TestTransferCSVColumnsMultipart(t *testing.T) {
 		})
 	}
 }
+
+func TestTransferCSVEncodingValidation(t *testing.T) {
+	fake := &stubDriver{info: driver.DriverInfo{Name: "MySQL", Flavor: "mysql"}}
+	srv := httptest.NewServer(newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, fake)))
+	defer srv.Close()
+	cookie := loginSessionDB(t, srv, "appdb")
+	response := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/databases/appdb/export", `{"format":"csv","tables":["t"],"csvEncoding":"unknown"}`, cookie)
+	io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != 400 || len(fake.exportCalls) != 0 {
+		t.Fatalf("invalid encoding export status=%d calls=%d", response.StatusCode, len(fake.exportCalls))
+	}
+	for _, encoding := range []string{"literal", "escaped", "unknown"} {
+		resp := multipartImport(t, srv, cookie, map[string]string{"type": "csv", "table": "t", "columns": `["value"]`, "csvEncoding": encoding}, []byte("rows.csv"), []byte("value\n"))
+		io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if encoding == "unknown" {
+			if resp.StatusCode != 400 {
+				t.Fatalf("invalid import encoding status=%d", resp.StatusCode)
+			}
+			continue
+		}
+		if resp.StatusCode != 200 || fake.importCSVCalls[len(fake.importCSVCalls)-1].opts.CSVEncoding != encoding {
+			t.Fatalf("encoding %q status=%d calls=%+v", encoding, resp.StatusCode, fake.importCSVCalls)
+		}
+	}
+	if len(fake.importCSVCalls) != 2 {
+		t.Fatalf("invalid encoding reached importer: %+v", fake.importCSVCalls)
+	}
+}

@@ -200,6 +200,9 @@ type ExecOpts struct {
 // IfNotExists only apply to the sql format; Gzip wraps the output in a
 // gzip stream. MySQL honors the selected database; PostgreSQL stays login-bound.
 type ExportRequest struct {
+	// CSVEncoding escaped uses \N for NULL and prefixes literal leading backslashes.
+	// Omitted retains legacy raw MySQL output and escaped PostgreSQL output.
+	CSVEncoding  string       `json:"csvEncoding,omitempty"`
 	Mode         string       `json:"mode,omitempty"`
 	Query        *SelectQuery `json:"query,omitempty"`
 	IncludeViews bool         `json:"includeViews,omitempty"`
@@ -226,6 +229,9 @@ type Result struct {
 // CSVImportOpts tunes one ImportCSV call. The zero value enables the
 // defaults: comma separator, standard double quotes, positional mapping, no skipped header.
 type CSVImportOpts struct {
+	// CSVEncoding literal disables NULL/backslash/binary marker decoding for mapped external CSV.
+	// Omitted/escaped retains mapped escaped decoding; nil Columns retains legacy MySQL positional import.
+	CSVEncoding string `json:"csvEncoding,omitempty"`
 	// Columns maps source fields to target columns; empty entries are ignored. Nil preserves positional import.
 	Columns []string `json:"columns,omitempty"`
 	// Separator is the field separator, a single character (e.g. ",",

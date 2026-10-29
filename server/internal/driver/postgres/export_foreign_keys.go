@@ -90,3 +90,48 @@ func writeForeignKeysSQL(out io.Writer, tables []string, defs map[string]driver.
 	}
 	return nil
 }
+
+// orderDataTables loads parents before children while existing constraints stay
+// active. A cycle (including a self-reference) needs row-level planning or a
+// transaction with deferrable constraints; neither is promised by data mode,
+// so reject it before producing bytes and direct callers to the complete dump.
+func orderDataTables(tables []string, definitions map[string]driver.TableDef) ([]string, error) {
+	state := make(map[string]uint8, len(tables))
+	ordered := make([]string, 0, len(tables))
+	var stack []string
+	var visit func(string) error
+	visit = func(table string) error {
+		if state[table] == 2 {
+			return nil
+		}
+		if state[table] == 1 {
+			return fmt.Errorf("data-only export cannot order foreign key cycle %s; use structure and data mode", strings.Join(append(slices.Clone(stack), table), " -> "))
+		}
+		def, ok := definitions[table]
+		if !ok {
+			return fmt.Errorf("data-only export has missing foreign key dependency %q", table)
+		}
+		state[table] = 1
+		stack = append(stack, table)
+		parents := make([]string, 0, len(def.ForeignKeys))
+		for _, fk := range def.ForeignKeys {
+			parents = append(parents, fk.RefTable)
+		}
+		slices.Sort(parents)
+		for _, parent := range parents {
+			if err := visit(parent); err != nil {
+				return err
+			}
+		}
+		stack = stack[:len(stack)-1]
+		state[table] = 2
+		ordered = append(ordered, table)
+		return nil
+	}
+	for _, table := range tables {
+		if err := visit(table); err != nil {
+			return nil, err
+		}
+	}
+	return ordered, nil
+}

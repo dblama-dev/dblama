@@ -21,6 +21,8 @@
         <span>{{ t('transferWorkflows.mode') }}</span>
         <n-select v-model:value="mode" :options="modeOptions" data-testid="export-mode" />
       </label>
+      <p v-if="isSql && mode === 'data' && catalog.schemaAware">{{ t('transferWorkflows.dataDependencies') }}</p>
+      <n-alert v-if="!isSql" type="info">{{ t('transferWorkflows.csvExportEncoding') }}</n-alert>
       <div v-if="isSql && mode !== 'data'" class="export-view__field">
         <n-checkbox v-model:checked="includeViews">{{ t('export.includeViews') }}</n-checkbox>
         <n-checkbox v-model:checked="dropIfExists">{{ t('export.dropIfExists') }}</n-checkbox>
