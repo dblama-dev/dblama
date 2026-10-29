@@ -5,6 +5,7 @@
     <router-link v-if="caps?.monitor" to="/server/processes">{{ t('admin.monitor') }}</router-link>
     <template v-if="db">
       <router-link :to="catalog.path(`/db/${encodeURIComponent(db)}`)">{{ db }}</router-link>
+      <router-link v-for="action in ['console','search','import','export']" :key="action" :to="catalog.path(`/db/${encodeURIComponent(db)}/${action}`)">{{ t(`navigationWorkflows.${action}`) }}</router-link>
       <router-link v-for="kind in kinds" :key="kind" :to="catalog.path(`/db/${encodeURIComponent(db)}/objects/${kind}`)">{{ t(`objects.${kind}`) }}</router-link>
     </template>
   </nav>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { routerKey } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useNotification } from 'naive-ui'
 import { NButton, NCheckbox, NInput, NSelect } from 'naive-ui'
@@ -118,6 +119,24 @@ const indexes = ref<Index[]>([])
 const indexesValid = ref(true)
 const foreignKeys = ref<ForeignKey[]>([])
 let keySeq = 0
+let loadRequest = 0
+const columnBaseline = ref(''), indexBaseline=ref(''), fkBaseline=ref('')
+const columnsSnapshot=()=>JSON.stringify({name:tableName.value,rows:rows.value.map(row=>({...row,key:0})),options:options.value})
+const dirtyColumns=computed(()=>columnBaseline.value!=='' && columnsSnapshot()!==columnBaseline.value)
+const dirtyIndexes=computed(()=>indexBaseline.value!=='' && JSON.stringify(indexes.value)!==indexBaseline.value)
+const dirtyFKs=computed(()=>fkBaseline.value!=='' && JSON.stringify(foreignKeys.value)!==fkBaseline.value)
+const dirty=computed(()=>dirtyColumns.value||dirtyIndexes.value||dirtyFKs.value)
+const router=inject(routerKey,undefined)
+const removeGuard=router?.beforeEach((to,from)=>{
+  if(to.fullPath===from.fullPath || !dirty.value) return true
+  return window.confirm(t('navigationWorkflows.discard'))
+})
+function beforeUnload(event:BeforeUnloadEvent):void {if(dirty.value){event.preventDefault();event.returnValue=''}}
+window.addEventListener('beforeunload',beforeUnload)
+onBeforeUnmount(()=>{removeGuard?.();window.removeEventListener('beforeunload',beforeUnload)})
+async function snapshotAll():Promise<void>{await nextTick();columnBaseline.value=columnsSnapshot();indexBaseline.value=JSON.stringify(indexes.value);fkBaseline.value=JSON.stringify(foreignKeys.value)}
+async function indexesSaved():Promise<void>{indexBaseline.value=JSON.stringify(indexes.value);await catalog.invalidate(props.db)}
+async function fksSaved():Promise<void>{fkBaseline.value=JSON.stringify(foreignKeys.value);await catalog.invalidate(props.db)}
 
 function fromDef(c: ColumnDef): EditableColumn {
   const generated = (c.generated ?? '') as EditableColumn['generated']
@@ -155,27 +174,33 @@ function fromDef(c: ColumnDef): EditableColumn {
   }
 }
 
-async function load(): Promise<void> {
+async function load(columnsOnly = false): Promise<void> {
+  const request=++loadRequest
+  const requestedPath=path.value
   if (createMode.value) {
     // Create mode owns no definition: reset everything so reusing this
     // component after another table's structure view (vue-router reuses
     // the component instance) starts from a blank editor instead of the
     // previous table's state.
     resetEditor()
+    await snapshotAll()
     return
   }
   loading.value = true
   try {
-    const def = await api<TableDef>('GET', path.value)
+    const def = await api<TableDef>('GET', requestedPath)
+    if(request!==loadRequest || requestedPath!==path.value)return
     tableName.value = def.newName || props.table
     rows.value = (def.columns ?? []).map(fromDef)
     options.value = { ...def.options }
-    indexes.value = def.indexes ?? []
-    foreignKeys.value = def.foreignKeys ?? []
+    if(!columnsOnly){indexes.value = def.indexes ?? [];foreignKeys.value = def.foreignKeys ?? []}
+    await nextTick()
+    columnBaseline.value=columnsSnapshot()
+    if(!columnsOnly){indexBaseline.value=JSON.stringify(indexes.value);fkBaseline.value=JSON.stringify(foreignKeys.value)}
   } catch (err) {
     notifyError(err)
   } finally {
-    loading.value = false
+    if(request===loadRequest) loading.value = false
   }
 }
 
@@ -352,6 +377,7 @@ function buildColumns(): ColumnDef[] {
 }
 
 async function save(): Promise<void> {
+  if(!createMode.value && tableName.value!==props.table && (dirtyIndexes.value || dirtyFKs.value) && !window.confirm(t('navigationWorkflows.discard')))return
   saving.value = true
   try {
     if (createMode.value) {
@@ -367,6 +393,7 @@ async function save(): Promise<void> {
       notification.success({ content: t('structure.saved'), duration: 3000 })
       // The parent navigates to the new table (and invalidates the
       // catalog); the db/table watch then loads the fresh definition.
+      await snapshotAll()
       emit('created', tableName.value)
       return
     }
@@ -386,10 +413,11 @@ async function save(): Promise<void> {
     if (tableName.value !== props.table) {
       // The route still points at the old name; the parent navigates and
       // the db/table watch refetches the definition under the new name.
+      await snapshotAll()
       emit('renamed', tableName.value)
       return
     }
-    await load()
+    await load(true)
   } catch (err) {
     notifyError(err)
   } finally {
@@ -422,21 +450,25 @@ async function save(): Promise<void> {
           data-testid="struct-save"
           @click="save"
         >
-          {{ t('structure.save') }}
+          {{ t('navigationWorkflows.columnSave') }}
         </NButton>
       </div>
 
+      <p>{{ t('navigationWorkflows.saveScopes') }}</p>
       <h3 class="structure-editor__title">
         {{ t('structure.columns') }}
       </h3>
       <div class="structure-editor__columns">
-        <div
+        <details
+          :open="createMode || !row.originalName"
           v-for="(row, index) in rows"
           :key="row.key"
           class="struct-row"
           :class="{ 'struct-row--deleted': row.markedForDeletion }"
           data-testid="struct-row"
         >
+          <summary :aria-label="`${t('navigationWorkflows.editColumn')}: ${row.name}`">{{ row.name || '…' }} <code>{{ row.type }}{{ row.length ? `(${row.length})` : '' }}</code> · {{ row.nullable ? 'NULL' : 'NOT NULL' }} <span v-if="row.autoIncrement"> · ID</span><span v-if="row.defaultValue"> · DEFAULT {{ row.defaultValue }}</span><span v-if="row.generated"> · {{ row.generated }}</span></summary>
+          <div class="struct-row__fields">
           <label
             class="struct-field struct-field--name"
             :title="row.originalName ?? ''"
@@ -628,7 +660,8 @@ async function save(): Promise<void> {
           >
             {{ t('structure.generatedHint') }}
           </div>
-        </div>
+          </div>
+        </details>
         <NButton
           size="small"
           data-testid="struct-add"
@@ -650,7 +683,7 @@ async function save(): Promise<void> {
         :draft="createMode"
         @validity="indexesValid = $event"
         :column-names="rows.filter((r) => !r.markedForDeletion).map((r) => r.name)"
-        @saved="load"
+        @saved="indexesSaved"
       />
 
       <h3 class="structure-editor__title">
@@ -662,7 +695,7 @@ async function save(): Promise<void> {
 
       <h3 class="structure-editor__title">{{ t('structure.foreignKeys') }}</h3>
       <ForeignKeyEditor v-model="foreignKeys" :db="db" :table="table"
-        :column-names="rows.filter(r => !r.markedForDeletion).map(r => r.name)" @saved="load" />
+        :column-names="rows.filter(r => !r.markedForDeletion).map(r => r.name)" @saved="fksSaved" />
 
     </template>
   </section>
@@ -697,7 +730,10 @@ async function save(): Promise<void> {
   align-items: flex-start;
 }
 
-.struct-row {
+.struct-row { display:block;width:100%;padding:8px;border:1px solid #8884;border-radius:4px;box-sizing:border-box; }
+.struct-row summary {cursor:pointer;padding:4px; }
+.struct-row summary code {margin-left:12px;opacity:.7;}
+.struct-row__fields {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;

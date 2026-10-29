@@ -156,6 +156,9 @@ describe('DataGrid', () => {
     await deleteButtons[1].trigger('click')
     await flushPromises()
 
+    expect(wrapper.emitted('delete-row')).toBeUndefined()
+    wrapper.findAllComponents(NPopconfirm)[1].vm.$emit('positive-click')
+    await flushPromises()
     expect(wrapper.emitted('delete-row')).toEqual([[{ id: 2 }]])
   })
 
@@ -210,6 +213,9 @@ describe('DataGrid', () => {
     expect(wrapper.emitted('edit-row')?.[0]?.[0]).toMatchObject({ __pk: {id:2,name:null} })
     const deletes = wrapper.findAll('button').filter(b => b.text() === 'Удалить')
     await deletes[1]!.trigger('click')
+    expect(wrapper.emitted('delete-row')).toBeUndefined()
+    wrapper.findAllComponents(NPopconfirm)[1].vm.$emit('positive-click')
+    await flushPromises()
     expect(wrapper.emitted('delete-row')).toEqual([[{id:2,name:null}]])
     wrapper.unmount()
   })
@@ -378,4 +384,19 @@ describe('TableView data view', () => {
     expect(document.body.textContent).toContain('invalid filter parameter')
     wrapper.unmount()
   })
+})
+
+it('restores the visible controlled filter and applies it with Enter',async()=>{
+ const wrapper=mountGrid({filters:[{column:'name',op:'LIKE',value:'%restored%'}]})
+ expect(wrapper.findComponent(NInput).props('value')).toBe('%restored%')
+ await wrapper.findComponent(NInput).trigger('keydown.enter')
+ expect(wrapper.emitted('apply-filters')).toEqual([[[{column:'name',op:'LIKE',value:'%restored%'}]]])
+ wrapper.unmount()
+})
+it('clears captured selection when rows are replaced in a keyless table',async()=>{
+ const wrapper=mountGrid({pkColumns:[]})
+ wrapper.findComponent(NDataTable).vm.$emit('update:checked-row-keys',['__idx_0'])
+ await flushPromises();await wrapper.setProps({rows:[[9,'different']]})
+ expect(wrapper.findComponent(NDataTable).props('checkedRowKeys')).toEqual([])
+ wrapper.unmount()
 })

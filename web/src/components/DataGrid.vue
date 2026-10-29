@@ -14,12 +14,13 @@
             {{ t('grid.deleteSelected') }} ({{ checkedKeys.length }})
           </n-button>
         </template>
-        {{ t('grid.confirmDelete') }}
+        {{ t('grid.confirmDelete') }} {{ tableName }} ({{ checkedKeys.length }})
       </n-popconfirm>
       <n-popconfirm v-if="checkedKeys.length > 0" @positive-click="copySelected">
         <template #trigger><n-button size="small">{{ t('grid.copySelected') }} ({{ checkedKeys.length }})</n-button></template>
         {{ t('grid.copyConfirm') }}
       </n-popconfirm>
+      <n-button v-if="checkedKeys.length" size="small" @click="editSelected">{{ t('navigationWorkflows.editSelected') }} ({{ checkedKeys.length }})</n-button>
       <n-button size="small" quaternary @click="emit('refresh')">
         {{ t('grid.refresh') }}
       </n-button>
@@ -30,6 +31,7 @@
       <span class="datagrid__filters-label">{{ t('grid.filters') }}</span>
       <div v-for="(draft, i) in drafts" :key="i" class="datagrid__filter">
         <n-select
+          :aria-label="t('navigationWorkflows.filterColumn')"
           v-model:value="draft.column"
           size="small"
           clearable
@@ -38,24 +40,28 @@
           class="datagrid__filter-column"
         />
         <n-select
+          :aria-label="t('navigationWorkflows.filterOperator')"
           v-model:value="draft.op"
           size="small"
           :options="operatorOptions"
           class="datagrid__filter-op"
         />
         <n-input
+          :aria-label="t('navigationWorkflows.filterValue')"
+          @keydown.enter="applyFilters"
           v-model:value="draft.value"
           size="small"
           :disabled="isNullOperator(draft.op)"
           class="datagrid__filter-value"
         />
-        <n-button size="tiny" quaternary @click="removeDraft(i)">×</n-button>
+        <n-button :aria-label="t('navigationWorkflows.removeFilter')" size="tiny" quaternary @click="removeDraft(i)">×</n-button>
       </div>
-      <n-button size="small" dashed @click="addDraft">+</n-button>
+      <n-button :aria-label="t('navigationWorkflows.addFilter')" size="small" dashed @click="addDraft">+</n-button>
       <n-button size="small" @click="applyFilters">{{ t('grid.apply') }}</n-button>
       <n-button size="small" quaternary @click="resetFilters">{{ t('grid.reset') }}</n-button>
     </div>
 
+    <div class="datagrid__pagination"><span>{{ t('grid.total') }}: {{ totalRows }}</span><n-pagination v-bind="pagination" @update:page="onPage" @update:page-size="onPageSize" /></div>
     <n-data-table
       remote
       size="small"
@@ -64,6 +70,7 @@
       :loading="loading"
       :row-key="rowKey"
       :pagination="pagination"
+      :scroll-x="scrollWidth"
       :checked-row-keys="checkedKeys"
       class="datagrid__table"
       @update:checked-row-keys="onCheckedRowKeys"
@@ -71,6 +78,7 @@
       @update:page-size="onPageSize"
       @update:sorter="onSorter"
     />
+    <div class="datagrid__total">{{ t('grid.total') }}: {{ totalRows }}</div>
   </div>
 </template>
 
@@ -85,6 +93,7 @@ import {
   NDataTable,
   NInput,
   NPopconfirm,
+  NPagination,
   NSelect,
 } from 'naive-ui'
 
@@ -115,9 +124,11 @@ const props = withDefaults(
     pageIndex: number
     pageSize: number
     pkColumns: string[]
+    tableName?: string
+    filters?: RowsFilter[]
     sort: RowsSort | null
   }>(),
-  { sort: null },
+  { sort: null, filters: () => [], tableName: '' },
 )
 
 const emit = defineEmits<{
@@ -128,6 +139,7 @@ const emit = defineEmits<{
   refresh: []
   'add-row': []
   'edit-row': [row: GridRow]
+  'edit-rows': [keys: Record<string,unknown>[]]
   'copy-row': [row: GridRow]
   'copy-rows': [keys: Record<string,unknown>[]]
   'export-selection': []
@@ -157,7 +169,7 @@ const tableData = computed<GridRow[]>(() => {
         pk[name] = idx >= 0 ? row[idx] : null
       }
       record.__pk = pk
-      record.__key = props.pkColumns.map((name) => String(pk[name])).join(' | ')
+      record.__key = props.pkColumns.length === 1 ? String(pk[props.pkColumns[0]!]) : JSON.stringify(props.pkColumns.map(name => pk[name]))
     } else {
       record.__key = `__idx_${offset + i}`
       record.__pk = Object.fromEntries(props.columns.map((meta, j) => [meta.name, row[j]]))
@@ -183,7 +195,8 @@ function renderCell(value: unknown): ReturnType<typeof h> | string {
   if (typeof value === 'string' && HEX_RE.test(value)) {
     return h(BlobValue, { hex: value })
   }
-  return String(value)
+  const text = typeof value === 'object' ? JSON.stringify(value) : String(value)
+  return h('details', {class:'datagrid__cell'}, [h('summary',{title:text},text),h('pre', {tabindex:0},text)])
 }
 
 const gridColumns = computed<DataTableColumns<GridRow>>(() => {
@@ -191,6 +204,7 @@ const gridColumns = computed<DataTableColumns<GridRow>>(() => {
   cols.push({ type: 'selection' })
   for (const meta of props.columns) {
     cols.push({
+      width: Math.max(140,Math.min(300,meta.name.length*9+70)),
       title: meta.name,
       key: meta.name,
       sorter: 'default',
@@ -203,6 +217,8 @@ const gridColumns = computed<DataTableColumns<GridRow>>(() => {
     cols.push({
       title: t('grid.actions'),
       key: '__actions',
+      width: 240,
+      fixed: 'right',
       render: (row) =>
         h('span', { class: 'datagrid__row-actions' }, [
           h(NButton, { size: 'tiny', quaternary: true, 'data-testid': 'copy-row', onClick: () => emit('copy-row', row) }, { default: () => t('grid.copy') }),
@@ -211,18 +227,10 @@ const gridColumns = computed<DataTableColumns<GridRow>>(() => {
             { size: 'tiny', quaternary: true, onClick: () => emit('edit-row', row) },
             { default: () => t('grid.edit') },
           ),
-          h(
-            NButton,
-            {
-              size: 'tiny',
-              quaternary: true,
-              type: 'error',
-              onClick: () => {
-                if (row.__pk) emit('delete-row', row.__pk)
-              },
-            },
-            { default: () => t('grid.delete') },
-          ),
+          h(NPopconfirm, {onPositiveClick: () => { if (row.__pk) emit('delete-row',row.__pk) }}, {
+            trigger: () => h(NButton,{size:'tiny',quaternary:true,type:'error'},{default:()=>t('grid.delete')}),
+            default: () => `${t('grid.confirmDelete')} ${props.tableName} ${JSON.stringify(row.__pk)}`,
+          }),
         ]),
     })
   }
@@ -237,13 +245,12 @@ function onCheckedRowKeys(keys: (string | number)[]): void {
   checkedKeys.value = keys.map(String)
 }
 
-// A refetch replaces the rows: drop checked keys that no longer exist so
-// the selection can never reference deleted rows.
+// A new result set clears selection. In keyless tables positional row keys
+// can otherwise silently select a different row after a sort or filter.
 watch(
   () => props.rows,
   () => {
-    const valid = new Set(tableData.value.map((row) => row.__key))
-    checkedKeys.value = checkedKeys.value.filter((key) => valid.has(key))
+    checkedKeys.value = []
   },
 )
 
@@ -264,6 +271,13 @@ function copySelected(): void {
   if (keys.length) emit('copy-rows', keys)
   checkedKeys.value=[]
 }
+
+function editSelected(): void {
+  const selected=new Set(checkedKeys.value)
+  const keys=tableData.value.filter(row=>selected.has(row.__key)).map(row=>row.__pk).filter((key): key is Record<string,unknown>=>key!==null)
+  if(keys.length) emit('edit-rows',keys.map(key=>({...key})))
+}
+const scrollWidth = computed(() => 280 + props.columns.reduce((sum,meta)=>sum+Math.max(140,Math.min(300,meta.name.length*9+70)),0))
 
 // --- Pagination and sorting --------------------------------------------
 
@@ -296,6 +310,7 @@ function onSorter(event: DataTableSortState | DataTableSortState[] | null): void
 // --- Filter row --------------------------------------------------------
 
 const drafts = ref<FilterDraft[]>([emptyDraft()])
+watch(() => props.filters, value => { drafts.value = value.length ? value.map(filter=>({...filter})) : [emptyDraft()] }, {immediate:true,deep:true})
 
 function emptyDraft(): FilterDraft {
   return { column: null, op: '=', value: '' }
@@ -338,6 +353,11 @@ function resetFilters(): void {
 </script>
 
 <style scoped>
+.datagrid__pagination {display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;}
+.datagrid__toolbar {position:sticky;top:0;z-index:2;background:var(--n-color,#fff);padding:6px 0;}
+.datagrid__table {max-width:100%;overflow:auto;}
+.datagrid__cell summary {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;max-width:260px;}
+.datagrid__cell pre {white-space:pre-wrap;overflow:auto;max-height:240px;max-width:300px;word-break:break-word;}
 .datagrid {
   display: flex;
   flex-direction: column;

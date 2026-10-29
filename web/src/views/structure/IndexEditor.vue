@@ -108,7 +108,7 @@ function canSave(): boolean {
 }
 
 watch(rows, () => {
-  if (props.draft) emit('update:indexes', rows.value.map(toIndex))
+  emit('update:indexes', rows.value.map(toIndex))
 }, { deep: true })
 watch(() => canSave(), valid => emit('validity', valid), { immediate: true })
 

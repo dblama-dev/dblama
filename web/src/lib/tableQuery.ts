@@ -34,6 +34,7 @@ export const ROW_FILTER_OPERATORS: readonly string[] = [
   '<=',
   '>=',
   'LIKE',
+  'CONTAINS',
   'NOT LIKE',
   'REGEXP',
   'NOT REGEXP',
@@ -63,4 +64,33 @@ export function buildRowsQuery(state: RowsQueryState): string {
     params.append('filter', `${filter.column}:${filter.op}:${value}`)
   }
   return params.toString()
+}
+
+export interface TableRouteState { page: number; pageSize: number; filters: RowsFilter[]; sort: RowsSort | null }
+export function readTableRouteQuery(query: Record<string, unknown>): TableRouteState {
+  const positive = (value: unknown, fallback: number) => typeof value === 'string' && /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) && Number(value) > 0 ? Number(value) : fallback
+  let filters: RowsFilter[] = []
+  let sort: RowsSort | null = null
+  try {
+    const parsed: unknown = JSON.parse(String(query.filters ?? '[]'))
+    if (Array.isArray(parsed)) filters = parsed.filter((f): f is RowsFilter => !!f && typeof f.column === 'string' && typeof f.value === 'string' && ROW_FILTER_OPERATORS.includes(f.op)).map(f => ({column:f.column,op:f.op,value:isNullOperator(f.op)?'':f.value}))
+  } catch { /* Invalid URLs use the default query. */ }
+  try {
+    const parsed = JSON.parse(String(query.sort ?? 'null'))
+    if (parsed && typeof parsed.column === 'string' && typeof parsed.desc === 'boolean') sort = {column:parsed.column,desc:parsed.desc}
+  } catch { /* Invalid URLs use the default query. */ }
+  return {page:positive(query.page,1),pageSize:Math.min(positive(query.pageSize,50),200),filters,sort}
+}
+export function writeTableRouteQuery(query: Record<string, unknown>, state: TableRouteState): Record<string, string | null | (string | null)[]> {
+  const next = {...query} as Record<string,string | null | (string | null)[]>
+  delete next.filters; delete next.sort
+  if (state.filters.length) next.filters = JSON.stringify(state.filters)
+  if (state.sort) next.sort = JSON.stringify(state.sort)
+  next.page = String(state.page); next.pageSize = String(state.pageSize)
+  return next
+}
+export function tableContextLink(db: string, table: string, action: string, schema?: string | null): string {
+  const query = new URLSearchParams({table})
+  if (schema) query.set('schema',schema)
+  return `/db/${encodeURIComponent(db)}/${action}?${query}`
 }

@@ -1,14 +1,21 @@
 <template>
   <section class="table-view">
     <n-breadcrumb>
-      <n-breadcrumb-item>{{ db }}</n-breadcrumb-item>
+      <n-breadcrumb-item @click="router.push('/server')">{{ t('server.title') }}</n-breadcrumb-item><n-breadcrumb-item @click="router.push(catalog.path(`/db/${encodeURIComponent(db)}`))">{{ db }}</n-breadcrumb-item>
+      <n-breadcrumb-item v-if="catalog.schema" @click="router.push(catalog.path(`/db/${encodeURIComponent(db)}`))">{{ catalog.schema }}</n-breadcrumb-item>
       <n-breadcrumb-item>{{ isNewTable ? t('table.new') : table }}</n-breadcrumb-item>
     </n-breadcrumb>
     <n-tabs type="line" :value="view" @update:value="switchView">
       <n-tab name="data">{{ t('table.data') }}</n-tab>
       <n-tab name="structure">{{ t('table.structure') }}</n-tab>
-      <n-tab v-if="!isNewTable" name="sql">{{ t('table.sql') }}</n-tab>
+      <n-tab v-if="!isNewTable" name="sql">{{ t('navigationWorkflows.ddl') }}</n-tab>
+      <n-tab v-if="!isNewTable" name="operations">{{ t('navigationWorkflows.operations') }}</n-tab>
     </n-tabs>
+    <nav v-if="!isNewTable" class="table-view__actions" aria-label="Table actions">
+      <n-button size="small" @click="openInsert">{{ t('navigationWorkflows.insert') }}</n-button>
+      <n-button v-for="action in ['console','search','import','export']" :key="action" size="small" @click="router.push(tableContextLink(db,table,action,catalog.schema))">{{ t(`navigationWorkflows.${action}`) }}</n-button>
+      <n-button data-testid="table-partitions" v-if="session.sessionInfo?.caps.partitions" size="small" @click="router.push(catalog.path(`/db/${encodeURIComponent(db)}/table/${encodeURIComponent(table)}/partitions`))">{{ t('navigationWorkflows.partitions') }}</n-button>
+    </nav>
     <!-- Create mode (_new): no rows exist yet, the data tab is a
          placeholder and only the structure editor is usable. -->
     <div v-if="view === 'data' && isNewTable" class="table-view__placeholder">
@@ -24,6 +31,8 @@
       :page-size="pageSize"
       :pk-columns="pkColumns"
       :sort="sort"
+      :filters="filters"
+      :table-name="`${db}.${table}`"
       @update:page="onPage"
       @update:page-size="onPageSize"
       @update:sort="onSort"
@@ -31,6 +40,7 @@
       @refresh="refetch"
       @add-row="onAddRow"
       @edit-row="onEditRow"
+      @edit-rows="onEditRows"
       @copy-row="onCopyRow"
       @copy-rows="copyRows"
       @export-selection="exportSelection"
@@ -44,8 +54,10 @@
       @renamed="onTableRenamed"
       @created="onTableCreated"
     />
+    <TableOperations v-else-if="view === 'operations'" :db="db" :table="table" @changed="refetch" @dropped="router.push(catalog.path(`/db/${encodeURIComponent(db)}`))" />
     <TableSQL v-else-if="view === 'sql'" :db="db" :table="table" />
     <BulkUpsert v-if="!isNewTable && view === 'data' && session.sessionInfo?.caps.upsert" :path="catalog.path(rowsPath + '/upsert')" @saved="refetch" />
+    <BulkEdit :show="bulkShow" :rows-path="catalog.path(rowsPath + '/rows')" :columns="modalColumns" :row-keys="bulkKeys" @update:show="bulkShow = $event" @saved="refetch" />
     <RowModal
       v-if="!isNewTable"
       :show="rowModal.show"
@@ -66,11 +78,13 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useNotification } from 'naive-ui'
-import { NBreadcrumb, NBreadcrumbItem, NTab, NTabs } from 'naive-ui'
+import { NBreadcrumb, NBreadcrumbItem, NButton, NTab, NTabs } from 'naive-ui'
 
 import { api, ApiError } from '../api/client'
 import type { ColumnDef, ForeignKey, Page, TableDef } from '../api/types'
 import { useCatalogStore } from '../stores/catalog'
+import BulkEdit from '../components/BulkEdit.vue'
+import TableOperations from '../components/TableOperations.vue'
 import BulkUpsert from '../components/BulkUpsert.vue'
 import { useSessionStore } from '../stores/session'
 import DataGrid from '../components/DataGrid.vue'
@@ -78,7 +92,7 @@ import RowModal from '../components/RowModal.vue'
 import StructureEditor from './structure/StructureEditor.vue'
 import TableSQL from './structure/TableSQL.vue'
 import { downloadExport } from '../lib/download'
-import { buildRowsQuery, type RowsFilter, type RowsSort } from '../lib/tableQuery'
+import { buildRowsQuery, readTableRouteQuery, writeTableRouteQuery, tableContextLink, type RowsFilter, type RowsSort } from '../lib/tableQuery'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -93,6 +107,7 @@ const db = computed(() => String(route.params.db ?? ''))
 const table = computed(() => String(route.params.t ?? ''))
 const view = computed(() => {
   if (route.query.view === 'sql') return isNewTable.value ? 'structure' : 'sql'
+  if (route.query.view === 'operations' && !isNewTable.value) return 'operations'
   return route.query.view === 'structure' ? 'structure' : 'data'
 })
 // The literal "_new" is the create-table placeholder, not a table name.
@@ -133,10 +148,22 @@ const pkPath = computed(() => catalog.path(`${rowsPath.value}/pk`))
 const pkColumns = ref<string[]>([])
 const page = ref<Page | null>(null)
 const loading = ref(false)
-const pageIndex = ref(1)
-const pageSize = ref(50)
-const sort = ref<RowsSort | null>(null)
-const filters = ref<RowsFilter[]>([])
+const initialQuery = readTableRouteQuery(route.query)
+const pageIndex = ref(initialQuery.page)
+const pageSize = ref(initialQuery.pageSize)
+const sort = ref<RowsSort | null>(initialQuery.sort)
+const filters = ref<RowsFilter[]>(initialQuery.filters)
+function restoreQuery(): void {
+  const state = readTableRouteQuery(route.query)
+  pageIndex.value=state.page; pageSize.value=state.pageSize; sort.value=state.sort; filters.value=state.filters
+}
+async function persistQuery(): Promise<void> {
+  await router.push({query:writeTableRouteQuery(route.query,{page:pageIndex.value,pageSize:pageSize.value,sort:sort.value,filters:filters.value})})
+}
+watch([() => route.query.filters,() => route.query.sort,() => route.query.page,() => route.query.pageSize], () => {
+ const before=JSON.stringify(queryState());restoreQuery()
+ if(JSON.stringify(queryState())!==before)void refetch()
+})
 
 function queryState() {
   return {
@@ -152,21 +179,20 @@ function notifyError(err: unknown): void {
   notification.error({ content: message, duration: 5000 })
 }
 
-// Stale-response guard: every fetch captures the counter value taken at its
-// start; a response that arrives after a newer request has started (seq has
-// moved on) is discarded — both its data and its error. The counter is
-// shared by the pk and rows fetches, so a slow pk response can never
-// overwrite a fresher one either. `loading` also follows the latest request.
+// Rows and primary-key metadata have separate request sequences. A filter
+// request must not invalidate the key metadata still loading for this table.
 let fetchSeq = 0
-
+let pkFetchSeq = 0
+let reloadSeq = 0
 async function loadPk(): Promise<void> {
-  const seq = ++fetchSeq
+  const seq = ++pkFetchSeq
+  const path = pkPath.value
   try {
-    const pk = await api<{ columns: string[] }>('GET', pkPath.value)
-    if (seq !== fetchSeq) return
+    const pk = await api<{ columns: string[] }>('GET', path)
+    if (seq !== pkFetchSeq || path !== pkPath.value) return
     pkColumns.value = pk.columns
   } catch (err) {
-    if (seq !== fetchSeq) return
+    if (seq !== pkFetchSeq || path !== pkPath.value) return
     notifyError(err)
   }
 }
@@ -189,15 +215,19 @@ async function refetch(): Promise<void> {
 }
 
 async function reload(): Promise<void> {
+  const seq=++reloadSeq
+  ++fetchSeq
+  ++pkFetchSeq
   // The _new placeholder has no table behind it — no pk or rows fetch.
   if (isNewTable.value) return
   rowModal.value.show = false
   page.value = null
   pkColumns.value = []
-  pageIndex.value = 1
-  sort.value = null
-  filters.value = []
+  restoreQuery()
+  bulkShow.value = false
+  defRequest++
   await loadPk()
+  if(seq!==reloadSeq)return
   await refetch()
 }
 
@@ -208,27 +238,32 @@ onMounted(() => {
 watch([db, table, () => catalog.schema], () => {
   void reload()
 })
+watch(view,(next,previous)=>{if(next==='data' && previous!=='data')void reload()})
 
 async function onPage(next: number): Promise<void> {
   pageIndex.value = next
+  await persistQuery()
   await refetch()
 }
 
 async function onPageSize(size: number): Promise<void> {
   pageSize.value = size
   pageIndex.value = 1
+  await persistQuery()
   await refetch()
 }
 
 async function onSort(next: RowsSort | null): Promise<void> {
   sort.value = next
   pageIndex.value = 1
+  await persistQuery()
   await refetch()
 }
 
 async function onFilters(next: RowsFilter[]): Promise<void> {
   filters.value = next
   pageIndex.value = 1
+  await persistQuery()
   await refetch()
 }
 
@@ -244,6 +279,7 @@ async function deleteRows(pks: Record<string, unknown>[]): Promise<void> {
   // A delete can empty the current page: step back one page if so.
   if ((page.value?.rows.length ?? 0) === 0 && pageIndex.value > 1) {
     pageIndex.value -= 1
+    await persistQuery()
     await refetch()
   }
 }
@@ -279,29 +315,42 @@ async function fetchDef(): Promise<boolean> {
     defColumns.value = def.columns
     defForeignKeys.value = def.foreignKeys ?? []
     return true
-  } catch {
+  } catch (err) {
     if (request !== defRequest || path !== catalog.path(rowsPath.value)) return false
-    // Definition unavailable: ColumnMeta-only rendering is good enough.
-    defColumns.value = null
-    defForeignKeys.value = []
-    return true
+    notifyError(err)
+    return false
   }
 }
 
-function onAddRow(): void {
+async function onAddRow(): Promise<void> {
   defColumns.value = null
-  void fetchDef()
+  if (!await fetchDef()) return
   rowModal.value = { show: true, mode: 'insert', row: null, pk: null }
 }
 
-function onEditRow(row: EditableRow): void {
+async function onEditRow(row: EditableRow): Promise<void> {
   const values: Record<string, unknown> = {}
   for (const meta of page.value?.columns ?? []) {
     values[meta.name] = row[meta.name]
   }
   defColumns.value = null
-  void fetchDef()
+  if (!await fetchDef()) return
   rowModal.value = { show: true, mode: 'edit', row: values, pk: row.__pk }
+}
+
+const bulkShow = ref(false)
+const bulkKeys = ref<Record<string,unknown>[]>([])
+async function onEditRows(keys: Record<string,unknown>[]): Promise<void> {
+  const captured = keys.map(key => ({...key}))
+  if (!await fetchDef()) return
+  bulkKeys.value=captured; bulkShow.value=true
+}
+async function openInsert(): Promise<void> {
+  if(view.value!=='data'){
+    const failure=await router.push({query:{...route.query,view:'data'}})
+    if(failure)return
+  }
+  await onAddRow()
 }
 
 async function onCopyRow(row: EditableRow): Promise<void> {
@@ -343,6 +392,7 @@ function onRowSaved(): void {
   gap: 8px;
 }
 
+.table-view__actions { display:flex;flex-wrap:wrap;gap:6px; }
 .table-view__placeholder {
   padding: 24px;
   opacity: 0.6;

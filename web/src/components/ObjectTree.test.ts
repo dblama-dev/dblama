@@ -23,7 +23,7 @@ vi.mock('vue-router', () => ({
 }))
 
 const pushSpy = vi.fn()
-const route = reactive({ params: {} as { db?: string } })
+const route = reactive({ params: {} as { db?: string;t?:string },path:'' })
 const mockedApi = vi.mocked(api)
 enableAutoUnmount(afterEach)
 
@@ -251,5 +251,33 @@ describe('ObjectTree', () => {
     expect(wrapper.find('[data-testid="tree-add-sequence"]').exists()).toBe(true)
     wrapper.unmount()
   })
+
+
+it('derives the selected table from navigation and browser history',async()=>{
+ route.params={db:'mydb',t:'orders'}
+ const wrapper=await mountTree()
+ expect(wrapper.findComponent(NTree).props('selectedKeys')).toEqual(['table:orders'])
+ route.params.t='users';await flushPromises()
+ expect(wrapper.findComponent(NTree).props('selectedKeys')).toEqual(['table:users'])
+ wrapper.unmount()
+})
+it('keeps database selection and catalog unchanged when navigation is cancelled',async()=>{
+ const wrapper=await mountTree();mockedApi.mockClear()
+ pushSpy.mockResolvedValueOnce({type:4})
+ wrapper.findComponent(NSelect).vm.$emit('update:value','otherdb');await flushPromises()
+ expect(wrapper.findComponent(NSelect).props('value')).toBe('mydb')
+ expect(mockedApi).not.toHaveBeenCalledWith('GET','/api/databases/otherdb/tables')
+ wrapper.unmount()
+})
+it('keeps schema unchanged when navigation is cancelled',async()=>{
+ useSessionStore().sessionInfo!.caps.schemas=true
+ mockedApi.mockImplementation(async (_method,url)=>url==='/api/databases'?databasesPayload:url==='/api/schemas'?{schemas:['public','other']}:{tables})
+ const wrapper=await mountTree();mockedApi.mockClear()
+ pushSpy.mockResolvedValueOnce({type:4})
+ wrapper.findAllComponents(NSelect).find(select=>select.attributes('data-testid')==='schema-select')!.vm.$emit('update:value','other');await flushPromises()
+ expect(useCatalogStore().schema).toBe('public')
+ expect(mockedApi).not.toHaveBeenCalledWith('GET','/api/databases/mydb/tables?schema=other')
+ wrapper.unmount()
+})
 
 })

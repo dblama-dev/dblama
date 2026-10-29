@@ -118,6 +118,7 @@ describe('buildRowsQuery', () => {
       '<=',
       '>=',
       'LIKE',
+      'CONTAINS',
       'NOT LIKE',
       'REGEXP',
       'NOT REGEXP',
@@ -127,4 +128,17 @@ describe('buildRowsQuery', () => {
       'IS NOT NULL',
     ])
   })
+})
+
+import { readTableRouteQuery, writeTableRouteQuery, tableContextLink } from './tableQuery'
+it('restores route grid state and ignores corrupt state', () => {
+ expect(readTableRouteQuery({ page:'3',pageSize:'25',filters:JSON.stringify([{column:'name',op:'LIKE',value:'%a%'}]),sort:JSON.stringify({column:'id',desc:true}) })).toEqual({page:3,pageSize:25,filters:[{column:'name',op:'LIKE',value:'%a%'}],sort:{column:'id',desc:true}})
+ expect(readTableRouteQuery({page:'-1',pageSize:'nan',filters:'no',sort:'{}'})).toEqual({page:1,pageSize:50,filters:[],sort:null})
+})
+it('writes query state without dropping schema and section',()=>{
+ expect(writeTableRouteQuery({schema:'Odd',view:'data',extra:'yes'}, {page:2,pageSize:50,filters:[],sort:null})).toEqual({schema:'Odd',view:'data',extra:'yes',page:'2',pageSize:'50'})
+ expect(tableContextLink('a/b','weird %','export','Odd Schema')).toBe('/db/a%2Fb/export?table=weird+%25&schema=Odd+Schema')
+})
+it('restores literal CONTAINS filters from database search links',()=>{
+ expect(readTableRouteQuery({filters:JSON.stringify([{column:'name',op:'CONTAINS',value:'100%_!'}])}).filters).toEqual([{column:'name',op:'CONTAINS',value:'100%_!'}])
 })

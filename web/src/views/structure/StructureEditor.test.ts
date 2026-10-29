@@ -509,3 +509,50 @@ it('uses schema for definitions and writes and hides PostgreSQL column reorderin
   expect(mockedApi).toHaveBeenCalledWith('PUT', `${defUrl}?schema=Odd%20Schema`, expect.anything())
   wrapper.unmount()
 })
+
+it('keeps pending columns and FK edits when indexes are saved',async()=>{
+ mockBase();const wrapper=await mountLoaded()
+ const row=rows(wrapper)[1]!
+ row.findAllComponents(NInput)[0]!.vm.$emit('update:value','pending_title');await flushPromises()
+ const {default:IndexEditor}=await import('./IndexEditor.vue')
+ wrapper.findComponent(IndexEditor).vm.$emit('saved');await flushPromises()
+ expect(rows(wrapper)[1]!.findAllComponents(NInput)[0]!.props('value')).toBe('pending_title')
+ wrapper.unmount()
+})
+it('starts existing column editors collapsed with readable overview',async()=>{
+ mockBase();const wrapper=await mountLoaded()
+ expect(wrapper.findAll('details.struct-row')).toHaveLength(3)
+ expect(wrapper.find('details.struct-row').attributes('open')).toBeUndefined()
+ expect(wrapper.find('details.struct-row summary').text()).toContain('id')
+ wrapper.unmount()
+})
+
+it('does not warn after load, and allows cancelling loss of any dirty section',async()=>{
+ mockBase()
+ const {routerKey}=await import('vue-router')
+ let guard!: (to:{fullPath:string},from:{fullPath:string})=>boolean
+ const pinia=createPinia();setActivePinia(pinia)
+ const remove=vi.fn()
+ const wrapper=mount(defineComponent({setup:()=>()=>h(NNotificationProvider,null,{default:()=>h(StructureEditor,{db:'mydb',table:'users'})})}),{global:{plugins:[pinia,i18n],provide:{[routerKey as symbol]:{beforeEach:(fn:typeof guard)=>{guard=fn;return remove}}}}})
+ await flushPromises()
+ const confirm=vi.spyOn(window,'confirm').mockReturnValue(false)
+ expect(guard({fullPath:'/other'},{fullPath:'/structure'})).toBe(true)
+ const {default:IndexEditor}=await import('./IndexEditor.vue')
+ wrapper.findComponent(IndexEditor).vm.$emit('update:indexes',[{name:'pending',type:'INDEX',columns:[{name:'id'}]}]);await flushPromises()
+ expect(guard({fullPath:'/other'},{fullPath:'/structure'})).toBe(false)
+ expect(confirm).toHaveBeenCalledOnce()
+ wrapper.unmount();expect(remove).toHaveBeenCalledOnce();confirm.mockRestore()
+})
+it('keeps unsaved index and FK models after saving columns/options',async()=>{
+ mockBase();const wrapper=await mountLoaded()
+ const {default:IndexEditor}=await import('./IndexEditor.vue')
+ const {default:ForeignKeyEditor}=await import('./ForeignKeyEditor.vue')
+ const pendingIndex=[{name:'pending',type:'INDEX',columns:[{name:'id'}]}]
+ const pendingFK=[{name:'pending_fk',columns:['id'],refTable:'other',refColumns:['id']}]
+ wrapper.findComponent(IndexEditor).vm.$emit('update:indexes',pendingIndex)
+ wrapper.findComponent(ForeignKeyEditor).vm.$emit('update:modelValue',pendingFK)
+ await flushPromises();await clickSave(wrapper)
+ expect(wrapper.findComponent(IndexEditor).props('indexes')).toEqual(pendingIndex)
+ expect(wrapper.findComponent(ForeignKeyEditor).props('modelValue')).toEqual(pendingFK)
+ wrapper.unmount()
+})

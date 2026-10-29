@@ -32,8 +32,10 @@
     <n-alert v-else-if="catalog.error" type="error" :title="t('tree.loadFailed')">
       {{ catalog.error }}
     </n-alert>
+    <div v-if="favoriteTables.length" class="object-tree__saved"><strong>{{ t('navigationWorkflows.favorites') }}</strong><n-button v-for="item in favoriteTables" :key="`${item.db}.${item.schema}.${item.table}`" text size="small" @click="openSaved(item)">{{ item.db }} / {{ item.table }}<span v-if="item.schema"> ({{ item.schema }})</span></n-button></div>
+    <details v-if="recentTables.length" class="object-tree__saved"><summary>{{ t('navigationWorkflows.recent') }}</summary><n-button v-for="item in recentTables" :key="`${item.db}.${item.schema}.${item.table}`" text size="small" @click="openSaved(item)">{{ item.db }} / {{ item.table }}<span v-if="item.schema"> ({{ item.schema }})</span></n-button></details>
     <n-tree
-      v-else
+      v-if="!dbsError && !catalog.error"
       block-line
       :data="treeData"
       :selected-keys="selectedKeys"
@@ -51,11 +53,12 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { NAlert, NButton, NInput, NSelect, NTree, NModal, NInputNumber, NPopconfirm, type TreeOption } from 'naive-ui'
 
-import { fetchSchemas, fetchSequences, createSequence, dropSequence, alterSequence } from '../lib/schema'
+import { fetchSchemas, fetchSequences, createSequence, dropSequence, alterSequence, withSchema } from '../lib/schema'
 import type { SequenceInfo } from '../api/types'
 import { api } from '../api/client'
 import { useCatalogStore } from '../stores/catalog'
 import { useSessionStore } from '../stores/session'
+import { readNavigationPreferences,writeNavigationPreferences,rememberTable,toggleFavorite,type TableLocation } from '../lib/navigationPreferences'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -87,12 +90,12 @@ async function loadSequences(): Promise<void> {
 }
 async function selectSchema(schema: string): Promise<void> {
   if (!db.value) return
+  const database=db.value
+  // Navigate before changing shared scope so dirty editors may cancel.
+  const failure=await router.push(withSchema(`/db/${encodeURIComponent(database)}`,schema,true))
+  if(failure)return
   schemaError.value = ''
-  sequences.value = []
-  selectedKeys.value = []
-  await catalog.selectSchema(db.value, schema)
-  try { await loadSequences() } catch (err) { schemaError.value = String(err) }
-  void router.push(catalog.path(`/db/${encodeURIComponent(db.value)}`))
+  if(catalog.schema!==schema)await catalog.selectSchema(database,schema)
 }
 async function addSequence(): Promise<void> {
   sequenceBusy.value = true
@@ -114,7 +117,28 @@ async function removeSequence(name: string): Promise<void> {
   } catch (err) { schemaError.value = String(err) }
 }
 const search = ref('')
-const selectedKeys = ref<string[]>([])
+const selectedKeys = computed(() => {
+ const table=route.params.t
+ if(typeof table==='string')return [`table:${table}`]
+ const action=route.path?.split('/').pop()
+ return action && ['console','export','import'].includes(action) ? [action] : []
+})
+const preferences=ref(readNavigationPreferences())
+const scope=computed(()=>JSON.stringify(session.sessionInfo?{driver:session.sessionInfo.driver.flavor,host:session.sessionInfo.driver.host,user:session.sessionInfo.driver.user}:{}))
+const recentTables=computed(()=>preferences.value.recent.filter(item=>item.scope===scope.value))
+const favoriteTables=computed(()=>preferences.value.favorites.filter(item=>item.scope===scope.value))
+function location(table:string):TableLocation{return {scope:scope.value,db:db.value??'',table,schema:catalog.schemaAware?catalog.schema:null}}
+function persistPreferences():void{writeNavigationPreferences(undefined,{...readNavigationPreferences(),recent:preferences.value.recent,favorites:preferences.value.favorites})}
+function favorite(table:string):void{preferences.value=toggleFavorite(preferences.value,location(table));persistPreferences()}
+function isFavorite(table:string):boolean{return favoriteTables.value.some(item=>item.db===db.value&&item.schema===location(table).schema&&item.table===table)}
+function openSaved(item:TableLocation):void{
+ const query=new URLSearchParams();if(item.schema)query.set('schema',item.schema)
+ void router.push(`/db/${encodeURIComponent(item.db)}/table/${encodeURIComponent(item.table)}${query.size?'?'+query:''}`)
+}
+watch([()=>route.params.db,()=>route.params.t,()=>catalog.schema,scope],()=>{
+ if(typeof route.params.db!=='string'||typeof route.params.t!=='string'||route.params.t==='_new')return
+ preferences.value=rememberTable(preferences.value,{...location(route.params.t),db:route.params.db});persistPreferences()
+},{immediate:true})
 // The database node starts expanded so tables are visible right away;
 // the user can collapse it afterwards.
 const expandedKeys = ref<string[]>([])
@@ -154,7 +178,6 @@ watch(() => catalog.databaseRevision, loadDatabases)
 watch(routeDatabase, async next => {
   if (!next || next === db.value) return
   db.value = next
-  selectedKeys.value = []
   expandedKeys.value = defaultExpandedKeys(next)
   await catalog.fetchTables(next)
 })
@@ -168,10 +191,11 @@ watch(() => catalog.schema, async () => {
 })
 
 async function selectDb(next: string): Promise<void> {
-  db.value = next
-  selectedKeys.value = []
-  expandedKeys.value = defaultExpandedKeys(next)
-  void router.push(catalog.path(`/db/${encodeURIComponent(next)}`))
+  const failure=await router.push(catalog.path(`/db/${encodeURIComponent(next)}`))
+  if(failure)return
+  if(db.value===next)return
+  db.value=next
+  expandedKeys.value=defaultExpandedKeys(next)
   await catalog.fetchTables(next)
 }
 
@@ -191,7 +215,7 @@ const treeData = computed<TreeOption[]>(() => {
   const matches = (name: string): boolean => name.toLowerCase().includes(needle)
   const tables = catalog.tables
     .filter((table) => !table.isView && matches(table.name))
-    .map((table) => ({ key: `table:${table.name}`, label: table.name, isLeaf: true }))
+    .map((table) => ({ key: `table:${table.name}`, label: table.name, isLeaf: true, suffix:()=>h(NButton,{size:'tiny',quaternary:true,'aria-label':`${t('navigationWorkflows.favorite')}: ${table.name}`,onClick:(event:MouseEvent)=>{event.stopPropagation();favorite(table.name)}},{default:()=>isFavorite(table.name)?'★':'☆'}) }))
   const children: TreeOption[] = [
     {
       // The SQL console of this database; a plain leaf, no search filter.
@@ -231,7 +255,7 @@ const treeData = computed<TreeOption[]>(() => {
   ]
   const views = catalog.tables
     .filter((table) => table.isView && matches(table.name))
-    .map((table) => ({ key: `table:${table.name}`, label: table.name, isLeaf: true }))
+    .map((table) => ({ key: `table:${table.name}`, label: table.name, isLeaf: true, suffix:()=>h(NButton,{size:'tiny',quaternary:true,'aria-label':`${t('navigationWorkflows.favorite')}: ${table.name}`,onClick:(event:MouseEvent)=>{event.stopPropagation();favorite(table.name)}},{default:()=>isFavorite(table.name)?'★':'☆'}) }))
   // The Views group appears only when the database actually has views.
   if (views.length > 0) {
     children.push({ key: 'group:views', label: t('tree.views'), children: views })
@@ -256,7 +280,6 @@ const treeData = computed<TreeOption[]>(() => {
 function onSelect(keys: string[]): void {
   const key = keys[keys.length - 1]
   if (key === undefined || db.value === null) return
-  selectedKeys.value = [key]
   // Identifiers may contain %, ? or #; vue-router decodes params on read.
   if (key === 'console' || key === 'export' || key === 'import') {
     void router.push(catalog.path(`/db/${encodeURIComponent(db.value)}/${key}`))
@@ -282,4 +305,5 @@ function createTable(): void {
   gap: 8px;
   padding: 12px;
 }
+.object-tree__saved{display:flex;flex-direction:column;gap:4px;}.object-tree__saved .n-button{justify-content:flex-start;max-width:100%;overflow:hidden;}
 </style>
