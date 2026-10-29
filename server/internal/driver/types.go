@@ -27,6 +27,7 @@ type DriverInfo struct {
 	Version string `json:"version"`
 	User    string `json:"user"`
 	Host    string `json:"host"`
+	Port    string `json:"port,omitempty"`
 }
 
 // Caps declares which optional database features the connected server
@@ -197,8 +198,9 @@ type ExecOpts struct {
 // table (the dump is a single delimited file); for sql an empty Tables
 // list means the whole database (non-view tables). DropIfExists and
 // IfNotExists only apply to the sql format; Gzip wraps the output in a
-// gzip stream. The dump targets the driver's own login database.
+// gzip stream. MySQL honors the selected database; PostgreSQL stays login-bound.
 type ExportRequest struct {
+	Mode         string       `json:"mode,omitempty"`
 	Query        *SelectQuery `json:"query,omitempty"`
 	IncludeViews bool         `json:"includeViews,omitempty"`
 	Format       string       `json:"format"`
@@ -222,13 +224,15 @@ type Result struct {
 }
 
 // CSVImportOpts tunes one ImportCSV call. The zero value enables the
-// defaults: Separator 0 → ",", Enclosure 0 → none, SkipHeader false.
+// defaults: comma separator, standard double quotes, positional mapping, no skipped header.
 type CSVImportOpts struct {
+	// Columns maps source fields to target columns; empty entries are ignored. Nil preserves positional import.
+	Columns []string `json:"columns,omitempty"`
 	// Separator is the field separator, a single character (e.g. ",",
 	// ";", "\t"). Empty means ",".
 	Separator string `json:"separator"`
 	// Enclosure is the field-enclosing character (e.g. "\"") — a single
-	// character. Empty means no enclosure.
+	// character. Empty keeps standard double-quote parsing.
 	Enclosure string `json:"enclosure"`
 	// SkipHeader discards the file's first record (a column-name header).
 	SkipHeader bool `json:"skipHeader"`

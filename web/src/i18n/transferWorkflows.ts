@@ -1,0 +1,26 @@
+export const transferWorkflowMessages = {
+  en: { transferWorkflows: {
+    context: 'Database: {db} · Tables: {table}', allTables: 'all tables',
+    mode: 'SQL dump contents', mode_all: 'Structure and data', mode_structure: 'Structure only', mode_data: 'Data only',
+    preset: 'CSV preset', commaPreset: 'CSV — comma, double quotes', semicolonPreset: 'CSV — semicolon, double quotes', tabPreset: 'TSV — tab, double quotes',
+    previewHint: 'Preview: at most 20 data rows and 200 fields from the first 256 KiB. The server validates the complete file. Double quotes enclose fields, including quoted newlines.',
+    previewLoading: 'Reading preview and table columns…', previewError: 'Cannot preview CSV:', noPreviewRows: 'No complete CSV records in preview. Check the file and delimiter.',
+    mapping: 'Map source fields to target columns', mappingHint: 'Choose one target per source field, or Ignore. Omitted targets use server defaults. Mapped empty fields stay empty; \\N imports NULL.',
+    ignoreColumn: 'Ignore this field', sourceColumn: 'Source field {number}', mappingRequired: 'Map at least one source field to a target column.', mappingDuplicate: 'Each target column may be selected only once.',
+    stop: 'Stop import', cancelled: 'Import stopped.', failed: 'Import did not complete.',
+    completedRows: 'Server confirmed {done} imported rows.', completedBytes: 'Server confirmed execution through {done} source bytes.',
+    partial: 'Earlier changes remain applied. Cancellation stops future work; a statement already running may still finish. Review the database before retrying.',
+  } },
+  ru: { transferWorkflows: {
+    context: 'База: {db} · Таблицы: {table}', allTables: 'все таблицы',
+    mode: 'Содержимое SQL-дампа', mode_all: 'Структура и данные', mode_structure: 'Только структура', mode_data: 'Только данные',
+    preset: 'Формат CSV', commaPreset: 'CSV — запятая, двойные кавычки', semicolonPreset: 'CSV — точка с запятой, двойные кавычки', tabPreset: 'TSV — табуляция, двойные кавычки',
+    previewHint: 'Просмотр: до 20 строк данных и 200 полей из первых 256 КиБ. Сервер проверит весь файл. Двойные кавычки ограничивают поля, включая переносы строк.',
+    previewLoading: 'Чтение примера и столбцов таблицы…', previewError: 'Не удалось прочитать CSV:', noPreviewRows: 'В примере нет полных записей CSV. Проверьте файл и разделитель.',
+    mapping: 'Сопоставить поля CSV со столбцами таблицы', mappingHint: 'Выберите столбец для каждого поля или пропустите поле. Пропущенные столбцы получат значения по умолчанию. Пустые поля останутся пустыми; \\N означает NULL.',
+    ignoreColumn: 'Пропустить поле', sourceColumn: 'Поле {number}', mappingRequired: 'Сопоставьте хотя бы одно поле со столбцом таблицы.', mappingDuplicate: 'Каждый столбец можно выбрать только один раз.',
+    stop: 'Остановить импорт', cancelled: 'Импорт остановлен.', failed: 'Импорт не завершён.',
+    completedRows: 'Сервер подтвердил импорт {done} строк.', completedBytes: 'Сервер подтвердил выполнение до {done} байт исходного файла.',
+    partial: 'Ранее выполненные изменения сохранены. Отмена прекращает дальнейшую работу; уже запущенный запрос может завершиться. Проверьте базу перед повторным импортом.',
+  } },
+}

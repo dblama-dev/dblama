@@ -6,12 +6,15 @@ import { NButton, NCheckbox, NInput, NNotificationProvider, NRadioGroup, NSelect
 
 import type { TableInfo } from '../api/types'
 import i18n from '../i18n'
+import { transferWorkflowMessages } from '../i18n/transferWorkflows'
+i18n.global.mergeLocaleMessage('en', transferWorkflowMessages.en)
+i18n.global.mergeLocaleMessage('ru', transferWorkflowMessages.ru)
 import ImportView from './ImportView.vue'
 
-const routeState = vi.hoisted(() => ({ db: 'mydb' }))
+const routeState = vi.hoisted(() => ({ db: 'mydb', table: '' }))
 
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { db: routeState.db } }),
+  useRoute: () => ({ params: { db: routeState.db }, query: { table: routeState.table } }),
 }))
 
 const tables: TableInfo[] = [
@@ -51,6 +54,7 @@ function mockFetch(importResponse: Response): ReturnType<typeof vi.fn> {
   return vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
     const url = String(input)
     if (url.endsWith('/tables')) return jsonRes(200, { tables })
+    if (/\/tables\/[^/]+$/.test(url)) return jsonRes(200, {columns: [{name:'id',type:'bigint'}, {name:'name',type:'text'}]})
     if (url.endsWith('/import')) return importResponse
     throw new Error(`unexpected url: ${url}`)
   })
@@ -69,8 +73,10 @@ function mountView(pinia: Pinia) {
 async function chooseFile(view: ReturnType<typeof mount>, name: string, contents: string): Promise<void> {
   const input = view.find('input[type="file"]')
   const file = new File([contents], name, { type: 'text/plain' })
-  Object.defineProperty(input.element, 'files', { value: [file] })
+  Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
   await input.trigger('change')
+  await new Promise(resolve => setTimeout(resolve, 30))
+  await flushPromises()
 }
 
 describe('ImportView', () => {
@@ -79,6 +85,7 @@ describe('ImportView', () => {
 
   beforeEach(() => {
     routeState.db = 'mydb'
+    routeState.table = ''
     pinia = createPinia()
     setActivePinia(pinia)
     fetchMock = mockFetch(streamRes([]))
@@ -108,6 +115,8 @@ describe('ImportView', () => {
 
     view.findComponent(NSelect).vm.$emit('update:value', 'users')
     await flushPromises()
+    await new Promise(resolve => setTimeout(resolve, 30))
+    await flushPromises()
     expect(view.findComponent(NButton).attributes('disabled')).toBeUndefined()
   })
 
@@ -125,7 +134,7 @@ describe('ImportView', () => {
     await inputs[0].find('input').setValue(';')
     view.findAllComponents(NCheckbox)[0].vm.$emit('update:checked', true)
     await flushPromises()
-    await chooseFile(view, 'rows.csv', 'a;b\n1;2\n')
+    await chooseFile(view, 'rows.csv', 'id;name\n1;2\n')
 
     await view.find('[data-testid="import-submit"]').trigger('click')
     await flushPromises()
@@ -137,15 +146,16 @@ describe('ImportView', () => {
         headers: expect.objectContaining({ 'X-Requested-With': 'XMLHttpRequest' }),
       }),
     )
-    const form = fetchMock.mock.calls[1][1].body as FormData
+    const form = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/import'))![1].body as FormData
     // The server streams parts in order and keeps the file part open, so
     // every option field must precede the file.
-    expect([...form.keys()]).toEqual(['type', 'table', 'separator', 'enclosure', 'skipHeader', 'file'])
+    expect([...form.keys()]).toEqual(['type', 'table', 'separator', 'enclosure', 'skipHeader', 'columns', 'file'])
     expect(form.get('type')).toBe('csv')
     expect(form.get('table')).toBe('users')
     expect(form.get('separator')).toBe(';')
     expect(form.get('enclosure')).toBe('')
     expect(form.get('skipHeader')).toBe('true')
+    expect(JSON.parse(String(form.get('columns')))).toEqual(['id', 'name'])
     expect(form.get('file')).toBeInstanceOf(File)
   })
 
@@ -176,7 +186,7 @@ describe('ImportView', () => {
     expect(tableCalls).toHaveLength(2)
   })
 
-  it('stops with an error notification on an error line and does not invalidate', async () => {
+  it('stops with an error notification and refreshes potentially partial changes', async () => {
     fetchMock = mockFetch(
       streamRes(['{"done":1,"total":4}\n{"done":1,"total":4,"error":"boom near line 2"}\n']),
     )
@@ -192,7 +202,61 @@ describe('ImportView', () => {
     expect(document.body.textContent).toContain('boom near line 2')
     expect(wrapper.text()).not.toContain('Импорт завершён')
     const tableCalls = fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/tables'))
-    expect(tableCalls).toHaveLength(1)
+    expect(tableCalls).toHaveLength(2)
+  })
+
+  it('preselects the table from the route', async () => {
+    routeState.table = 'orders'
+    const wrapper = mountView(pinia); await flushPromises()
+    const view = wrapper.findComponent(ImportView)
+    view.findComponent(NRadioGroup).vm.$emit('update:value', 'csv'); await flushPromises()
+    expect(view.findComponent(NSelect).props('value')).toBe('orders')
+  })
+
+  it('stops an active import and reports possible partial work without success', async () => {
+    let signal: AbortSignal | undefined
+    fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, options?: RequestInit) => {
+      if (String(input).endsWith('/tables')) return jsonRes(200, {tables})
+      signal = options?.signal as AbortSignal
+      return await new Promise((_resolve, reject) => signal!.addEventListener('abort', () => reject(new DOMException('Stopped','AbortError'))))
+    }); vi.stubGlobal('fetch',fetchMock)
+    const wrapper = mountView(pinia); await flushPromises()
+    const view = wrapper.findComponent(ImportView)
+    await chooseFile(view, 'dump.sql', 'INSERT INTO t VALUES (1);')
+    await view.find('[data-testid="import-submit"]').trigger('click'); await flushPromises()
+    await view.find('[data-testid="import-stop"]').trigger('click'); await flushPromises()
+    expect(signal?.aborted).toBe(true)
+    expect(view.find('[data-testid="import-result"]').text()).toMatch(/отмен|останов/i)
+    expect(document.body.textContent).not.toContain('Импорт завершён')
+  })
+
+  it('previews quoted values and submits reordered and ignored source fields', async () => {
+    const wrapper = mountView(pinia); await flushPromises()
+    const view = wrapper.findComponent(ImportView)
+    view.findComponent(NRadioGroup).vm.$emit('update:value', 'csv'); await flushPromises()
+    view.findComponent(NSelect).vm.$emit('update:value', 'users'); await flushPromises()
+    await chooseFile(view, 'rows.csv', '"Привет,\nмир",ignored,9007199254740993\n')
+    expect(view.find('[data-testid="csv-preview"]').text()).toContain('Привет,')
+    view.findAllComponents(NSelect).find(select => select.attributes('data-testid') === 'csv-map-0')!.vm.$emit('update:value', 'name')
+    view.findAllComponents(NSelect).find(select => select.attributes('data-testid') === 'csv-map-1')!.vm.$emit('update:value', '')
+    view.findAllComponents(NSelect).find(select => select.attributes('data-testid') === 'csv-map-2')!.vm.$emit('update:value', 'id')
+    await flushPromises()
+    await view.find('[data-testid="import-submit"]').trigger('click'); await flushPromises()
+    const form = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/import'))![1].body as FormData
+    expect(JSON.parse(String(form.get('columns')))).toEqual(['name', '', 'id'])
+  })
+
+  it('blocks malformed CSV and duplicate target mappings', async () => {
+    const wrapper = mountView(pinia); await flushPromises()
+    const view = wrapper.findComponent(ImportView)
+    view.findComponent(NRadioGroup).vm.$emit('update:value', 'csv'); await flushPromises()
+    view.findComponent(NSelect).vm.$emit('update:value', 'users'); await flushPromises()
+    await chooseFile(view, 'bad.csv', '1,"unclosed')
+    expect(view.find('[data-testid="csv-preview-error"]').exists()).toBe(true)
+    expect(view.find('[data-testid="import-submit"]').attributes('disabled')).toBeDefined()
+    await chooseFile(view, 'rows.csv', '1,value\n')
+    view.findAllComponents(NSelect).find(select => select.attributes('data-testid') === 'csv-map-1')!.vm.$emit('update:value', 'id'); await flushPromises()
+    expect(view.find('[data-testid="import-submit"]').attributes('disabled')).toBeDefined()
   })
 
   it('shows the csv options only for the csv type', async () => {

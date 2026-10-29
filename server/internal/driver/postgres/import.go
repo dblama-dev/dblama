@@ -89,6 +89,9 @@ func (d *PostgresDriver) ImportCSV(ctx context.Context, db, table string, r io.R
 	if db != d.loginDB {
 		return fmt.Errorf("import csv: database %s is not the login database %s", db, d.loginDB)
 	}
+	if opts.Enclosure != "" && opts.Enclosure != `"` {
+		return fmt.Errorf("import csv: unsupported enclosure %q", opts.Enclosure)
+	}
 	sep, err := csvSeparator(opts.Separator)
 	if err != nil {
 		return fmt.Errorf("import csv: %w", err)
@@ -99,6 +102,14 @@ func (d *PostgresDriver) ImportCSV(ctx context.Context, db, table string, r io.R
 	if err != nil {
 		return fmt.Errorf("import csv: %w", err)
 	}
+	fieldCount := len(columns)
+	if opts.Columns != nil {
+		fieldCount = len(opts.Columns)
+	}
+	columns, indexes, err := driver.CSVImportColumns(columns, opts.Columns)
+	if err != nil {
+		return err
+	}
 	names := make([]string, len(columns))
 	for i, c := range columns {
 		names[i] = c.Name
@@ -106,7 +117,7 @@ func (d *PostgresDriver) ImportCSV(ctx context.Context, db, table string, r io.R
 
 	cr := csv.NewReader(r)
 	cr.Comma = sep
-	cr.FieldsPerRecord = len(names)
+	cr.FieldsPerRecord = fieldCount
 	if opts.SkipHeader {
 		if _, err := cr.Read(); err != nil {
 			return fmt.Errorf("import csv: header: %w", err)
@@ -118,6 +129,7 @@ func (d *PostgresDriver) ImportCSV(ctx context.Context, db, table string, r io.R
 		return fmt.Errorf("import csv: %w", err)
 	}
 
+	committed := 0
 	nrows := 0
 	var args []any
 	batchFirst := 0
@@ -132,12 +144,19 @@ func (d *PostgresDriver) ImportCSV(ctx context.Context, db, table string, r io.R
 		if _, err := d.db.ExecContext(ctx, query, args...); err != nil {
 			return fmt.Errorf("import csv: rows %d-%d: %w", batchFirst, nrows, err)
 		}
+		committed = nrows
+		if progress != nil {
+			progress(int64(committed), 0)
+		}
 		args = args[:0]
 		batchFirst = 0
 		return nil
 	}
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("import csv: %w", err)
+		}
 		record, err := cr.Read()
 		if err == io.EOF {
 			break
@@ -149,7 +168,8 @@ func (d *PostgresDriver) ImportCSV(ctx context.Context, db, table string, r io.R
 		if batchFirst == 0 {
 			batchFirst = nrows
 		}
-		for i, field := range record {
+		for i, source := range indexes {
+			field := record[source]
 			if field == `\N` {
 				args = append(args, nil)
 				continue
@@ -167,20 +187,20 @@ func (d *PostgresDriver) ImportCSV(ctx context.Context, db, table string, r io.R
 			}
 			args = append(args, field)
 		}
-		if progress != nil {
-			progress(int64(nrows), int64(nrows))
-		}
 		if len(args)/len(names) >= csvBatchSize {
 			if err := flush(); err != nil {
 				return err
 			}
 		}
 	}
+	if nrows == 0 {
+		return fmt.Errorf("import csv: empty input")
+	}
 	if err := flush(); err != nil {
 		return err
 	}
 	if progress != nil {
-		progress(int64(nrows), int64(nrows))
+		progress(int64(committed), int64(committed))
 	}
 	return nil
 }

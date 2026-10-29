@@ -47,6 +47,13 @@ func (d *PostgresDriver) ShowCreateTable(ctx context.Context, db, table string) 
 // LIMIT/OFFSET (documented caveat). Nothing but the current row and
 // statement is ever buffered.
 func (d *PostgresDriver) Export(ctx context.Context, db string, req driver.ExportRequest, w io.Writer) error {
+	if req.Mode != "" && req.Mode != "all" && req.Mode != "structure" && req.Mode != "data" {
+		return fmt.Errorf("export: invalid mode %q", req.Mode)
+	}
+	if req.Mode == "structure" && req.Query != nil {
+		return fmt.Errorf("export: structure mode cannot export a row selection")
+	}
+
 	if db == "" {
 		return fmt.Errorf("export: no database to dump")
 	}
@@ -89,8 +96,30 @@ func (d *PostgresDriver) Export(ctx context.Context, db string, req driver.Expor
 		}
 	}
 
+	if isSQL && req.Mode == "data" {
+		infos, err := d.ListTables(ctx, db)
+		if err != nil {
+			return err
+		}
+		catalog := map[string]bool{}
+		for _, info := range infos {
+			catalog[info.Name] = info.IsView
+		}
+		base := make([]string, 0, len(tables))
+		for _, name := range tables {
+			isView, ok := catalog[name]
+			if !ok {
+				return fmt.Errorf("export: table %q not found", name)
+			}
+			if !isView {
+				base = append(base, name)
+			}
+		}
+		tables = base
+	}
+
 	var views []dump.View
-	if isSQL && req.Query == nil && req.IncludeViews {
+	if isSQL && req.Query == nil && req.IncludeViews && req.Mode != "data" {
 		var err error
 		tables, views, err = d.prepareViewExport(ctx, req.Tables)
 		if err != nil {
@@ -98,7 +127,7 @@ func (d *PostgresDriver) Export(ctx context.Context, db string, req driver.Expor
 		}
 	}
 	var definitions map[string]driver.TableDef
-	if isSQL && req.Query == nil {
+	if isSQL && req.Query == nil && req.Mode != "data" {
 		var err error
 		tables, definitions, err = d.prepareTableExport(ctx, tables)
 		if err != nil {
@@ -175,7 +204,7 @@ func (d *PostgresDriver) exportSQL(ctx context.Context, tables []string, definit
 		return err
 	}
 
-	if req.DropIfExists && len(tables) > 0 {
+	if req.Mode != "data" && req.DropIfExists && len(tables) > 0 {
 		names := make([]string, len(tables))
 		for i, name := range tables {
 			names[i] = sqlgen.QuoteIdentPg(name)
@@ -185,33 +214,40 @@ func (d *PostgresDriver) exportSQL(ctx context.Context, tables []string, definit
 		}
 	}
 	for _, table := range tables {
-		create, err := portableTableCreate(table, definitions[table])
-		if err != nil {
-			return fmt.Errorf("export: %w", err)
-		}
-		if req.IfNotExists {
-			create, err = addIfNotExists(create)
+		if req.Mode != "data" {
+			create, err := portableTableCreate(table, definitions[table])
 			if err != nil {
 				return fmt.Errorf("export: %w", err)
 			}
+			if req.IfNotExists {
+				create, err = addIfNotExists(create)
+				if err != nil {
+					return fmt.Errorf("export: %w", err)
+				}
+			}
+
+			qual, err := qualify(schema, table)
+			if err != nil {
+				return fmt.Errorf("export: %w", err)
+			}
+			section := "-- Table: " + qual + "\n"
+			section += create + ";\n\n"
+			if err := writeExport(out, section); err != nil {
+				return err
+			}
 		}
 
-		qual, err := qualify(schema, table)
-		if err != nil {
-			return fmt.Errorf("export: %w", err)
+		if req.Mode != "structure" {
+			if err := d.exportTableSQLRows(ctx, table, out); err != nil {
+				return err
+			}
+			if err := d.exportSerialState(ctx, table, out); err != nil {
+				return err
+			}
 		}
-		section := "-- Table: " + qual + "\n"
-		section += create + ";\n\n"
-		if err := writeExport(out, section); err != nil {
-			return err
-		}
-
-		if err := d.exportTableSQLRows(ctx, table, out); err != nil {
-			return err
-		}
-		if err := d.exportSerialState(ctx, table, out); err != nil {
-			return err
-		}
+	}
+	if req.Mode == "data" {
+		return nil
 	}
 	return writeForeignKeysSQL(out, tables, definitions, req)
 }

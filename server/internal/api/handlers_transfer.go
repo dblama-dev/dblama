@@ -52,23 +52,15 @@ func (ew *exportStreamWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// handleExport streams a database dump as an attachment. The requested
-// database must match the session: the driver's Export dumps its own
-// login database, so a session logged in without a database has nothing
-// to dump and a {db} other than the login database would silently dump
-// the wrong schema. Both are bad_request before any header is written.
-// Format (and, for delimited formats, the exactly-one-table requirement)
-// is validated before any header too, so an invalid request still gets
-// the JSON error envelope. The success status is sent on the first data
-// write. Errors after that point abort the response, making the browser's
-// download fail rather than silently saving a partial backup.
+// handleExport honors the route database. PostgreSQL connections remain bound
+// to their login database; MySQL catalog/data queries qualify the selected one.
 func (s *apiServer) handleExport(w http.ResponseWriter, r *http.Request) {
 	sess, _ := session.FromContext(r.Context())
-	if sess.Database == "" {
+	if sess.Driver.Info().Flavor == "postgres" && sess.Database == "" {
 		WriteErr(w, http.StatusBadRequest, ErrBadRequest("export requires logging in with a database"))
 		return
 	}
-	if urlDB := chi.URLParam(r, "db"); urlDB != sess.Database {
+	if urlDB := chi.URLParam(r, "db"); sess.Driver.Info().Flavor == "postgres" && urlDB != sess.Database {
 		WriteErr(w, http.StatusBadRequest, ErrBadRequest(
 			"export dumps the login database "+sess.Database+", not "+urlDB))
 		return
@@ -76,6 +68,10 @@ func (s *apiServer) handleExport(w http.ResponseWriter, r *http.Request) {
 
 	var req driver.ExportRequest
 	if !decodeJSONBody(w, r, &req) {
+		return
+	}
+	if req.Mode != "" && req.Mode != "all" && req.Mode != "structure" && req.Mode != "data" {
+		WriteErr(w, http.StatusBadRequest, ErrBadRequest("mode must be all, structure or data"))
 		return
 	}
 	meta, ok := exportFormats[req.Format]
@@ -107,7 +103,7 @@ func (s *apiServer) handleExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", meta.contentType)
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
 	out := &exportStreamWriter{w: w}
-	if err := sess.Driver.Export(r.Context(), sess.Database, req, out); err != nil {
+	if err := sess.Driver.Export(r.Context(), chi.URLParam(r, "db"), req, out); err != nil {
 		if !out.started {
 			w.Header().Del("Content-Disposition")
 			writeDriverErr(w, err)
@@ -150,6 +146,7 @@ func (s *apiServer) handleImport(w http.ResponseWriter, r *http.Request) {
 	// kept open for the driver, so anything after it is ignored.
 	var (
 		fileType, table, separator, enclosure string
+		columns                               []string
 		skipHeader                            bool
 		file                                  io.Reader
 	)
@@ -180,6 +177,11 @@ func (s *apiServer) handleImport(w http.ResponseWriter, r *http.Request) {
 			separator = string(val)
 		case "enclosure":
 			enclosure = string(val)
+		case "columns":
+			if err := json.Unmarshal(val, &columns); err != nil || columns == nil {
+				WriteErr(w, http.StatusBadRequest, ErrBadRequest("columns must be a JSON array of target names"))
+				return
+			}
 		case "skipHeader":
 			skipHeader, err = strconv.ParseBool(string(val))
 			if err != nil {
@@ -228,7 +230,7 @@ func (s *apiServer) handleImport(w http.ResponseWriter, r *http.Request) {
 	if fileType == "sql" {
 		impErr = sess.Driver.ImportSQL(r.Context(), chi.URLParam(r, "db"), file, progress)
 	} else {
-		opts := driver.CSVImportOpts{Separator: separator, Enclosure: enclosure, SkipHeader: skipHeader}
+		opts := driver.CSVImportOpts{Separator: separator, Enclosure: enclosure, SkipHeader: skipHeader, Columns: columns}
 		impErr = sess.Driver.ImportCSV(r.Context(), chi.URLParam(r, "db"), table, file, opts, progress)
 	}
 	if impErr != nil {

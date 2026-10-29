@@ -2,12 +2,11 @@
   <section class="export-view">
     <h2>{{ t('export.title') }}</h2>
 
-    <!-- The backend export endpoint dumps the login database only, so
-         exporting a different database is impossible — block it early. -->
     <n-alert v-if="dbMismatch" type="warning" data-testid="export-db-mismatch">
       {{ t('export.dbMismatch') }}
     </n-alert>
 
+    <p>{{ t('transferWorkflows.context', { db, table: selected.join(', ') || t('transferWorkflows.allTables') }) }}</p>
     <div class="export-view__form">
       <label class="export-view__field">
         <span>{{ t('export.format') }}</span>
@@ -18,7 +17,11 @@
         />
       </label>
 
-      <div v-if="isSql" class="export-view__field">
+      <label v-if="isSql" class="export-view__field">
+        <span>{{ t('transferWorkflows.mode') }}</span>
+        <n-select v-model:value="mode" :options="modeOptions" data-testid="export-mode" />
+      </label>
+      <div v-if="isSql && mode !== 'data'" class="export-view__field">
         <n-checkbox v-model:checked="includeViews">{{ t('export.includeViews') }}</n-checkbox>
         <n-checkbox v-model:checked="dropIfExists">{{ t('export.dropIfExists') }}</n-checkbox>
         <n-checkbox v-model:checked="ifNotExists">{{ t('export.ifNotExists') }}</n-checkbox>
@@ -74,6 +77,7 @@ const session = useSessionStore()
 const notification = useNotification()
 
 const format = ref('sql')
+const mode = ref<'all' | 'structure' | 'data'>('all')
 const dropIfExists = ref(false)
 const ifNotExists = ref(false)
 const gzip = ref(false)
@@ -83,22 +87,16 @@ const exporting = ref(false)
 const db = computed(() => String(route.params.db ?? ''))
 const includeViews = ref(true)
 const isSql = computed(() => format.value === 'sql')
-// The export endpoint dumps the driver's login database; the {db} URL
-// parameter is ignored there (unlike import), so a mismatch means the
-// user cannot get what the dialog seems to offer.
-const dbMismatch = computed(() => {
-  const login = session.sessionInfo?.database
-  return login !== null && login !== undefined && login !== db.value
-})
+const dbMismatch = computed(() => session.sessionInfo?.driver.flavor === 'postgres' && session.sessionInfo?.database !== db.value)
 // Delimited formats dump one single-file table; sql may take the whole
 // database (empty selection).
 const submitDisabled = computed(
   () => dbMismatch.value || exporting.value || (!isSql.value && selected.value.length !== 1),
 )
 
-const tableOptions = computed(() => catalog.tables.filter((table) => !table.isView || (isSql.value && includeViews.value)))
+const tableOptions = computed(() => catalog.tables.filter((table) => !table.isView || (isSql.value && mode.value !== 'data' && includeViews.value)))
 
-watch([format, includeViews, tableOptions], () => {
+watch([format, mode, includeViews, tableOptions], () => {
   const valid = new Set(tableOptions.value.map(table => table.name))
   selected.value = selected.value.filter(name => valid.has(name))
 })
@@ -110,9 +108,15 @@ const formatOptions = computed<SelectOption[]>(() => [
   { label: t('export.formatTsv'), value: 'tsv' },
 ])
 
-watch([db, () => catalog.schema], () => {
+const modeOptions = computed<SelectOption[]>(() => ['all', 'structure', 'data'].map(value => ({ value, label: t(`transferWorkflows.mode_${value}`) })))
+
+watch([db, () => catalog.schema, () => route.query?.table], async (_value, _old, onCleanup) => {
+  let stale = false
+  onCleanup(() => { stale = true })
   selected.value = []
-  void catalog.fetchTables(db.value)
+  const requested = route.query?.table
+  await catalog.fetchTables(db.value)
+  if (!stale && typeof requested === 'string' && tableOptions.value.some(table => table.name === requested)) selected.value = [requested]
 }, { immediate: true })
 
 function toggleTable(name: string, checked: boolean): void {
@@ -129,12 +133,13 @@ async function submit(): Promise<void> {
   try {
     const body: ExportRequest = {
       format: format.value,
+      ...(isSql.value ? { mode: mode.value } : {}),
       tables: selected.value,
       // The sql-only flags stay false for delimited formats (their
       // checkboxes are hidden); the server ignores them there anyway.
-      includeViews: isSql.value && includeViews.value,
-      dropIfExists: isSql.value && dropIfExists.value,
-      ifNotExists: isSql.value && ifNotExists.value,
+      includeViews: isSql.value && mode.value !== 'data' && includeViews.value,
+      dropIfExists: isSql.value && mode.value !== 'data' && dropIfExists.value,
+      ifNotExists: isSql.value && mode.value !== 'data' && ifNotExists.value,
       gzip: gzip.value,
     }
     await downloadExport(db.value, body, catalog.schemaAware ? catalog.schema : undefined)

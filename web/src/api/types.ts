@@ -13,6 +13,7 @@ export interface DriverInfo {
   version: string
   user: string
   host: string
+  port?: string
 }
 
 export interface Caps {
@@ -160,6 +161,7 @@ export interface Page {
 // pre-checked in the UI). dropIfExists/ifNotExists only apply to sql,
 // gzip wraps any format.
 export interface ExportRequest {
+  mode?: 'all' | 'structure' | 'data'
   query?: { columns?: string[]; filters?: {column: string; operator: string; value: string}[]; sorts?: {column: string; desc: boolean}[]; limit?: number; offset?: number }
   includeViews?: boolean
   format: string

@@ -83,6 +83,9 @@ var _ driver.Driver = (*PostgresDriver)(nil)
 // with a ping, and reads the server version. Connection errors never
 // contain the DSN or the password.
 func Connect(ctx context.Context, cfg driver.ConnConfig) (driver.Driver, error) {
+	if cfg.Port == "" {
+		cfg.Port = "5432"
+	}
 	db, err := openDatabase(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("open postgres connection to %s:%s: %w", cfg.Host, cfg.Port, err)
@@ -102,7 +105,7 @@ func Connect(ctx context.Context, cfg driver.ConnConfig) (driver.Driver, error) 
 
 	return &PostgresDriver{
 		db:       db,
-		info:     driver.DriverInfo{Name: "PostgreSQL", Flavor: "postgres", Version: parseVersion(versionRaw), User: cfg.User, Host: cfg.Host},
+		info:     driver.DriverInfo{Name: "PostgreSQL", Flavor: "postgres", Version: parseVersion(versionRaw), User: cfg.User, Host: cfg.Host, Port: cfg.Port},
 		caps:     postgresCaps(),
 		loginDB:  cfg.Database,
 		schema:   defaultSchema,

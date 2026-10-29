@@ -3,6 +3,7 @@ package mysql
 import (
 	"context"
 	"encoding/csv"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -90,41 +91,13 @@ func excerpt(s string) string {
 // CSV import — the same batch size the dump writer streams in.
 const csvBatchSize = 100
 
-// progressRowStride is the row stride of ImportCSV's progress reports:
-// per-row callbacks on a big file would flood the NDJSON stream (and the
-// browser painting it), so progress is reported every 1000th row plus
-// the final row (done == total on success).
-const progressRowStride = 1000
-
-// ImportCSV imports delimited rows read from r into table in database db
-// and reports row progress. See the driver.Driver contract for the full
-// semantics; the implementation pins are:
-//
-//   - the fields of every record map onto the table's columns in ordinal
-//     order (read from information_schema, so a missing table fails
-//     before anything is read) and every record must carry exactly the
-//     table's column count — encoding/csv enforces it from the first
-//     record on; values are always bound as parameters (no SQL is ever
-//     built from the file's content);
-//   - an empty field becomes SQL NULL, any other field is bound as a
-//     string and coerced server-side (MySQL numeric/date semantics);
-//   - rows are written in multi-row INSERT batches of csvBatchSize, the
-//     remainder flushed at EOF; a batch is one statement, so on a
-//     transactional table it lands atomically. The first failing batch
-//     aborts the import: earlier batches stay applied, the error names
-//     the batch's first row number (1-based, header excluded);
-//   - options: Separator is the encoding/csv field separator (default
-//     ","), Enclosure is the field-enclosing character — encoding/csv
-//     quotes with "\"" only, so an empty enclosure means the standard
-//     "\"" semantics still apply and any other character fails before
-//     reading; SkipHeader discards the first record;
-//   - progress: the row count is unknown until the stream ends, so
-//     done tracks rows read: progress(done=n, total=n) is reported
-//     every 1000th row (progressRowStride) plus the final row — per-row
-//     callbacks would flood the progress stream — and the final count
-//     is the number of imported rows; a nil progress is allowed. An
-//     input with no data rows (nothing at all, or only the
-//     skipped header) is an error, mirroring ImportSQL's empty script.
+// ImportCSV imports delimited rows in parameterized batches. Nil Columns
+// retains ordinal mapping and legacy empty-field-to-NULL conversion. Explicit
+// mapping permits reordering/ignored fields, keeps empty strings and decodes
+// \N as NULL (leading doubled backslashes escape a literal backslash).
+// Double quotes are the supported enclosure, including when left unspecified.
+// Progress reports only successfully applied batches, total=0 until EOF.
+// Earlier batches remain applied if parsing, execution or cancellation fails.
 func (d *MysqlDriver) ImportCSV(ctx context.Context, db, table string, r io.Reader, opts driver.CSVImportOpts, progress func(done, total int64)) error {
 	if db == "" {
 		return fmt.Errorf("import csv: %w: database name", sqlgen.ErrEmptyIdentifier)
@@ -153,6 +126,14 @@ func (d *MysqlDriver) ImportCSV(ctx context.Context, db, table string, r io.Read
 	if err != nil {
 		return fmt.Errorf("import csv into %s.%s: %w", db, table, err)
 	}
+	fieldCount := len(columns)
+	if opts.Columns != nil {
+		fieldCount = len(opts.Columns)
+	}
+	columns, indexes, err := driver.CSVImportColumns(columns, opts.Columns)
+	if err != nil {
+		return err
+	}
 	names := make([]string, len(columns))
 	for i, c := range columns {
 		names[i] = c.Name
@@ -172,7 +153,7 @@ func (d *MysqlDriver) ImportCSV(ctx context.Context, db, table string, r io.Read
 
 	cr := csv.NewReader(r)
 	cr.Comma = []rune(sep)[0]
-	cr.FieldsPerRecord = len(names)
+	cr.FieldsPerRecord = fieldCount
 
 	if opts.SkipHeader {
 		if _, err := cr.Read(); err != nil {
@@ -184,6 +165,7 @@ func (d *MysqlDriver) ImportCSV(ctx context.Context, db, table string, r io.Read
 	}
 
 	args := make([]any, 0, csvBatchSize*len(names))
+	committed := 0
 	nrows := 0      // data rows read so far
 	batchFirst := 0 // 1-based row number of the current batch's first row
 	flush := func(lastRow int) error {
@@ -198,11 +180,18 @@ func (d *MysqlDriver) ImportCSV(ctx context.Context, db, table string, r io.Read
 		if _, err := d.db.ExecContext(ctx, query, args...); err != nil {
 			return fmt.Errorf("import csv: rows %d-%d: %w", batchFirst, lastRow, err)
 		}
+		committed = lastRow
+		if progress != nil {
+			progress(int64(committed), 0)
+		}
 		args = args[:0]
 		return nil
 	}
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("import csv: %w", err)
+		}
 		rec, err := cr.Read()
 		if err == io.EOF {
 			break
@@ -214,15 +203,32 @@ func (d *MysqlDriver) ImportCSV(ctx context.Context, db, table string, r io.Read
 		if batchFirst == 0 {
 			batchFirst = nrows
 		}
-		for _, f := range rec {
+		for i, source := range indexes {
+			f := rec[source]
+			if opts.Columns != nil {
+				if f == `\N` {
+					args = append(args, nil)
+				} else {
+					if strings.HasPrefix(f, `\\`) {
+						f = f[1:]
+					}
+					if isBinaryTypeName(columns[i].Type) && strings.HasPrefix(f, "0x") {
+						binary, err := hex.DecodeString(f[2:])
+						if err != nil {
+							return fmt.Errorf("import csv: row %d column %s: invalid binary hex: %w", nrows, columns[i].Name, err)
+						}
+						args = append(args, binary)
+						continue
+					}
+					args = append(args, f)
+				}
+				continue
+			}
 			if f == "" {
 				args = append(args, nil)
 			} else {
 				args = append(args, f)
 			}
-		}
-		if progress != nil && nrows%progressRowStride == 0 {
-			progress(int64(nrows), int64(nrows))
 		}
 		if nrows-batchFirst+1 == csvBatchSize {
 			if err := flush(nrows); err != nil {
@@ -234,13 +240,11 @@ func (d *MysqlDriver) ImportCSV(ctx context.Context, db, table string, r io.Read
 	if nrows == 0 {
 		return fmt.Errorf("import csv: empty input")
 	}
-	// The final row always reports, even when it is not on the stride —
-	// the done == total contract of a successful import.
-	if progress != nil && nrows%progressRowStride != 0 {
-		progress(int64(nrows), int64(nrows))
-	}
 	if err := flush(nrows); err != nil {
 		return err
+	}
+	if progress != nil {
+		progress(int64(committed), int64(committed))
 	}
 	return nil
 }

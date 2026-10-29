@@ -6,15 +6,18 @@ import { NAlert, NButton, NCheckbox, NNotificationProvider, NSelect } from 'naiv
 
 import type { TableInfo } from '../api/types'
 import i18n from '../i18n'
+import { transferWorkflowMessages } from '../i18n/transferWorkflows'
+i18n.global.mergeLocaleMessage('en', transferWorkflowMessages.en)
+i18n.global.mergeLocaleMessage('ru', transferWorkflowMessages.ru)
 import { useSessionStore } from '../stores/session'
 import { useCatalogStore } from '../stores/catalog'
 import ExportView from './ExportView.vue'
 
 // The view reads the :db route param only.
-const routeState = vi.hoisted(() => ({ db: 'mydb' }))
+const routeState = vi.hoisted(() => ({ db: 'mydb', table: '' }))
 
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { db: routeState.db } }),
+  useRoute: () => ({ params: { db: routeState.db }, query: { table: routeState.table } }),
 }))
 
 const tables: TableInfo[] = [
@@ -71,6 +74,7 @@ describe('ExportView', () => {
 
   beforeEach(() => {
     routeState.db = 'mydb'
+    routeState.table = ''
     pinia = createPinia()
     setActivePinia(pinia)
     const session = useSessionStore()
@@ -211,17 +215,27 @@ describe('ExportView', () => {
     await flushPromises()
 
     const body = JSON.parse(String(fetchMock.mock.calls[1][1].body))
-    expect(body).toEqual({ format: 'sql', tables: [], includeViews: true, dropIfExists: true, ifNotExists: false, gzip: true })
+    expect(body).toEqual({ format: 'sql', mode: 'all', tables: [], includeViews: true, dropIfExists: true, ifNotExists: false, gzip: true })
   })
 
   it('warns and disables submit when the selected db differs from the login db', async () => {
     routeState.db = 'otherdb'
+    useSessionStore().sessionInfo!.driver.flavor = 'postgres'
     const wrapper = mountView(pinia)
     await flushPromises()
 
     const view = wrapper.findComponent(ExportView)
     expect(view.findComponent(NAlert).text()).toContain('текущей базы подключения')
     expect(view.findComponent(NButton).attributes('disabled')).toBeDefined()
+  })
+
+  it('preselects a route table and permits another MySQL database', async () => {
+    routeState.table = 'orders'; routeState.db = 'otherdb'
+    const wrapper = mountView(pinia); await flushPromises()
+    const view = wrapper.findComponent(ExportView)
+    expect(view.find('[data-testid="export-submit"]').attributes('disabled')).toBeUndefined()
+    await view.find('[data-testid="export-submit"]').trigger('click'); await flushPromises()
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1].body)).tables).toEqual(['orders'])
   })
 
   it('reports a server error envelope as a notification', async () => {

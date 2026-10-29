@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1914,12 +1915,9 @@ func TestExportHandler_MidstreamErrorAbortsDownload(t *testing.T) {
 	}
 }
 
-// TestExportHandler_RequiresLoginDatabase pins that export is bound to
-// the session's login database: the driver dumps its own login database,
-// so a session without one has nothing to dump and a {db} different from
-// the login database would silently dump the wrong schema. Both are 400
-// before any header is written.
-func TestExportHandler_RequiresLoginDatabase(t *testing.T) {
+// TestExportHandler_PostgresRequiresLoginDatabase checks that PostgreSQL
+// rejects missing/mismatched login databases before sending export headers.
+func TestExportHandler_PostgresRequiresLoginDatabase(t *testing.T) {
 	tests := []struct {
 		name    string
 		loginDB string
@@ -1929,7 +1927,7 @@ func TestExportHandler_RequiresLoginDatabase(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			fake := &stubDriver{info: driver.DriverInfo{Name: "FakeDB"}, exportOutput: "DUMP-DATA"}
+			fake := &stubDriver{info: driver.DriverInfo{Name: "PostgreSQL", Flavor: "postgres"}, exportOutput: "DUMP-DATA"}
 			h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, fake))
 			srv := httptest.NewServer(h)
 			t.Cleanup(srv.Close)
@@ -2100,7 +2098,7 @@ func TestImportHandler_Multipart(t *testing.T) {
 			t.Errorf("ImportCSV call = %+v, want appdb.users with the raw file content", call)
 		}
 		want := driver.CSVImportOpts{Separator: ";", Enclosure: "\"", SkipHeader: true}
-		if call.opts != want {
+		if !reflect.DeepEqual(call.opts, want) {
 			t.Errorf("ImportCSV opts = %+v, want %+v", call.opts, want)
 		}
 	})

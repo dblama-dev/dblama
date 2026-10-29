@@ -26,9 +26,10 @@ interface ImportLine {
 export interface ImportCsvOptions {
   /** Target table; required for csv (validated by the caller). */
   table: string
+  columns?: string[]
   /** Field separator, a single character; "" keeps the server default. */
   separator: string
-  /** Field-enclosing character (e.g. `"`); "" means none. */
+  /** Double-quote enclosure; "" retains the same standard parsing. */
   enclosure: string
   /** Discard the file's first record (column-name header). */
   skipHeader: boolean
@@ -48,6 +49,7 @@ export function buildImportFormData(type: 'sql' | 'csv', file: File, csv: Import
     form.append('separator', csv.separator)
     form.append('enclosure', csv.enclosure)
     form.append('skipHeader', String(csv.skipHeader))
+    if (csv.columns !== undefined) form.append('columns', JSON.stringify(csv.columns))
   }
   form.append('file', file)
   return form
@@ -65,6 +67,7 @@ export async function runImport(
   form: FormData,
   onProgress: (done: number, total: number) => void,
   schema: string | null = null,
+  signal?: AbortSignal,
 ): Promise<void> {
   let res: Response
   try {
@@ -73,8 +76,10 @@ export async function runImport(
       headers: { 'X-Requested-With': 'XMLHttpRequest' },
       credentials: 'same-origin',
       body: form,
+      signal,
     })
-  } catch {
+  } catch (err) {
+    if (signal?.aborted || (err instanceof Error && err.name === 'AbortError')) throw err
     throw new ApiError('internal', 'network error', 0)
   }
 
@@ -101,22 +106,32 @@ export async function runImport(
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
-  for (;;) {
-    const { value, done } = await reader.read()
-    if (value !== undefined) buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    // An unterminated tail chunk is a partial line — keep it buffered
-    // unless the stream has ended.
-    buffer = done ? '' : (lines.pop() ?? '')
-    for (const line of lines) {
-      if (line.trim() === '') continue
-      const record = JSON.parse(line) as ImportLine
-      if (record.error !== undefined && record.error !== '') {
-        throw new Error(record.error)
+  try {
+    for (;;) {
+      signal?.throwIfAborted()
+      const { value, done } = await reader.read()
+      signal?.throwIfAborted()
+      if (value !== undefined) buffer += decoder.decode(value, { stream: true })
+      if (done) buffer += decoder.decode()
+      const lines = buffer.split('\n')
+      // An unterminated tail chunk is a partial line — keep it buffered
+      // unless the stream has ended.
+      buffer = done ? '' : (lines.pop() ?? '')
+      for (const line of lines) {
+        if (line.trim() === '') continue
+        const record = JSON.parse(line) as ImportLine
+        onProgress(record.done ?? 0, record.total ?? 0)
+        if (record.error !== undefined && record.error !== '') {
+          throw new Error(record.error)
+        }
+        if (record.ok === true) return
       }
-      onProgress(record.done ?? 0, record.total ?? 0)
-      if (record.ok === true) return
+      if (done) break
     }
-    if (done) break
+    throw new Error('Import stream ended before terminal success; earlier changes may have been applied')
+  } finally {
+    // Release the stream on errors, cancellation and terminal success.
+    if (typeof reader.cancel === 'function') await reader.cancel().catch(() => {})
+    if (typeof reader.releaseLock === 'function') reader.releaseLock()
   }
 }

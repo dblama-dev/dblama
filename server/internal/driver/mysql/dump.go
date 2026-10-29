@@ -82,7 +82,7 @@ func (d *MysqlDriver) ShowCreateTable(ctx context.Context, db, table string) (st
 // VALUES tuples per emitted INSERT statement.
 const exportBatchSize = 100
 
-// Export streams a dump of the driver's login database to w. The sql
+// Export streams a dump of the selected database to w using qualified reads. The sql
 // format writes one section per table — an optional DROP TABLE IF
 // EXISTS, the server's CREATE statement (rewritten with IF NOT EXISTS
 // when requested) and the data as batched multi-row INSERTs. Statements
@@ -101,6 +101,13 @@ const exportBatchSize = 100
 // which on a live table may skip or duplicate rows — a documented
 // caveat, the same one mysqldump has.
 func (d *MysqlDriver) Export(ctx context.Context, db string, req driver.ExportRequest, w io.Writer) error {
+	if req.Mode != "" && req.Mode != "all" && req.Mode != "structure" && req.Mode != "data" {
+		return fmt.Errorf("export: invalid mode %q", req.Mode)
+	}
+	if req.Mode == "structure" && req.Query != nil {
+		return fmt.Errorf("export: structure mode cannot export a row selection")
+	}
+
 	// Validate the format before any byte is written: an unknown
 	// format fails without touching w.
 	var sep rune
@@ -116,11 +123,6 @@ func (d *MysqlDriver) Export(ctx context.Context, db string, req driver.ExportRe
 
 	if db == "" {
 		return fmt.Errorf("export: no database to dump")
-	}
-	if db != d.loginDB {
-		// The pool is bound to the login database; the handler already
-		// validates this, the driver refuses rather than dump the wrong one.
-		return fmt.Errorf("export: database %s is not the login database %s", db, d.loginDB)
 	}
 
 	// Resolve the table list: sql with an empty list dumps the whole
@@ -152,15 +154,37 @@ func (d *MysqlDriver) Export(ctx context.Context, db string, req driver.ExportRe
 		}
 	}
 
+	if isSQL && req.Mode == "data" {
+		infos, err := d.ListTables(ctx, db)
+		if err != nil {
+			return err
+		}
+		catalog := map[string]bool{}
+		for _, info := range infos {
+			catalog[info.Name] = info.IsView
+		}
+		base := make([]string, 0, len(tables))
+		for _, name := range tables {
+			isView, ok := catalog[name]
+			if !ok {
+				return fmt.Errorf("export: table %q not found", name)
+			}
+			if !isView {
+				base = append(base, name)
+			}
+		}
+		tables = base
+	}
+
 	var views []dump.View
-	if isSQL && req.Query == nil && req.IncludeViews {
+	if isSQL && req.Query == nil && req.IncludeViews && req.Mode != "data" {
 		var err error
 		tables, views, err = d.prepareViewExport(ctx, db, req.Tables)
 		if err != nil {
 			return fmt.Errorf("export views: %w", err)
 		}
 	}
-	if isSQL && req.Query == nil {
+	if isSQL && req.Query == nil && req.Mode != "data" {
 		var err error
 		tables, _, err = d.prepareTableExport(ctx, db, tables)
 		if err != nil {
@@ -251,7 +275,7 @@ func (d *MysqlDriver) exportSQL(ctx context.Context, db string, tables []string,
 		return err
 	}
 
-	if req.DropIfExists && len(tables) > 0 {
+	if req.Mode != "data" && req.DropIfExists && len(tables) > 0 {
 		names := make([]string, len(tables))
 		for i, name := range tables {
 			names[i] = sqlgen.QuoteIdent(name)
@@ -262,25 +286,29 @@ func (d *MysqlDriver) exportSQL(ctx context.Context, db string, tables []string,
 	}
 
 	for _, table := range tables {
-		create, err := d.ShowCreateTable(ctx, db, table)
-		if err != nil {
-			return fmt.Errorf("export: %w", err)
-		}
-		if req.IfNotExists {
-			create, err = addIfNotExists(create)
+		if req.Mode != "data" {
+			create, err := d.ShowCreateTable(ctx, db, table)
 			if err != nil {
 				return fmt.Errorf("export: %w", err)
 			}
+			if req.IfNotExists {
+				create, err = addIfNotExists(create)
+				if err != nil {
+					return fmt.Errorf("export: %w", err)
+				}
+			}
+
+			section := "-- Table: " + sqlgen.QuoteIdent(table) + "\n"
+			section += create + ";\n\n"
+			if err := writeExport(out, section); err != nil {
+				return err
+			}
 		}
 
-		section := "-- Table: " + sqlgen.QuoteIdent(table) + "\n"
-		section += create + ";\n\n"
-		if err := writeExport(out, section); err != nil {
-			return err
-		}
-
-		if err := d.exportTableSQLRows(ctx, db, table, out); err != nil {
-			return err
+		if req.Mode != "structure" {
+			if err := d.exportTableSQLRows(ctx, db, table, out); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

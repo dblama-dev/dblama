@@ -61,6 +61,9 @@ var _ driver.Driver = (*MysqlDriver)(nil)
 // verifies it with a ping, and detects flavor and version. Connection
 // errors never contain the DSN or the password.
 func Connect(ctx context.Context, cfg driver.ConnConfig) (driver.Driver, error) {
+	if cfg.Port == "" {
+		cfg.Port = "3306"
+	}
 	db, err := sql.Open("mysql", DSN(cfg, cfg.Password))
 	if err != nil {
 		return nil, fmt.Errorf("open mysql connection to %s:%s: %w", cfg.Host, cfg.Port, err)
@@ -81,7 +84,7 @@ func Connect(ctx context.Context, cfg driver.ConnConfig) (driver.Driver, error) 
 	flavor, version := ParseFlavor(versionRaw)
 	return &MysqlDriver{
 		db:      db,
-		info:    driver.DriverInfo{Name: serverName(flavor), Flavor: flavor, Version: version, User: cfg.User, Host: cfg.Host},
+		info:    driver.DriverInfo{Name: serverName(flavor), Flavor: flavor, Version: version, User: cfg.User, Host: cfg.Host, Port: cfg.Port},
 		caps:    capsFor(flavor, version),
 		loginDB: cfg.Database,
 	}, nil
