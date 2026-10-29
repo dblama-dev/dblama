@@ -29,7 +29,7 @@
         <div class="row-modal__choices">
           <n-select v-if="mode === 'insert' && !col.generated && (col.default != null || col.autoIncrement)" class="row-modal__mode" :value="fields[col.name]?.mode === 'default' ? 'default' : 'value'" :options="[{ label: text.value, value: 'value' }, { label: text.default, value: 'default' }]" size="small" :disabled="saving" @update:value="setMode(col.name, $event)" />
           <n-checkbox v-if="col.nullable && !col.generated" class="row-modal__null" size="small" :checked="fields[col.name]?.mode === 'null'" :disabled="saving" @update:checked="setMode(col.name, $event ? 'null' : 'value')">{{ t('row.nullToggle') }}</n-checkbox>
-          <span v-else-if="!col.generated" class="row-modal__required" :title="text.required">{{ t('row.required') }}</span>
+          <span v-else-if="!col.generated && fields[col.name]?.mode !== 'default'" class="row-modal__required" :title="text.required">NOT NULL</span>
         </div>
       </div>
     </div>

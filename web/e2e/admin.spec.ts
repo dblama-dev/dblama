@@ -124,7 +124,7 @@ test('SQL view creation, source editing, result queries, and cancelled deletion'
     await objects.getByLabel('Filter objects', { exact: true }).fill(view)
     await objects.locator(`[data-object="${view}"]`).click()
     await expect(objects.getByLabel('Name', { exact: true })).toBeDisabled()
-    await expect(objects.getByLabel('SQL source', { exact: true })).toHaveValue(new RegExp(table))
+    await expect(objects.getByLabel('SQL source', { exact: true })).toHaveText(new RegExp(table))
     await objects.getByLabel('SQL source', { exact: true }).fill(`CREATE OR REPLACE VIEW ${view} AS SELECT id, label FROM ${table}`)
     await objects.getByRole('button', { name: 'Save SQL source', exact: true }).click()
     await expect(objects.getByRole('status')).toHaveText('Saved.')

@@ -76,6 +76,7 @@ test('existing table can disable autoincrement and retain its primary key', asyn
     await page.goto(tablePath(db, table, 'structure'))
     const toggle = page.getByTestId('struct-row').first().locator('.struct-field--autoinc input[type=radio], .struct-field--autoinc [role=checkbox]')
     const button = page.getByTestId('struct-row').first().locator('.struct-field--autoinc .n-radio, .struct-field--autoinc .n-checkbox')
+    await page.getByTestId('struct-row').first().locator('summary').click()
     await button.click()
     const saved = page.waitForResponse(r => r.request().method() === 'PUT' && new URL(r.url()).pathname.endsWith(`/tables/${table}`))
     await page.getByTestId('struct-save').click()

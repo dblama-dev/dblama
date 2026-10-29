@@ -1,0 +1,183 @@
+import { test, expect, runSQL, tablePath, dbPath, selectOption } from './fixtures'
+
+test('default insert, empty NOT NULL edit, filters survive tabs and reload', async ({page,db,engine,prefix}) => {
+ const table = `${prefix}_ux`
+ try {
+  await runSQL(page, `CREATE TABLE ${table} (id ${engine === 'postgres' ? 'SERIAL' : 'INT AUTO_INCREMENT'} PRIMARY KEY, title VARCHAR(80) NOT NULL DEFAULT '', note TEXT, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP); INSERT INTO ${table}(title,note) VALUES ('','first'),('second','other');`)
+  await page.goto(tablePath(db,table))
+  const rows=page.locator('.datagrid tbody tr')
+  await rows.first().getByRole('button',{name:'Edit',exact:true}).click()
+  const modal=page.locator('.row-modal')
+  const note=modal.locator('.row-modal__field').filter({has:page.locator('.row-modal__label').getByText('note',{exact:true})})
+  await note.locator('textarea').fill('updated')
+  await modal.getByRole('button',{name:'Save',exact:true}).click()
+  await expect(modal).toBeHidden()
+  await expect(rows.first()).toContainText('updated')
+  await page.getByRole('button',{name:'Add row',exact:true}).click()
+  await modal.getByRole('button',{name:'Save',exact:true}).click()
+  await expect(modal).toBeHidden()
+  await expect(rows).toHaveCount(3)
+  await selectOption(page,page.locator('.datagrid__filter-column'),'title')
+  await page.locator('.datagrid__filter-value input').fill('second')
+  await page.getByRole('button',{name:'Apply',exact:true}).click()
+  await expect(rows).toHaveCount(1)
+  await page.locator('.n-tabs-tab').filter({hasText:/^Structure$/}).click()
+  await expect(page.getByTestId('struct-row')).toHaveCount(4)
+  await page.locator('.n-tabs-tab').filter({hasText:/^Data$/}).click()
+  await expect(page.locator('.datagrid__filter-value input')).toHaveValue('second')
+  await expect(rows).toHaveCount(1)
+  await page.reload()
+  await expect(page.locator('.datagrid__filter-value input')).toHaveValue('second')
+  await expect(rows).toHaveCount(1)
+ } finally { await runSQL(page,`DROP TABLE IF EXISTS ${table}`) }
+})
+
+test('SQL draft, saved query and keyboard execution survive navigation',async({page,db})=>{
+ await page.goto(dbPath(db,'console'))
+ const editor=page.locator('.cm-content')
+ await editor.fill('SELECT 42 AS retained_draft')
+ await page.getByRole('link',{name:db,exact:true}).first().click()
+ await page.getByRole('link',{name:'SQL query',exact:true}).first().click()
+ await expect(editor).toHaveText('SELECT 42 AS retained_draft')
+ await page.locator('.console__bookmarks summary').click()
+ await page.getByRole('textbox',{name:'Query name',exact:true}).fill('answer')
+ await page.getByRole('button',{name:'Save query',exact:true}).click()
+ await expect(page.getByRole('status')).toHaveText('Query saved locally.')
+ await editor.press('Control+Enter')
+ await expect(page.locator('.resultgrid tbody td')).toHaveText('42')
+ await page.reload()
+ await expect(editor).toHaveText('SELECT 42 AS retained_draft')
+ await page.locator('.console__bookmarks summary').click()
+ await editor.fill('SELECT 0')
+ await selectOption(page,page.locator('.console__bookmarks .n-select'),'answer')
+ await expect(editor).toHaveText('SELECT 42 AS retained_draft')
+})
+
+test('database search treats wildcard characters literally and opens persistent filter',async({page,db,prefix})=>{
+ const table=`${prefix}_search`
+ try {
+  await runSQL(page,`CREATE TABLE ${table}(id INTEGER PRIMARY KEY, title VARCHAR(100)); INSERT INTO ${table} VALUES (1,'100%_!literal'),(2,'100percent other');`)
+  await page.goto(dbPath(db,'search'))
+  await page.getByRole('checkbox',{name:table,exact:true}).check()
+  await page.getByLabel('Text to find',{exact:true}).fill('%_!')
+  await page.locator('.search-view').getByRole('button',{name:'Search',exact:true}).click()
+  await expect(page.getByRole('status')).toContainText('Search complete')
+  await expect(page.locator('[data-search-result]')).toHaveCount(1)
+  await page.locator('[data-search-result]').click()
+  await expect(page.locator('.datagrid tbody tr')).toHaveCount(1)
+  await expect(page.locator('.datagrid tbody tr')).toContainText('100%_!literal')
+  await expect(page.locator('.datagrid__filter-value input')).toHaveValue('%_!')
+  await page.reload()
+  await expect(page.locator('.datagrid tbody tr')).toHaveCount(1)
+ } finally {await runSQL(page,`DROP TABLE IF EXISTS ${table}`)}
+})
+
+test('default-only insert and confirmed bulk edit work through real endpoints',async({page,db,engine,prefix})=>{
+ const table=`${prefix}_defaults`
+ try {
+  await runSQL(page,`CREATE TABLE ${table}(id ${engine==='postgres'?'SERIAL':'INT AUTO_INCREMENT'} PRIMARY KEY, title VARCHAR(100) NOT NULL DEFAULT '', created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);`)
+  await page.goto(tablePath(db,table))
+  for(let n=0;n<2;n++) {
+   await page.getByRole('button',{name:'Add row',exact:true}).click()
+   await page.locator('.row-modal').getByRole('button',{name:'Save',exact:true}).click()
+   await expect(page.locator('.row-modal')).toBeHidden()
+  }
+  const rows=page.locator('.datagrid tbody tr')
+  await expect(rows).toHaveCount(2)
+  await rows.nth(0).getByRole('checkbox').check()
+  await rows.nth(1).getByRole('checkbox').check()
+  await page.getByRole('button',{name:/^Edit selected/}).click()
+  const title=page.locator('.bulk-edit__field').filter({has:page.getByRole('checkbox',{name:'title',exact:true})})
+  await title.getByRole('checkbox',{name:'title',exact:true}).check()
+  await title.locator('input[type=text]').fill('bulk value')
+  await page.getByTestId('bulk-review').click()
+  await expect(page.locator('.bulk-edit__confirmation')).toContainText('2 captured rows')
+  await page.getByTestId('bulk-confirm').click()
+  await expect(page.locator('.bulk-edit__progress')).toHaveText('2 of 2 rows applied.')
+  await page.getByRole('button',{name:'Close',exact:true}).click()
+  await expect(rows.nth(0)).toContainText('bulk value')
+  await expect(rows.nth(1)).toContainText('bulk value')
+ }finally{await runSQL(page,`DROP TABLE IF EXISTS ${table}`)}
+})
+
+test('CSV mapping, export modes and confirmed table operations',async({page,db,prefix})=>{
+ const table=`${prefix}_transfer`
+ try{
+  await runSQL(page,`CREATE TABLE ${table}(id INTEGER PRIMARY KEY, title VARCHAR(100) NOT NULL, note VARCHAR(100) NOT NULL DEFAULT 'server default');`)
+  await page.goto(`${dbPath(db,'import')}?table=${table}`)
+  await page.locator('.n-radio').filter({has:page.locator('input[value="csv"]')}).click()
+  await page.getByRole('checkbox',{name:'Skip the header row',exact:true}).check()
+  await page.getByTestId('import-file').setInputFiles({name:'mapped.csv',mimeType:'text/csv',buffer:Buffer.from('unused,title,id\nignore,Unicode Анна,7\n')})
+  await expect(page.getByTestId('csv-preview')).toBeVisible()
+  await selectOption(page,page.getByTestId('csv-map-0'),'Ignore this field')
+  await selectOption(page,page.getByTestId('csv-map-1'),'title')
+  await selectOption(page,page.getByTestId('csv-map-2'),'id')
+  await page.getByTestId('import-submit').click()
+  await expect(page.getByText('Import finished',{exact:true})).toBeVisible()
+  await page.goto(tablePath(db,table))
+  await expect(page.locator('.datagrid tbody tr')).toContainText('Unicode Анна')
+  await expect(page.locator('.datagrid tbody tr')).toContainText('server default')
+  await page.goto(`${dbPath(db,'export')}?table=${table}`)
+  const {readFile}=await import('node:fs/promises')
+  for(const [label,hasDDL,hasData] of [['Structure only',true,false],['Data only',false,true]] as const){
+   await selectOption(page,page.getByTestId('export-mode'),label)
+   const download=page.waitForEvent('download')
+   await page.getByTestId('export-submit').click()
+   const file=await download
+   const sql=await readFile((await file.path())!,'utf8')
+   expect(/CREATE TABLE/i.test(sql)).toBe(hasDDL)
+   expect(/INSERT INTO/i.test(sql)).toBe(hasData)
+  }
+  await page.goto(tablePath(db,table,'operations'))
+  await page.getByRole('button',{name:'Truncate',exact:true}).click()
+  await expect(page.locator('.n-popconfirm')).toContainText(table)
+  await page.locator('.n-popconfirm').getByRole('button',{name:'Cancel',exact:true}).click()
+  await page.getByRole('button',{name:'Truncate',exact:true}).click()
+  await page.locator('.n-popconfirm').getByRole('button',{name:/^(Confirm|OK)$/}).click()
+  await page.locator('.n-tabs-tab').filter({hasText:/^Data$/}).click()
+  await expect(page.locator('.datagrid__pagination').first()).toContainText('Total: 0')
+  await page.locator('.n-tabs-tab').filter({hasText:/^Operations$/}).click()
+  await page.getByRole('button',{name:'Drop',exact:true}).click()
+  await page.locator('.n-popconfirm').getByRole('button',{name:/^(Confirm|OK)$/}).click()
+  await expect(page).toHaveURL(dbPath(db))
+ }finally{await runSQL(page,`DROP TABLE IF EXISTS ${table}`)}
+})
+
+test('long values stay compact and open an exact full-value inspector',async({page,db,prefix})=>{
+ const table=`${prefix}_long`
+ const value='Long text with spaces and Unicode Юникод. '.repeat(80)
+ try{
+  await runSQL(page,`CREATE TABLE ${table}(id INTEGER PRIMARY KEY,note TEXT); INSERT INTO ${table} VALUES(1,'${value}');`)
+  await page.goto(tablePath(db,table))
+  const row=page.locator('.datagrid tbody tr').first()
+  await expect(row).toBeVisible()
+  const box=await row.boundingBox()
+  expect(box!.height).toBeLessThan(100)
+  await row.getByRole('button',{name:'Preview: note',exact:true}).click()
+  await expect(page.getByTestId('grid-inspected-value')).toHaveText(value)
+  await page.getByRole('button',{name:'close',exact:true}).click()
+  await expect(page.getByTestId('grid-inspected-value')).toBeHidden()
+ }finally{await runSQL(page,`DROP TABLE IF EXISTS ${table}`)}
+})
+
+test('account form buttons submit create and rename',async({page,engine,prefix})=>{
+ test.skip(engine==='postgres','Account management is a MySQL/MariaDB capability')
+ const account=`${prefix}_u`, renamed=`${prefix}_r`
+ try{
+  await page.goto('/server/users')
+  const form=page.locator('[data-test=create-form]')
+  await form.locator('[data-test=create-user]').fill(account)
+  await form.locator('[data-test=create-host]').fill('localhost')
+  await form.locator('[data-test=create-password]').fill('e2e-account-password')
+  await form.getByRole('button',{name:'Create account',exact:true}).click()
+  const row=page.locator('.admin-view tbody tr').filter({has:page.getByRole('cell',{name:account,exact:true})})
+  await expect(row).toBeVisible()
+  await row.getByRole('button',{name:'Edit',exact:true}).click()
+  const rename=page.locator('.editor fieldset').filter({has:page.locator('legend').getByText('Rename account',{exact:true})})
+  await rename.locator('input').first().fill(renamed)
+  await rename.getByRole('button',{name:'Save',exact:true}).click()
+  await expect(page.locator('.admin-view tbody tr').filter({has:page.getByRole('cell',{name:renamed,exact:true})})).toBeVisible()
+ }finally{
+  for(const name of [account,renamed]) await page.request.delete(`/api/users/${name}?host=localhost`,{headers:{'X-Requested-With':'XMLHttpRequest'}})
+ }
+})

@@ -277,10 +277,10 @@ const gridColumns = computed<DataTableColumns<GridRow>>(() => {
     cols.push({
       title: t('grid.actions'),
       key: '__actions',
-      width: 240,
+      width: 300,
       fixed: 'right',
       render: (row) =>
-        h('span', { class: 'datagrid__row-actions' }, [
+        h('span', { class: 'datagrid__row-actions', style: { whiteSpace: 'nowrap' } }, [
           h(NButton, {size:'tiny',quaternary:true,'data-testid':'row-inspect',disabled:props.columns.length===0,onClick:()=>inspectCell(row,props.columns[0]!.name)}, {default:()=>t('grid.preview')}),
           h(NButton, { size: 'tiny', quaternary: true, 'data-testid': 'copy-row', onClick: () => emit('copy-row', row) }, { default: () => t('grid.copy') }),
           h(

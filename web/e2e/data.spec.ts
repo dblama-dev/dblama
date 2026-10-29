@@ -78,6 +78,7 @@ test('row CRUD preserves NULL, empty text and exact numeric values', async ({ pa
     await checkCell(byId(page, 1), 3, exactId)
     await checkCell(byId(page, 1), 4, exactAmount)
     await byId(page, 1).getByRole('button', { name: 'Delete', exact: true }).click()
+    await confirm(page)
     await expect(gridRows(page)).toHaveCount(0)
   } finally {
     await runSQL(page, `DROP TABLE IF EXISTS ${table}`)
@@ -140,7 +141,7 @@ test('filters, sorting and page deletion keep results and exported selection con
     await expect(page.locator('.datagrid__filter-value input')).toBeDisabled()
     await page.getByRole('button', { name: 'Apply', exact: true }).click()
     await expect(gridRows(page)).toHaveCount(13)
-    await page.locator('.datagrid__filters').getByRole('button', { name: '+', exact: true }).click()
+    await page.locator('.datagrid__filters').getByRole('button', { name: 'Add filter', exact: true }).click()
     await selectOption(page, page.locator('.datagrid__filter-column').nth(1), 'id')
     await selectOption(page, page.locator('.datagrid__filter-op').nth(1), '>=')
     await page.locator('.datagrid__filter-value input').nth(1).fill('20')
@@ -159,13 +160,14 @@ test('filters, sorting and page deletion keep results and exported selection con
 
     await page.getByRole('button', { name: 'Reset', exact: true }).click()
     await expect(gridRows(page)).toHaveCount(26)
-    await selectOption(page, page.locator('.n-pagination .n-select'), '25 / page')
+    await selectOption(page, page.locator('.n-pagination .n-select').first(), '25 / page')
     await expect(gridRows(page)).toHaveCount(25)
-    await page.locator('.n-pagination-item').filter({ hasText: /^2$/ }).click()
+    await page.locator('.n-pagination-item').filter({ hasText: /^2$/ }).first().click()
     await expect(gridRows(page)).toHaveCount(1)
     await gridRows(page).first().getByRole('button', { name: 'Delete', exact: true }).click()
+    await confirm(page)
     await expect(gridRows(page)).toHaveCount(25)
-    await expect(page.locator('.n-pagination-item--active')).toHaveText('1')
+    await expect(page.locator('.n-pagination-item--active').first()).toHaveText('1')
   } finally {
     await runSQL(page, `DROP TABLE IF EXISTS ${table}`)
   }
