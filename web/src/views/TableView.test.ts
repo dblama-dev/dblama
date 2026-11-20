@@ -10,6 +10,7 @@ import TableView from './TableView.vue'
 import DataGrid from '../components/DataGrid.vue'
 import RowModal from '../components/RowModal.vue'
 import BulkEdit from '../components/BulkEdit.vue'
+import * as download from '../lib/download'
 vi.mock('../api/client', () => ({ api: vi.fn(), ApiError: class extends Error {} }))
 let route = reactive({ params: { db: 'app', t: 'items' }, query: {} as Record<string, string> })
 const push = vi.fn()
@@ -109,6 +110,49 @@ it('restores route filters and browser back into the visible grid',async()=>{
  route.query={filters:JSON.stringify([{column:'name',op:'=',value:'back'}])}; await flushPromises()
  expect(wrapper.findComponent(DataGrid).props('filters')).toEqual([{column:'name',op:'=',value:'back'}]);wrapper.unmount()
 })
+it('restores linked columns in table order and exports exactly those columns with active filters and sort', async () => {
+ const filters = [{ column: 'id', op: '>', value: '5' }]
+ const sort = { column: 'id', desc: true }
+ route.query = { schema: 'part one', filters: JSON.stringify(filters), sort: JSON.stringify(sort), columns: JSON.stringify(['label, %', 'gone', 'label, %']) }
+ const pinia = createPinia()
+ const catalog = useCatalogStore(pinia)
+ catalog.schemaAware = true
+ catalog.schema = 'part one'
+ const columns = [{ name: 'id', type: 'int', nullable: false }, { name: 'label, %', type: 'text', nullable: true }]
+ vi.mocked(api).mockImplementation(async (_method, path) => path.includes('/pk') ? { columns: ['id'] } : { columns, rows: [[6, 'row']], totalRows: 1 })
+ const exportFile = vi.spyOn(download, 'downloadExport').mockResolvedValue()
+ const wrapper = mount(defineComponent({ setup: () => () => h(NNotificationProvider, null, { default: () => h(TableView) }) }), { global: { plugins: [pinia, i18n], stubs: { DataGrid: true, RowModal: true } } })
+ try {
+  await flushPromises()
+  const grid = wrapper.findComponent(DataGrid)
+  expect(grid.props('visibleColumns')).toEqual(['label, %'])
+  grid.vm.$emit('export-selection')
+  await flushPromises()
+  expect(exportFile).toHaveBeenCalledWith('app', {
+   format: 'csv', tables: ['items'],
+   query: { columns: ['label, %'], filters: [{ column: 'id', operator: '>', value: '5' }], sorts: [sort] },
+  }, 'part one')
+  vi.mocked(api).mockClear()
+  push.mockImplementation(async ({ query }) => { route.query = query })
+  grid.vm.$emit('update:visible-columns', ['id'])
+  await flushPromises()
+  expect(route.query.columns).toBe('["id"]')
+  expect(grid.props('visibleColumns')).toEqual(['id'])
+  grid.vm.$emit('update:visible-columns', columns.map(column => column.name))
+  await flushPromises()
+  expect(route.query).toEqual({ schema: 'part one', filters: JSON.stringify(filters), sort: JSON.stringify(sort) })
+  route.query = { ...route.query, columns: '["missing"]' }
+  await flushPromises()
+  expect(grid.props('visibleColumns')).toEqual([])
+  grid.vm.$emit('export-selection')
+  await flushPromises()
+  expect(exportFile).toHaveBeenCalledTimes(1)
+  expect(api).not.toHaveBeenCalled()
+ } finally {
+  exportFile.mockRestore()
+  wrapper.unmount()
+ }
+})
 it('waits for full defaults before opening insert',async()=>{
  const wrapper=openTable();await flushPromises()
  let finish!: (value:unknown)=>void
@@ -174,14 +218,16 @@ it('does not open insert if leaving a dirty structure section was cancelled',asy
  expect(wrapper.findComponent(RowModal).props('show')).toBe(false)
  expect(api).not.toHaveBeenCalled();wrapper.unmount()
 })
-it('opens top-level insert while data is already the active route',async()=>{
- route.query={view:'data'}
- const wrapper=openTable();await flushPromises()
- push.mockResolvedValueOnce({type:16})
- const add=wrapper.findAll('button').find(button=>button.text()==='Вставить')!
- await add.trigger('click');await flushPromises()
- expect(wrapper.findComponent(RowModal).props('show')).toBe(true)
- expect(push).not.toHaveBeenCalled();wrapper.unmount()
+it('opens insert from the data grid without a duplicate toolbar action or navigation', async () => {
+  route.query = { view: 'data' }
+  const wrapper = openTable()
+  await flushPromises()
+  expect(wrapper.get('.table-view__actions').text()).not.toContain('Вставить')
+  wrapper.getComponent(DataGrid).vm.$emit('add-row')
+  await flushPromises()
+  expect(wrapper.getComponent(RowModal).props('show')).toBe(true)
+  expect(push).not.toHaveBeenCalled()
+  wrapper.unmount()
 })
 
 it('rejects a bulk-edit event when reliable primary keys are unavailable', async () => {

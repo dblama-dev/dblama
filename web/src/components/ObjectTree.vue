@@ -1,14 +1,21 @@
 <template>
   <div class="object-tree">
+    <div class="object-tree__scope">
+      <label :for="databaseID">{{ t('sideNavigation.database') }}</label>
+      <router-link v-if="db" :to="catalog.path(`/db/${encodeURIComponent(db)}`)">{{ t('sideNavigation.overview') }}</router-link>
+    </div>
     <n-select
       size="small"
+      filterable data-testid="database-select" :input-props="{ id: databaseID, 'aria-label': t('sideNavigation.database') }"
       :value="db"
       :options="dbOptions"
       :loading="dbsLoading"
       :placeholder="t('tree.selectDb')"
       @update:value="selectDb"
     />
-    <n-select v-if="session.sessionInfo?.caps.schemas" data-testid="schema-select"
+    <label v-if="session.sessionInfo?.caps.schemas" :for="schemaID" class="object-tree__scope">{{ t('sideNavigation.schema') }}</label>
+    <n-select v-if="session.sessionInfo?.caps.schemas" data-testid="schema-select" filterable
+      :input-props="{ id: schemaID, 'aria-label': t('sideNavigation.schema') }"
       :value="catalog.schema" :options="schemas.map(name => ({ label: name, value: name }))"
       :placeholder="t('tree.schemas')" size="small" @update:value="selectSchema" />
     <n-alert v-if="schemaError" type="error">{{ schemaError }}</n-alert>
@@ -20,11 +27,16 @@
       <n-button :disabled="!sequenceName.trim() || sequenceIncrement === 0 || sequenceBusy" :loading="sequenceBusy"
         data-testid="sequence-create" @click="addSequence">{{ t(sequenceEditName ? 'row.save' : 'tree.newSequence') }}</n-button>
     </n-modal>
+    <nav v-if="db" class="object-tree__tools" :aria-label="t('sideNavigation.tools')">
+      <router-link v-for="action in ['console', 'search', 'import', 'export']" :key="action" :to="catalog.path(`/db/${encodeURIComponent(db)}/${action}`)">
+        {{ t(`navigationWorkflows.${action}`) }}
+      </router-link>
+    </nav>
     <n-input
       v-model:value="search"
       size="small"
       clearable
-      :placeholder="t('tree.search')"
+      :placeholder="t('sideNavigation.filter')" :input-props="{ 'aria-label': t('sideNavigation.filter') }"
     />
     <n-alert v-if="dbsError" type="error" :title="t('tree.selectDb')">
       {{ dbsError }}
@@ -32,9 +44,7 @@
     <n-alert v-else-if="catalog.error" type="error" :title="t('tree.loadFailed')">
       {{ catalog.error }}
     </n-alert>
-    <div v-if="favoriteTables.length" class="object-tree__saved"><strong>{{ t('navigationWorkflows.favorites') }}</strong><n-button v-for="item in favoriteTables" :key="`${item.db}.${item.schema}.${item.table}`" text size="small" @click="openSaved(item)">{{ item.db }} / {{ item.table }}<span v-if="item.schema"> ({{ item.schema }})</span></n-button></div>
-    <details v-if="recentTables.length" class="object-tree__saved"><summary>{{ t('navigationWorkflows.recent') }}</summary><n-button v-for="item in recentTables" :key="`${item.db}.${item.schema}.${item.table}`" text size="small" @click="openSaved(item)">{{ item.db }} / {{ item.table }}<span v-if="item.schema"> ({{ item.schema }})</span></n-button></details>
-    <n-tree
+    <div class="object-tree__list"><n-tree
       v-if="!dbsError && !catalog.error"
       block-line
       :data="treeData"
@@ -43,12 +53,23 @@
       :disabled="catalog.loading"
       @update:expanded-keys="onExpand"
       @update:selected-keys="onSelect"
-    />
+    /></div>
+    <footer class="object-tree__footer">
+      <details v-if="favoriteTables.length" class="object-tree__saved" data-favorite-tables>
+        <summary>{{ t('navigationWorkflows.favorites') }} ({{ favoriteTables.length }})</summary>
+        <n-button v-for="item in favoriteTables" :key="JSON.stringify(item)" text size="small" @click="openSaved(item)">{{ item.db }} / {{ item.table }}<span v-if="item.schema"> ({{ item.schema }})</span></n-button>
+      </details>
+      <details v-if="recentTables.length" class="object-tree__saved">
+        <summary>{{ t('navigationWorkflows.recent') }} ({{ recentTables.length }})</summary>
+        <n-button v-for="item in recentTables" :key="JSON.stringify(item)" text size="small" @click="openSaved(item)">{{ item.db }} / {{ item.table }}<span v-if="item.schema"> ({{ item.schema }})</span></n-button>
+      </details>
+      <slot name="footer" :db="db" />
+    </footer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, ref, watch } from 'vue'
+import { computed, h, onMounted, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { NAlert, NButton, NInput, NSelect, NTree, NModal, NInputNumber, NPopconfirm, type TreeOption } from 'naive-ui'
@@ -67,6 +88,8 @@ const catalog = useCatalogStore()
 const session = useSessionStore()
 
 const db = ref<string | null>(null)
+const databaseID = useId()
+const schemaID = useId()
 const routeDatabase = computed(() => typeof route.params.db === 'string' ? route.params.db : null)
 const dbs = ref<string[]>([])
 const dbsLoading = ref(false)
@@ -117,12 +140,7 @@ async function removeSequence(name: string): Promise<void> {
   } catch (err) { schemaError.value = String(err) }
 }
 const search = ref('')
-const selectedKeys = computed(() => {
- const table=route.params.t
- if(typeof table==='string')return [`table:${table}`]
- const action=route.path?.split('/').pop()
- return action && ['console','export','import'].includes(action) ? [action] : []
-})
+const selectedKeys = computed(() => typeof route.params.t === 'string' ? [`table:${route.params.t}`] : [])
 const preferences=ref(readNavigationPreferences())
 const scope=computed(()=>JSON.stringify(session.sessionInfo?{driver:session.sessionInfo.driver.flavor,host:session.sessionInfo.driver.host,port:session.sessionInfo.driver.port ?? '',user:session.sessionInfo.driver.user}:{}))
 const recentTables=computed(()=>preferences.value.recent.filter(item=>item.scope===scope.value))
@@ -139,8 +157,6 @@ watch([()=>route.params.db,()=>route.params.t,()=>catalog.schema,scope],()=>{
  if(typeof route.params.db!=='string'||typeof route.params.t!=='string'||route.params.t==='_new')return
  preferences.value=rememberTable(preferences.value,{...location(route.params.t),db:route.params.db});persistPreferences()
 },{immediate:true})
-// The database node starts expanded so tables are visible right away;
-// the user can collapse it afterwards.
 const expandedKeys = ref<string[]>([])
 
 const dbOptions = computed(() => dbs.value.map((name) => ({ label: name, value: name })))
@@ -199,10 +215,9 @@ async function selectDb(next: string): Promise<void> {
   await catalog.fetchTables(next)
 }
 
-/** The db node and its groups start expanded; unknown keys are ignored by
- * the tree (e.g. group:views when the database has no views). */
+/** Keep the current database's table and view groups expanded on first load. */
 function defaultExpandedKeys(database: string | null): string[] {
-  return database === null ? [] : [`db:${database}`, 'group:tables', 'group:views', 'group:schemas', 'group:sequences']
+  return database === null ? [] : ['group:tables', 'group:views', 'group:sequences']
 }
 
 function onExpand(keys: string[]): void {
@@ -217,22 +232,6 @@ const treeData = computed<TreeOption[]>(() => {
     .filter((table) => !table.isView && matches(table.name))
     .map((table) => ({ key: `table:${table.name}`, label: table.name, isLeaf: true, suffix:()=>h(NButton,{size:'tiny',quaternary:true,'aria-label':`${t('navigationWorkflows.favorite')}: ${table.name}`,onClick:(event:MouseEvent)=>{event.stopPropagation();favorite(table.name)}},{default:()=>isFavorite(table.name)?'★':'☆'}) }))
   const children: TreeOption[] = [
-    {
-      // The SQL console of this database; a plain leaf, no search filter.
-      key: 'console',
-      label: t('tree.console'),
-      isLeaf: true,
-    },
-    {
-      key: 'export',
-      label: t('tree.export'),
-      isLeaf: true,
-    },
-    {
-      key: 'import',
-      label: t('tree.import'),
-      isLeaf: true,
-    },
     {
       key: 'group:tables',
       label: t('tree.tables'),
@@ -260,9 +259,6 @@ const treeData = computed<TreeOption[]>(() => {
   if (views.length > 0) {
     children.push({ key: 'group:views', label: t('tree.views'), children: views })
   }
-  if (session.sessionInfo?.caps.schemas) {
-    children.push({ key: 'group:schemas', label: t('tree.schemas'), children: schemas.value.filter(matches).map(name => ({ key: `schema:${name}`, label: name, isLeaf: true })) })
-  }
   if (session.sessionInfo?.caps.sequences) {
     children.push({ key: 'group:sequences', label: t('tree.sequences'),
       suffix: () => h(NButton, { size: 'tiny', quaternary: true, 'data-testid': 'tree-add-sequence', title: t('tree.newSequence'), onClick: (e: MouseEvent) => { e.stopPropagation(); sequenceEditName.value = null; sequenceName.value = ''; sequenceIncrement.value = 1; sequenceRestart.value = null; sequenceDialog.value = true } }, { default: () => '+' }),
@@ -274,18 +270,13 @@ const treeData = computed<TreeOption[]>(() => {
       })),
     })
   }
-  return [{ key: `db:${db.value}`, label: db.value, children }]
+  return children
 })
 
 function onSelect(keys: string[]): void {
   const key = keys[keys.length - 1]
   if (key === undefined || db.value === null) return
   // Identifiers may contain %, ? or #; vue-router decodes params on read.
-  if (key === 'console' || key === 'export' || key === 'import') {
-    void router.push(catalog.path(`/db/${encodeURIComponent(db.value)}/${key}`))
-    return
-  }
-  if (key.startsWith('schema:')) { void selectSchema(key.slice(7)); return }
   if (!key.startsWith('table:')) return
   const table = key.slice('table:'.length)
   void router.push(catalog.path(`/db/${encodeURIComponent(db.value)}/table/${encodeURIComponent(table)}`))
@@ -302,8 +293,21 @@ function createTable(): void {
 .object-tree {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
+  height: 100%;
+  box-sizing: border-box;
+  overflow: auto;
+  gap: 6px;
+  padding: 8px 12px;
 }
-.object-tree__saved{display:flex;flex-direction:column;gap:4px;}.object-tree__saved .n-button{justify-content:flex-start;max-width:100%;overflow:hidden;}
+.object-tree > * { flex-shrink: 0; }
+.object-tree__scope { display: flex; align-items: baseline; justify-content: space-between; font-size: 12px; }
+.object-tree__scope label { font-weight: 600; }
+.object-tree__scope a, .object-tree__tools a { color: inherit; }
+.object-tree__tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px; padding: 2px 0 4px; }
+.object-tree__tools a { padding: 3px 7px; border-radius: 3px; background: #8881; font-size: 13px; text-decoration: none; }
+.object-tree__tools a:hover, .object-tree__tools a:focus-visible, .object-tree__tools .router-link-exact-active { background: #8883; text-decoration: underline; }
+.object-tree__list { flex: 1 0 80px; min-height: 80px; overflow: auto; }
+.object-tree__footer { border-top: 1px solid #8884; padding-top: 5px; max-height: 38vh; overflow: auto; }
+.object-tree__saved summary { cursor: pointer; padding: 4px 0; }
+.object-tree__saved .n-button { display: flex; max-width: 100%; justify-content: flex-start; text-align: start; padding: 3px 8px; white-space: normal; overflow-wrap: anywhere; }
 </style>

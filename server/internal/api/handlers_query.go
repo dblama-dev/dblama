@@ -9,8 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/hitslab/db-manager/server/internal/driver"
 	"github.com/hitslab/db-manager/server/internal/session"
 	"github.com/hitslab/db-manager/server/internal/sqlgen"
@@ -66,7 +64,7 @@ func (s *apiServer) handleQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess, _ := session.FromContext(r.Context())
-	results, err := sess.Driver.ExecSQL(r.Context(), chi.URLParam(r, "db"), req.SQL, req.QueryID,
+	results, err := sess.Driver.ExecSQL(r.Context(), pathParam(r, "db"), req.SQL, req.QueryID,
 		driver.ExecOpts{MaxRows: req.MaxRows, TimeoutSec: req.TimeoutSec})
 	if err != nil {
 		writeDriverErr(w, err)
@@ -84,7 +82,7 @@ func (s *apiServer) handleQuery(w http.ResponseWriter, r *http.Request) {
 // from the client's point of view.
 func (s *apiServer) handleCancel(w http.ResponseWriter, r *http.Request) {
 	sess, _ := session.FromContext(r.Context())
-	_ = sess.Driver.CancelQuery(r.Context(), chi.URLParam(r, "queryID"))
+	_ = sess.Driver.CancelQuery(r.Context(), pathParam(r, "queryID"))
 	w.WriteHeader(http.StatusNoContent)
 }
 

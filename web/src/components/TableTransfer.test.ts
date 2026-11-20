@@ -27,3 +27,30 @@ it('offers other databases and copies the selected tables before reporting chang
  expect(request).toHaveBeenCalledWith('POST','/api/databases/source/table-transfer',{action:'copy',tables:['items'],targetDB:'target'})
  expect(w.emitted('changed')).toHaveLength(1);expect(w.text()).toContain('Open target database')
 })
+
+it('keeps the destination link when the catalog clears the selection after transfer', async () => {
+ const w = await setup()
+ const button = (text:string) => w.findAllComponents(NButton).find(b => b.text() === text)
+ await button('Copy tables')!.trigger('click'); await flushPromises()
+ w.getComponent(NSelect).vm.$emit('update:value','target'); await flushPromises()
+ await w.get('form').trigger('submit'); await flushPromises()
+ await w.setProps({tables:[]})
+ expect(button('Copy tables')).toBeUndefined()
+ expect(button('Move tables')).toBeUndefined()
+ expect(button('Open target database')).toBeDefined()
+ w.unmount()
+})
+
+it('keeps the submitted transfer destination if selection changes during the request', async () => {
+ const w = await setup()
+ const copy = w.findAllComponents(NButton).find(b => b.text() === 'Copy tables')!
+ await copy.trigger('click'); await flushPromises()
+ w.getComponent(NSelect).vm.$emit('update:value','target'); await flushPromises()
+ let finish!: (value: unknown) => void
+ request.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+ await w.get('form').trigger('submit')
+ await w.setProps({tables:[]})
+ finish(undefined); await flushPromises()
+ expect(w.text()).toContain('Open target database')
+ w.unmount()
+})

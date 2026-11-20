@@ -6,8 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/hitslab/db-manager/server/internal/driver"
 	"github.com/hitslab/db-manager/server/internal/session"
 	"github.com/hitslab/db-manager/server/internal/sqlgen"
@@ -116,7 +114,7 @@ func (s *apiServer) handleRowsSelect(w http.ResponseWriter, r *http.Request) {
 	}
 	q.Limit, q.Offset = limit, offset
 
-	page, err := sess.Driver.SelectRows(r.Context(), chi.URLParam(r, "db"), chi.URLParam(r, "table"), q)
+	page, err := sess.Driver.SelectRows(r.Context(), pathParam(r, "db"), pathParam(r, "table"), q)
 	if err != nil {
 		writeDriverErr(w, err)
 		return
@@ -148,7 +146,7 @@ func (s *apiServer) handleRowInsert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := sess.Driver.InsertRow(r.Context(), chi.URLParam(r, "db"), chi.URLParam(r, "table"), vals); err != nil {
+	if err := sess.Driver.InsertRow(r.Context(), pathParam(r, "db"), pathParam(r, "table"), vals); err != nil {
 		writeDriverErr(w, err)
 		return
 	}
@@ -178,8 +176,8 @@ func (s *apiServer) handleRowUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := sess.Driver.UpdateRow(r.Context(), chi.URLParam(r, "db"),
-		chi.URLParam(r, "table"), req.Where, req.Values); err != nil {
+	if err := sess.Driver.UpdateRow(r.Context(), pathParam(r, "db"),
+		pathParam(r, "table"), req.Where, req.Values); err != nil {
 		writeDriverErr(w, err)
 		return
 	}
@@ -199,8 +197,8 @@ func (s *apiServer) handleRowDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := sess.Driver.DeleteRows(r.Context(), chi.URLParam(r, "db"),
-		chi.URLParam(r, "table"), req.Where); err != nil {
+	if err := sess.Driver.DeleteRows(r.Context(), pathParam(r, "db"),
+		pathParam(r, "table"), req.Where); err != nil {
 		writeDriverErr(w, err)
 		return
 	}
@@ -234,7 +232,7 @@ func (s *apiServer) handleRowsUpsert(w http.ResponseWriter, r *http.Request) {
 	if !decodeBinaryValues(w, r, req.Rows...) {
 		return
 	}
-	if err := sess.Driver.UpsertRows(r.Context(), chi.URLParam(r, "db"), chi.URLParam(r, "table"), req.Rows); err != nil {
+	if err := sess.Driver.UpsertRows(r.Context(), pathParam(r, "db"), pathParam(r, "table"), req.Rows); err != nil {
 		writeDriverErr(w, err)
 		return
 	}
@@ -263,7 +261,7 @@ func (s *apiServer) handleRowsCopy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := copier.CopyRows(r.Context(), chi.URLParam(r, "db"), chi.URLParam(r, "table"), req.Where); err != nil {
+	if err := copier.CopyRows(r.Context(), pathParam(r, "db"), pathParam(r, "table"), req.Where); err != nil {
 		writeDriverErr(w, err)
 		return
 	}

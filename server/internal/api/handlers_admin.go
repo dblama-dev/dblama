@@ -57,7 +57,7 @@ func adminMonitorDriver(w http.ResponseWriter, r *http.Request) (driver.MonitorM
 	return d, true
 }
 func adminAccount(w http.ResponseWriter, r *http.Request) (driver.UserAccount, bool) {
-	a := driver.UserAccount{User: chi.URLParam(r, "user"), Host: r.URL.Query().Get("host")}
+	a := driver.UserAccount{User: pathParam(r, "user"), Host: r.URL.Query().Get("host")}
 	if a.User == "_anonymous" && r.URL.Query().Get("anonymous") == "true" {
 		a.User = ""
 	}
@@ -101,7 +101,12 @@ func (s *apiServer) adminPrivileges(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	WriteJSON(w, 200, map[string]any{"privileges": catalog})
+	patterns, err := d.DatabasePatternsSupported(r.Context())
+	if err != nil {
+		writeDriverErr(w, err)
+		return
+	}
+	WriteJSON(w, 200, map[string]any{"privileges": catalog, "databasePatterns": patterns})
 }
 func (s *apiServer) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 	d, ok := adminUsersDriver(w, r)
@@ -234,8 +239,7 @@ func (s *apiServer) adminGrant(w http.ResponseWriter, r *http.Request) {
 }
 func adminValidGrant(w http.ResponseWriter, catalog []driver.PrivilegeInfo, g driver.GrantChange) bool {
 	scope := g.Scope
-	valid := !strings.ContainsRune(scope.Database+scope.Table, 0) && ((scope.Level == "global" && scope.Database == "" && scope.Table == "") || (scope.Level == "database" && scope.Database != "" && scope.Table == "") || (scope.Level == "table" && scope.Database != "" && scope.Table != ""))
-	if !valid || len(g.Privileges) == 0 && !g.GrantOption {
+	if !scope.Valid() || len(g.Privileges) == 0 && !g.GrantOption {
 		WriteErr(w, 400, ErrBadRequest("invalid privilege scope or empty privileges"))
 		return false
 	}
@@ -244,7 +248,7 @@ func adminValidGrant(w http.ResponseWriter, catalog []driver.PrivilegeInfo, g dr
 		for _, entry := range catalog {
 			if p == entry.Name {
 				for _, level := range entry.Levels {
-					if level == scope.Level {
+					if level == scope.PrivilegeLevel() {
 						found = true
 					}
 				}
@@ -277,7 +281,7 @@ func (s *apiServer) adminKill(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	id, err := strconv.ParseInt(pathParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
 		WriteErr(w, 400, ErrBadRequest("invalid process id"))
 		return

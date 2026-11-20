@@ -76,7 +76,7 @@ func (s *apiServer) handleDatabaseDrop(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	name := chi.URLParam(r, "db")
+	name := pathParam(r, "db")
 	if !validDatabaseInput(name) {
 		WriteErr(w, 400, ErrBadRequest("database name is required"))
 		return
@@ -98,7 +98,7 @@ func (s *apiServer) handleDatabaseRename(w http.ResponseWriter, r *http.Request)
 	if !decodeDatabaseBody(w, r, &req) {
 		return
 	}
-	source := chi.URLParam(r, "db")
+	source := pathParam(r, "db")
 	if !validDatabaseInput(req.Name) || !validDatabaseInput(source) || req.Name == source {
 		WriteErr(w, 400, ErrBadRequest("a different database name is required"))
 		return
@@ -124,7 +124,7 @@ func (s *apiServer) handleTableTransfer(w http.ResponseWriter, r *http.Request) 
 	if !decodeDatabaseBody(w, r, &req) {
 		return
 	}
-	source := chi.URLParam(r, "db")
+	source := pathParam(r, "db")
 	if !validDatabaseInput(source) || !validDatabaseInput(req.TargetDB) || source == req.TargetDB || len(req.Tables) == 0 || (req.Action != "copy" && req.Action != "move") {
 		WriteErr(w, 400, ErrBadRequest("select tables, a different target database, and copy or move"))
 		return

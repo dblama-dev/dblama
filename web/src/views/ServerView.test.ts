@@ -52,6 +52,20 @@ describe('ServerView', () => {
     vi.unstubAllGlobals()
   })
 
+  it('filters the database catalog without a second request and links to account management', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(res(200, { databases }))
+    vi.stubGlobal('fetch', fetchMock)
+    useSessionStore().sessionInfo = { ...sessionInfo, caps: { ...sessionInfo.caps, users: true } }
+    const wrapper = mount(ServerView, { global: { plugins: [i18n] } })
+    await flushPromises()
+    expect(wrapper.get('a[href="/server/users"]').text()).toContain('Пользователи')
+    await wrapper.get('input[type=search]').setValue('MYD')
+    expect(wrapper.find('a[href="/db/mydb"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('information_schema')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
   it('lists databases with human-readable sizes and refetches on refresh', async () => {
     const fetchMock = vi.fn().mockResolvedValue(res(200, { databases }))
     vi.stubGlobal('fetch', fetchMock)

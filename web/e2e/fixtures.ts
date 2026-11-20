@@ -36,7 +36,10 @@ export async function runSQL(page: Page, sql: string): Promise<void> {
   const match = new URL(page.url()).pathname.match(/^\/db\/([^/]+)/)
   const db = match ? decodeURIComponent(match[1]!) : database
   await page.goto(dbPath(db, 'console'))
-  await page.locator('.cm-content').fill(sql)
+  // Replace a restored draft through CodeMirror's selection and input handlers.
+  const editor = page.locator('.cm-content')
+  await editor.press('ControlOrMeta+a')
+  await page.keyboard.insertText(sql)
   const response = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/query'))
   await page.getByRole('button', { name: 'Execute all', exact: true }).click()
   const result = await response

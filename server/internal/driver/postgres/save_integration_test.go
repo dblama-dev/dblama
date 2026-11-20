@@ -44,6 +44,37 @@ func execSaveDDL(t *testing.T, drv driver.Driver, stmt string) {
 	}
 }
 
+func TestSaveTable_GeneratedNullabilityAndAdjacentEdits(t *testing.T) {
+	cfg := startDB(t)
+	drv := connectOK(t, cfg)
+	ctx := context.Background()
+	execSaveDDL(t, drv, "CREATE TABLE generated_edits (a integer NOT NULL, b integer GENERATED ALWAYS AS (a + 1) STORED, note varchar(10))")
+	execSaveDDL(t, drv, "INSERT INTO generated_edits(a, note) VALUES (7, 'saved')")
+	for _, nullable := range []bool{false, true} {
+		def, err := drv.TableDef(ctx, testDatabase, "generated_edits")
+		if err != nil {
+			t.Fatal(err)
+		}
+		def.Columns[1].Nullable = nullable
+		def.Columns[2].Length = "20"
+		if err := drv.SaveTable(ctx, testDatabase, "generated_edits", def); err != nil {
+			t.Fatal(err)
+		}
+		got, err := drv.TableDef(ctx, testDatabase, "generated_edits")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Columns[1].Nullable != nullable || got.Columns[1].Generated != "STORED" || got.Columns[2].Length != "20" {
+			t.Fatalf("columns after saving nullable=%v: %+v", nullable, got.Columns)
+		}
+	}
+	var a, b int
+	var note string
+	if err := drv.(*PostgresDriver).db.QueryRowContext(ctx, "SELECT a, b, note FROM generated_edits").Scan(&a, &b, &note); err != nil || a != 7 || b != 8 || note != "saved" {
+		t.Fatalf("stored row: a=%d, b=%d, note=%q, err=%v", a, b, note, err)
+	}
+}
+
 // TestSaveTable_CreateAndReadBack creates a table from a desired state
 // whose id carries BOTH serial markers exactly as the read path reports
 // them (AutoIncrement plus the nextval default) and verifies the

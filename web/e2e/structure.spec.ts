@@ -9,6 +9,49 @@ async function addColumn(page: Page, name: string, type: string) {
   return row
 }
 
+test('column defaults and ordered enum values survive a structure edit', async ({ page, db, prefix, engine }) => {
+  const table = `${prefix}_defaults`
+  const choices = engine === 'postgres' ? '' : ", choice ENUM('', 'red, green', ' later') DEFAULT 'red, green'"
+  try {
+    await runSQL(page, `CREATE TABLE ${table} (id INT PRIMARY KEY, blank VARCHAR(30) NOT NULL DEFAULT '', keyword VARCHAR(30) NOT NULL DEFAULT 'NULL', note VARCHAR(30)${choices});`)
+    await page.goto(tablePath(db, table, 'structure'))
+    const rows = page.getByTestId('struct-row')
+    await expect(rows.nth(1).locator('summary')).toContainText("DEFAULT ''")
+    await expect(rows.nth(2).locator('summary')).toContainText("DEFAULT 'NULL'")
+    const note = rows.nth(3)
+    await note.locator('summary').click()
+    await note.getByLabel('Default', { exact: true }).selectOption('literal')
+    if (engine !== 'postgres') {
+      const choice = rows.nth(4)
+      await choice.locator('summary').click()
+      await expect(choice.getByLabel('Value 1', { exact: true })).toHaveValue('')
+      await expect(choice.getByLabel('Value 2', { exact: true })).toHaveValue('red, green')
+      await expect(choice.getByLabel('Value 3', { exact: true })).toHaveValue(' later')
+      await choice.getByRole('button', { name: 'Add value' }).click()
+      await choice.getByLabel('Value 4', { exact: true }).fill('new, choice')
+      await page.getByRole('button', { name: 'Add column after keyword', exact: true }).click()
+      const added = rows.nth(3)
+      await expect(added.locator('.struct-field--name input')).toBeFocused()
+      await added.locator('.struct-field--name input').fill('middle_col')
+      await selectOption(page, added.locator('.struct-field--type .n-select'), 'int')
+    } else {
+      await expect(page.getByRole('button', { name: /Add column after/ })).toHaveCount(0)
+    }
+    const saved = page.waitForResponse(r => r.request().method() === 'PUT' && new URL(r.url()).pathname.endsWith(`/tables/${table}`))
+    await page.getByTestId('struct-save').click()
+    const response = await saved
+    expect(response.ok(), response.ok() ? undefined : await response.text()).toBe(true)
+    await page.reload()
+    if (engine !== 'postgres') await expect(rows.nth(3).locator('summary')).toContainText('middle_col')
+    await expect(rows.nth(engine === 'postgres' ? 3 : 4).locator('summary')).toContainText("DEFAULT ''")
+    const enumCondition = engine === 'postgres' ? '' : " AND choice = 'red, green'"
+    await runSQL(page, `INSERT INTO ${table} (id) VALUES (1); SELECT 'defaults applied' AS result FROM ${table} WHERE blank = '' AND keyword = 'NULL' AND note = ''${enumCondition};`)
+    await expect(page.locator('.resultgrid').last()).toContainText('defaults applied')
+  } finally {
+    await runSQL(page, `DROP TABLE IF EXISTS ${table};`)
+  }
+})
+
 test('autoincrement can be turned off by a second click and moved to another column', async ({ page, db }) => {
   await page.goto(tablePath(db, '_new', 'structure'))
   const first = await addColumn(page, 'id', 'int')

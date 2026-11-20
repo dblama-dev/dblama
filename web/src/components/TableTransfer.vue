@@ -1,11 +1,11 @@
 <template>
-  <section v-if="enabled" class="table-transfer">
+  <section v-if="enabled && (tables.length || completedTarget)" class="table-transfer">
     <n-space>
-      <n-button :disabled="!tables.length || busy" @click="open('copy')">{{ t('databaseOps.copyTables') }}</n-button>
-      <n-button :disabled="!tables.length || busy" @click="open('move')">{{ t('databaseOps.moveTables') }}</n-button>
+      <n-button v-if="tables.length" :disabled="busy" @click="open('copy')">{{ t('databaseOps.copyTables') }}</n-button>
+      <n-button v-if="tables.length" :disabled="busy" @click="open('move')">{{ t('databaseOps.moveTables') }}</n-button>
       <n-button v-if="completedTarget" @click="openTarget">{{ t('databaseOps.openTarget') }}</n-button>
     </n-space>
-    <form v-if="action" class="transfer-form" @submit.prevent="submit">
+    <form v-if="action && tables.length" class="transfer-form" @submit.prevent="submit">
       <span>{{ t('databaseOps.selected', { count: tables.length }) }}</span>
       <n-alert type="info">{{ t('databaseOps.transferWarning') }}</n-alert>
       <n-alert v-if="action === 'move'" type="warning">{{ t('databaseOps.moveWarning') }}</n-alert>
@@ -43,6 +43,9 @@ const busy = ref(false)
 const error = ref('')
 const targetID = `transfer-target-${useId()}`
 watch(() => props.db, () => { action.value = null; target.value = null; completedTarget.value = '' })
+watch(() => props.tables.length, count => {
+  if (!count) { action.value = null; target.value = null }
+})
 async function open(mode: 'copy' | 'move'): Promise<void> {
   action.value = mode; error.value = ''; target.value = null; loading.value = true
   try {
@@ -54,10 +57,16 @@ async function open(mode: 'copy' | 'move'): Promise<void> {
 async function submit(): Promise<void> {
   if (!enabled.value || !target.value || !action.value || busy.value || !props.tables.length) return
   busy.value = true; error.value = ''
+  const source = props.db
+  const destination = target.value
   try {
-    await transferTables(props.db, [...props.tables], target.value, action.value)
-    completedTarget.value = target.value; action.value = null; emit('changed')
-  } catch (e) { error.value = e instanceof Error ? e.message : String(e) }
+    await transferTables(source, [...props.tables], destination, action.value)
+    if (props.db === source) {
+      completedTarget.value = destination
+      action.value = null
+      emit('changed')
+    }
+  } catch (e) { if (props.db === source) error.value = e instanceof Error ? e.message : String(e) }
   finally { busy.value = false }
 }
 function openTarget(): void { void router.push({ name: 'db', params: { db: completedTarget.value } }) }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"github.com/go-chi/chi/v5"
 	"github.com/hitslab/db-manager/server/internal/driver"
@@ -20,6 +21,7 @@ type adminStub struct {
 	password string
 	killed   int64
 	disabled bool
+	patterns bool
 	grant    *driver.GrantChange
 }
 
@@ -85,6 +87,35 @@ func TestAdminCapabilityAndValidation(t *testing.T) {
 func (d *adminStub) PrivilegeCatalog() []driver.PrivilegeInfo {
 	return []driver.PrivilegeInfo{{Name: "SELECT", Levels: []string{"global", "database", "table"}}}
 }
+func (d *adminStub) DatabasePatternsSupported(context.Context) (bool, error) { return d.patterns, nil }
+
+func TestAdminDatabasePatternGrants(t *testing.T) {
+	d := &adminStub{stubDriver: &stubDriver{}}
+	for _, enabled := range []bool{false, true} {
+		d.patterns = enabled
+		w := adminRequest(t, d, "GET", "/users/privileges", "")
+		var catalog struct {
+			Privileges       []driver.PrivilegeInfo `json:"privileges"`
+			DatabasePatterns *bool                  `json:"databasePatterns"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &catalog); err != nil || w.Code != 200 || len(catalog.Privileges) == 0 || catalog.DatabasePatterns == nil || *catalog.DatabasePatterns != d.patterns {
+			t.Fatalf("privilege catalog for patterns=%t: %d %s", d.patterns, w.Code, w.Body.String())
+		}
+	}
+	want := driver.GrantScope{Level: "databasePattern", Database: `alice\_%`}
+	for _, method := range []string{"POST", "DELETE"} {
+		d.grant = nil
+		w := adminRequest(t, d, method, "/users/alice/grants?host=%25", `{"scope":{"level":"databasePattern","database":"alice\\_%"},"privileges":["SELECT"]}`)
+		if w.Code != 204 || d.grant == nil || d.grant.Scope != want {
+			t.Fatalf("pattern %s: %d %s", method, w.Code, w.Body.String())
+		}
+	}
+	d.patterns = false
+	w := adminRequest(t, d, "POST", "/users/alice/grants?host=%25", `{"scope":{"level":"databasePattern","database":"alice\\_%"},"privileges":["SELECT"]}`)
+	if w.Code != 400 || !strings.Contains(w.Body.String(), "partial_revokes") {
+		t.Fatalf("disabled pattern: %d %s", w.Code, w.Body.String())
+	}
+}
 func TestAdminRejectsUnsafeGrantPayloads(t *testing.T) {
 	d := &adminStub{stubDriver: &stubDriver{}}
 	for _, body := range []string{
@@ -93,6 +124,9 @@ func TestAdminRejectsUnsafeGrantPayloads(t *testing.T) {
 		`{"scope":{"level":"column","database":"app","table":"t"},"privileges":["SELECT"]}`,
 		`{"scope":{"level":"global","database":"app"},"privileges":["SELECT"]}`,
 		`{"scope":{"level":"global"},"privileges":[]}`,
+		`{"scope":{"level":"databasePattern","database":"foo\\_%","table":"bar"},"privileges":["SELECT"]}`,
+		`{"scope":{"level":"databasePattern","database":"foo\\_bar"},"privileges":["SELECT"]}`,
+		`{"scope":{"level":"databasePattern","database":"test%\\q"},"privileges":["SELECT"]}`,
 	} {
 		w := adminRequest(t, d, "POST", "/users/alice/grants?host=%25", body)
 		if w.Code != 400 {
@@ -124,6 +158,9 @@ func (d *adminStub) DropUser(_ context.Context, a driver.UserAccount) error {
 	return nil
 }
 func (d *adminStub) GrantPrivileges(_ context.Context, _ driver.UserAccount, g driver.GrantChange) error {
+	if g.Scope.Level == driver.DatabasePatternLevel && !d.patterns {
+		return driver.ErrDatabasePatternsDisabled
+	}
 	d.grant = &g
 	return nil
 }

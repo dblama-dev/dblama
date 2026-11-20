@@ -37,8 +37,8 @@ test('SQL draft, saved query and keyboard execution survive navigation',async({p
  await page.goto(dbPath(db,'console'))
  const editor=page.locator('.cm-content')
  await editor.fill('SELECT 42 AS retained_draft')
- await page.getByRole('link',{name:db,exact:true}).first().click()
- await page.getByRole('link',{name:'SQL query',exact:true}).first().click()
+ await page.locator('.app-sidebar').getByRole('link',{name:'Overview',exact:true}).click()
+ await page.getByRole('navigation',{name:'Database tools'}).getByRole('link',{name:'SQL query',exact:true}).click()
  await expect(editor).toHaveText('SELECT 42 AS retained_draft')
  await page.locator('.console__bookmarks summary').click()
  await page.getByRole('textbox',{name:'Query name',exact:true}).fill('answer')
@@ -161,24 +161,42 @@ test('long values stay compact and open an exact full-value inspector',async({pa
  }finally{await runSQL(page,`DROP TABLE IF EXISTS ${table}`)}
 })
 
-test('account form buttons submit create and rename',async({page,engine,prefix})=>{
- test.skip(engine==='postgres','Account management is a MySQL/MariaDB capability')
- const account=`${prefix}_u`, renamed=`${prefix}_r`
- try{
-  await page.goto('/server/users')
-  const form=page.locator('[data-test=create-form]')
-  await form.locator('[data-test=create-user]').fill(account)
-  await form.locator('[data-test=create-host]').fill('localhost')
-  await form.locator('[data-test=create-password]').fill('e2e-account-password')
-  await form.getByRole('button',{name:'Create account',exact:true}).click()
-  const row=page.locator('.admin-view tbody tr').filter({has:page.getByRole('cell',{name:account,exact:true})})
-  await expect(row).toBeVisible()
-  await row.getByRole('button',{name:'Edit',exact:true}).click()
-  const rename=page.locator('.editor fieldset').filter({has:page.locator('legend').getByText('Rename account',{exact:true})})
-  await rename.locator('input').first().fill(renamed)
-  await rename.getByRole('button',{name:'Save',exact:true}).click()
-  await expect(page.locator('.admin-view tbody tr').filter({has:page.getByRole('cell',{name:renamed,exact:true})})).toBeVisible()
- }finally{
-  for(const name of [account,renamed]) await page.request.delete(`/api/users/${name}?host=localhost`,{headers:{'X-Requested-With':'XMLHttpRequest'}})
- }
+test('account creation opens database grants, applies changes and renames the account', async ({ page, engine, prefix, db }) => {
+  test.skip(engine === 'postgres', 'Account management is a MySQL/MariaDB capability')
+  const account = prefix + '_u', renamed = prefix + '_r'
+  try {
+    await page.goto('/server/users')
+    await page.getByRole('button', { name: 'Create account', exact: true }).click()
+    const form = page.locator('[data-test=create-form]')
+    await form.getByLabel('User', { exact:true }).fill(account)
+    await form.getByLabel('Host', { exact:true }).fill('localhost')
+    await form.getByLabel('Password', { exact:true }).fill('e2e-account-password')
+    await form.getByRole('button', { name: 'Create account', exact: true }).click()
+    const editor = page.locator('.editor')
+    await expect(editor.getByRole('heading', { name: account + '@localhost', exact:true })).toBeVisible()
+    await editor.getByLabel('Database', { exact:true }).fill(db)
+    await editor.getByRole('button', { name: 'Edit privileges', exact:true }).click()
+    await editor.getByRole('checkbox', { name:'SELECT', exact:true }).check()
+    await editor.getByRole('checkbox', { name:'Allow granting these privileges', exact:true }).check()
+    await editor.getByRole('button', { name:'Apply privileges', exact:true }).click()
+    const existingScope = editor.getByRole('button', { name: new RegExp('Database.*' + db) })
+    await expect(existingScope).toContainText('GRANT OPTION')
+    await editor.getByRole('button', { name:'Back to accounts', exact:true }).click()
+    await page.getByRole('searchbox', { name: 'Find by user or host' }).fill(account)
+    await page.getByRole('row').filter({ has: page.getByRole('cell', {name:account, exact:true}) })
+      .getByRole('button', {name:'Edit', exact:true}).click()
+    await existingScope.click()
+    await expect(editor.getByRole('checkbox', { name:'SELECT', exact:true })).toBeChecked()
+    await editor.getByRole('checkbox', { name:'Allow granting these privileges', exact:true }).uncheck()
+    await editor.getByRole('button', { name:'Apply privileges', exact:true }).click()
+    await expect(existingScope).not.toContainText('GRANT OPTION')
+    await expect(editor.getByRole('checkbox', { name:'SELECT', exact:true })).toBeChecked()
+    await editor.getByRole('button', { name:'Account settings', exact:true }).click()
+    const rename = editor.getByRole('group', { name:'Rename account', exact:true })
+    await rename.getByLabel('New user', {exact:true}).fill(renamed)
+    await rename.getByRole('button', {name:'Save', exact:true}).click()
+    await expect(editor.getByRole('heading', {name:renamed + '@localhost',exact:true})).toBeVisible()
+  } finally {
+    for (const name of [account, renamed]) await page.request.delete('/api/users/' + name + '?host=localhost', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+  }
 })

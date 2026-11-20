@@ -57,6 +57,10 @@ export async function downloadExport(db: string, body: ExportRequest, schema: st
 
   const blob = await res.blob()
   const filename = filenameFromDisposition(res.headers.get('Content-Disposition')) ?? 'dump'
+  downloadBlob(blob, filename)
+}
+
+export function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url

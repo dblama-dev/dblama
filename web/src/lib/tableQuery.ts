@@ -48,6 +48,20 @@ export function isNullOperator(op: string): boolean {
   return op === 'IS NULL' || op === 'IS NOT NULL'
 }
 
+// Selection values are compared by the database. Limit shortcuts to scalar
+// types whose wire value round-trips through a bound text argument.
+const comparableScalar = /^(?:char|varchar|(?:tiny|medium|long)?text|(?:tiny|small|medium|big)?int|integer|numeric|decimal|float|real|double(?: precision)?|bool(?:ean)?|enum|set|uuid|year)$/i
+export function filterForCell(column: string, type: string, value: unknown): RowsFilter | null {
+  if (!column || column.includes(':')) return null
+  if (value === null) return { column, op: 'IS NULL', value: '' }
+  if (!comparableScalar.test(type)) return null
+  if (typeof value !== 'string' && typeof value !== 'boolean' && !(typeof value === 'number' && Number.isFinite(value))) return null
+  const literal = String(value)
+  // Filters are included in both the browser address and the rows request.
+  if (literal.length > 2048 || new URLSearchParams({ value: literal }).toString().length > 2048) return null
+  return { column, op: '=', value: literal }
+}
+
 /** buildRowsQuery serializes the grid state into the query string of the
  * rows endpoint. `filter` is repeatable and emitted in order; IS NULL and
  * IS NOT NULL are sent with a trailing colon and no value (the backend

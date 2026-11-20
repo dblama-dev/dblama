@@ -49,8 +49,9 @@ const rows: unknown[][] = [
 
 const page: Page = { columns, rows, totalRows: 2 }
 
-function mountGrid(props: Record<string, unknown> = {}) {
+function mountGrid(props: Record<string, unknown> = {}, attachTo?: HTMLElement) {
   return mount(DataGrid, {
+    attachTo,
     props: {
       columns,
       rows,
@@ -80,6 +81,61 @@ describe('DataGrid', () => {
     const text = wrapper.text()
     expect(text).toContain('alice')
     expect(text).toContain('1')
+  })
+
+  it('applies a column selection while retaining the hidden primary key and row values for edits', async () => {
+    const wrapper = mountGrid({}, document.body)
+    await wrapper.get('[data-testid="grid-columns"]').trigger('click')
+    const chooser = wrapper.get('[data-testid="grid-column-chooser"]')
+    await chooser.get('input[value="id"]').setValue(false)
+    await chooser.get('input[value="name"]').setValue(false)
+    expect(chooser.get('[data-testid="apply-columns"]').attributes('disabled')).toBeDefined()
+    await chooser.get('input[value="name"]').setValue(true)
+    await chooser.get('[data-testid="apply-columns"]').trigger('click')
+    expect(wrapper.emitted('update:visible-columns')).toEqual([[['name']]])
+
+    await wrapper.setProps({ visibleColumns: ['name'] })
+    expect(wrapper.findAll('th').map(header => header.text())).not.toContain('id')
+    expect(wrapper.findAll('tbody tr').at(0)?.findAll('td').at(1)?.text()).toBe('alice')
+    const edit = wrapper.get('tbody tr').findAll('button').find(button => button.attributes('aria-label') === 'Изменить')!
+    await edit.trigger('click')
+    expect(wrapper.emitted('edit-row')?.[0]?.[0]).toMatchObject({ id: 1, name: 'alice', __pk: { id: 1 } })
+    wrapper.unmount()
+  })
+
+  it('can restore all columns when none of the linked column names still exists', async () => {
+    const wrapper = mountGrid({ visibleColumns: [] }, document.body)
+    expect(wrapper.get('[data-testid="grid-export"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-testid="grid-columns"]').trigger('click')
+    const chooser = wrapper.get('[data-testid="grid-column-chooser"]')
+    await chooser.get('[data-testid="show-all-columns"]').trigger('click')
+    await chooser.get('[data-testid="apply-columns"]').trigger('click')
+    expect(wrapper.emitted('update:visible-columns')).toEqual([[['id', 'name']]])
+    wrapper.unmount()
+  })
+
+  it('selects a few fields in a wide table across separate searches and discards cancelled changes', async () => {
+    const wideColumns = Array.from({ length: 40 }, (_, i) => ({ name: `field ${i}`, type: 'text', nullable: false }))
+    const wrapper = mountGrid({ columns: wideColumns, rows: [], pkColumns: [] }, document.body)
+    const trigger = wrapper.get('[data-testid="grid-columns"]')
+    await trigger.trigger('click')
+    const chooser = wrapper.get('[data-testid="grid-column-chooser"]')
+    await chooser.get('[data-testid="clear-columns"]').trigger('click')
+    const search = chooser.get('input:not([type=checkbox])')
+    await search.setValue('FIELD 35')
+    expect(chooser.findAll('input[type=checkbox]')).toHaveLength(1)
+    await chooser.get('input[type=checkbox][value="field 35"]').setValue(true)
+    await search.setValue('field 10')
+    await chooser.get('input[type=checkbox][value="field 10"]').setValue(true)
+    await chooser.get('[data-testid="apply-columns"]').trigger('click')
+    expect(wrapper.emitted('update:visible-columns')).toEqual([[['field 10', 'field 35']]])
+    await wrapper.setProps({ visibleColumns: ['field 10', 'field 35'] })
+    await trigger.trigger('click')
+    await wrapper.get('[data-testid="show-all-columns"]').trigger('click')
+    await wrapper.get('[data-testid="grid-column-chooser"]').trigger('keydown.esc')
+    expect(wrapper.emitted('update:visible-columns')).toHaveLength(1)
+    expect(document.activeElement).toBe(trigger.element)
+    wrapper.unmount()
   })
 
   it('renders NULL cells as an italic NULL marker', () => {
@@ -151,7 +207,7 @@ describe('DataGrid', () => {
   it('emits the pk map on a single-row delete', async () => {
     const wrapper = mountGrid()
 
-    const deleteButtons = wrapper.findAll('button').filter((b) => b.text() === 'Удалить')
+    const deleteButtons = wrapper.findAll('button').filter((b) => b.attributes('aria-label') === 'Удалить')
     expect(deleteButtons.length).toBe(2)
     await deleteButtons[1].trigger('click')
     await flushPromises()
@@ -208,10 +264,10 @@ describe('DataGrid', () => {
   it('uses all original values for row actions when there is no primary key', async () => {
     const wrapper = mountGrid({ pkColumns: [] })
     expect(wrapper.text()).toContain('У таблицы нет первичного ключа')
-    const edits = wrapper.findAll('button').filter(b => b.text() === 'Изменить')
+    const edits = wrapper.findAll('button').filter(b => b.attributes('aria-label') === 'Изменить')
     await edits[1]!.trigger('click')
     expect(wrapper.emitted('edit-row')?.[0]?.[0]).toMatchObject({ __pk: {id:2,name:null} })
-    const deletes = wrapper.findAll('button').filter(b => b.text() === 'Удалить')
+    const deletes = wrapper.findAll('button').filter(b => b.attributes('aria-label') === 'Удалить')
     await deletes[1]!.trigger('click')
     expect(wrapper.emitted('delete-row')).toBeUndefined()
     wrapper.findAllComponents(NPopconfirm)[1].vm.$emit('positive-click')
@@ -486,5 +542,86 @@ it('offers keyboard-operable row inspection for clipped values below 120 charact
 it('keeps the table body viewport bounded so its horizontal scrollbar stays reachable', () => {
   const wrapper = mountGrid({ rows: Array.from({length:50}, (_, i) => [i, 'row']) })
   expect(wrapper.findComponent(NDataTable).props('maxHeight')).toBe('max(240px, calc(100vh - 360px))')
+  wrapper.unmount()
+})
+
+describe('filtering from the value inspector', () => {
+  const button = () => document.body.querySelector<HTMLButtonElement>('[data-testid="filter-inspected-value"]')
+
+  it.each([
+    ['varchar', '  A:%_  ', '=', '  A:%_  '],
+    ['text', '', '=', ''],
+    ['bytea', null, 'IS NULL', ''],
+    ['numeric', '12345678901234567890.10001', '=', '12345678901234567890.10001'],
+    ['boolean', false, '=', 'false'],
+  ])('adds a literal condition for %s value %j to the applied filters', async (type, value, op, expected) => {
+    const existing = { column: 'id', op: '>', value: '4' }
+    const wrapper = mountGrid({ columns: [{ name: 'data', type, nullable: true }, columns[0]], rows: [[value, 8]], filters: [existing] })
+    try {
+      await wrapper.get('[data-testid="row-inspect"]').trigger('click')
+      await flushPromises()
+      expect(button()?.disabled).toBe(false)
+      button()!.click()
+      expect(wrapper.emitted('apply-filters')).toEqual([[[existing, { column: 'data', op, value: expected }]]])
+    } finally { wrapper.unmount() }
+  })
+
+  it('preserves unfinished drafts and prevents a duplicate condition', async () => {
+    const wrapper = mountGrid({ filters: [{ column: 'id', op: '=', value: '1' }] })
+    try {
+      const filters = wrapper.get('.datagrid__filters')
+      filters.findComponent(NInput).vm.$emit('update:value', '7')
+      await wrapper.get('[data-testid="row-inspect"]').trigger('click')
+      await flushPromises()
+      const picker = wrapper.findAllComponents(NSelect).find(select => select.attributes('data-testid') === 'grid-inspect-column')!
+      picker.vm.$emit('update:value', 'name')
+      await flushPromises()
+      expect(button()?.disabled).toBe(true)
+      expect(filters.findComponent(NInput).props('value')).toBe('7')
+      filters.findComponent(NInput).vm.$emit('update:value', '1')
+      await flushPromises()
+      expect(button()?.disabled).toBe(false)
+      picker.vm.$emit('update:value', 'id')
+      await flushPromises()
+      expect(button()?.disabled).toBe(true)
+      expect(wrapper.emitted('apply-filters')).toBeUndefined()
+    } finally { wrapper.unmount() }
+  })
+
+  it.each([
+    ['payload', 'bytea', '0x4455'],
+    ['nested', 'text[]', '["apple","banana"]'],
+    ['big', 'text', 'a'.repeat(5000)],
+    ['a:b', 'text', 'unrepresentable column'],
+  ])('hides the action for values that cannot safely round-trip in a filter on %s', async (name, type, value) => {
+    const wrapper = mountGrid({ columns: [{ name, type, nullable: true }, columns[0]], rows: [[value, 1]] })
+    try {
+      await wrapper.get('[data-testid="row-inspect"]').trigger('click')
+      await flushPromises()
+      expect(document.body.querySelector('[data-testid="grid-inspected-value"]')?.textContent).toBe(value)
+      expect(button()).toBeNull()
+    } finally { wrapper.unmount() }
+  })
+})
+
+it('keeps compact row actions named and reachable without opening a menu', async () => {
+  const wrapper = mountGrid()
+  const actions = wrapper.get('tbody tr td:last-child').findAll('button')
+  expect(actions.map(button => button.attributes('aria-label'))).toEqual(['Изменить', 'Превью', 'Копировать', 'Удалить'])
+  for (const button of actions) expect(button.attributes('title')).toBe(button.attributes('aria-label'))
+  const actionColumn = wrapper.getComponent(NDataTable).props('columns')?.at(-1)
+  expect(actionColumn?.width).toBeLessThanOrEqual(150)
+  await actions[0]!.trigger('click')
+  expect(wrapper.emitted('edit-row')?.[0]?.[0]).toMatchObject({id:1,name:'alice'})
+  wrapper.unmount()
+})
+
+it('dismisses a pending row delete when a keyless position changes', async () => {
+  const wrapper = mountGrid({ pkColumns: [] }, document.body)
+  const original = wrapper.get('tbody tr').findAllComponents(NPopconfirm)[0]!
+  await original.get('button').trigger('click'); await flushPromises()
+  await wrapper.setProps({ rows: [[3, 'new search result'], [2, null]] })
+  original.vm.$emit('positive-click'); await flushPromises()
+  expect(wrapper.emitted('delete-row')).toBeUndefined()
   wrapper.unmount()
 })

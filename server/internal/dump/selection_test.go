@@ -3,9 +3,12 @@ package dump
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
+	"reflect"
+	"testing"
+
 	"github.com/hitslab/db-manager/server/internal/driver"
 	"github.com/hitslab/db-manager/server/internal/sqlgen"
-	"testing"
 )
 
 func TestWriteSelectionFiltersSortAndPaging(t *testing.T) {
@@ -27,15 +30,31 @@ func TestWriteSelectionFiltersSortAndPaging(t *testing.T) {
 		t.Fatalf("calls %d output %q", calls, out.String())
 	}
 }
-func TestWriteSelectionPostgresNullConvention(t *testing.T) {
-	var out bytes.Buffer
+func TestWriteSelectionSingleColumnRoundTrip(t *testing.T) {
 	read := func(context.Context, driver.SelectQuery) (driver.Page, error) {
-		return driver.Page{Columns: []driver.ColumnMeta{{Name: "value"}}, Rows: [][]any{{nil}, {""}, {`\N`}}}, nil
+		return driver.Page{Columns: []driver.ColumnMeta{{Name: ""}}, Rows: [][]any{{nil}, {""}, {`\N`}}}, nil
 	}
-	if err := WriteSelection(context.Background(), "t", "tsv", driver.SelectQuery{}, &out, read, sqlgen.QuoteIdentPg, nil, true); err != nil {
-		t.Fatal(err)
-	}
-	if out.String() != "value\n\\N\n\n\\\\N\n" {
-		t.Fatalf("output %q", out.String())
+	for _, tc := range []struct {
+		format string
+		sep    rune
+	}{
+		{FormatCSV, ','}, {FormatCSVSemicolon, ';'}, {FormatTSV, '\t'},
+	} {
+		t.Run(tc.format, func(t *testing.T) {
+			var out bytes.Buffer
+			if err := WriteSelection(context.Background(), "t", tc.format, driver.SelectQuery{}, &out, read, sqlgen.QuoteIdentPg, nil, true); err != nil {
+				t.Fatal(err)
+			}
+			r := csv.NewReader(&out)
+			r.Comma = tc.sep
+			records, err := r.ReadAll()
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := [][]string{{""}, {`\N`}, {""}, {`\\N`}}
+			if !reflect.DeepEqual(records, want) {
+				t.Errorf("records = %q, want %q", records, want)
+			}
+		})
 	}
 }

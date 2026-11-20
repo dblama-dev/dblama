@@ -1,7 +1,7 @@
 <template>
   <n-modal :show="show" preset="card" :title="mode === 'insert' ? t('row.insert') : t('row.edit')" class="row-modal" :style="{ width: 'min(720px, 96vw)' }" :mask-closable="!saving" :close-on-esc="!saving" :closable="!saving" @update:show="close">
     <div v-if="loading">{{ t('common.loading') }}</div>
-    <div v-else class="row-modal__fields">
+    <div v-else :key="entryNumber" ref="fieldList" class="row-modal__fields">
       <div v-for="col in columns" :key="col.name" class="row-modal__field">
         <label class="row-modal__label" :for="`row-${col.name}`">{{ col.name }}</label>
         <div class="row-modal__control">
@@ -33,15 +33,17 @@
         </div>
       </div>
     </div>
+    <p v-if="entryNumber && !error" role="status" class="row-modal__status">{{ t('row.insertedCount', { count: entryNumber }) }}</p>
     <p v-if="error" class="row-modal__error" role="alert">{{ error }}</p>
     <template #footer><div class="row-modal__footer">
       <n-button size="small" :disabled="saving" @click="close">{{ t('row.cancel') }}</n-button>
-      <n-button size="small" type="primary" :loading="saving" :disabled="!canSave" @click="save">{{ t('row.save') }}</n-button>
+      <n-button v-if="mode === 'insert'" size="small" :disabled="!canSave" @click="save(true)">{{ t('row.saveAnother') }}</n-button>
+      <n-button size="small" type="primary" :loading="saving" :disabled="!canSave" @click="save()">{{ t('row.save') }}</n-button>
     </div></template>
   </n-modal>
 </template>
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NButton, NCheckbox, NInput, NInputNumber, NModal, NSelect, useNotification } from 'naive-ui'
 import { api } from '../api/client'
@@ -51,7 +53,7 @@ import type { ColumnDef, ForeignKey, Page } from '../api/types'
 import { isRowNumeric, isRowBinary, isRowJSON, isRowBoolean, rowField, rowPayload, rowJSONError, rowValueError, type RowField, type RowMode, type RowValue } from '../lib/rowValues'
 import { rowWorkflowMessages } from '../i18n/rowWorkflows'
 const props = defineProps<{ show: boolean; mode: 'insert' | 'edit'; rowsPath: string; columns: ColumnDef[]; row: Record<string, unknown> | null; rowPk: Record<string, unknown> | null; foreignKeys?: ForeignKey[]; loading?: boolean }>()
-const emit = defineEmits<{ 'update:show': [show: boolean]; saved: [] }>()
+const emit = defineEmits<{ 'update:show': [show: boolean]; saved: [continueInserting?: boolean] }>()
 const { t, locale } = useI18n()
 const text = computed(() => rowWorkflowMessages[locale.value === 'ru' ? 'ru' : 'en'].rowWorkflows)
 const notification = useNotification()
@@ -61,23 +63,38 @@ const fields = reactive<Record<string, RowField>>({})
 let original: Record<string, unknown> = {}
 const saving = ref(false)
 const error = ref('')
-watch(() => [props.show, props.mode, props.row, props.loading] as const, ([show]) => {
- if (!show || props.loading) return
+const entryNumber = ref(0)
+const fileReads = reactive(new Map<string, symbol>())
+let formVersion = 0
+const fieldList = ref<HTMLElement | null>(null)
+function resetFields(row: Record<string, unknown> | null): void {
  for (const key of Object.keys(fields)) delete fields[key]
- for (const col of props.columns) fields[col.name] = rowField(col, props.row, props.mode === 'insert')
+ for (const col of props.columns) fields[col.name] = rowField(col, row, props.mode === 'insert')
  original = rowPayload(props.columns, fields)
  error.value = ''
+}
+watch(() => [props.show, props.mode, props.row, props.rowsPath, props.loading] as const, ([show]) => {
+ formVersion++
+ fileReads.clear()
+ saving.value = false
+ if (!show || props.loading) return
+ entryNumber.value = 0
+ resetFields(props.row)
 }, { immediate: true })
 function stringValue(name: string): string { return String(fields[name]?.value ?? '') }
 function selectValue(name: string): string | number | null { const value = fields[name]?.value; return typeof value === 'boolean' ? String(value) : value ?? null }
 function numberValue(name: string): number | null { const value = fields[name]?.value; return value === null || value === '' || value === undefined ? null : Number(value) }
 function setValue(name: string, value: RowValue): void {
+ fileReads.delete(name)
  const col = props.columns.find(col => col.name === name)
  if (col && isRowBoolean(col.type)) value = value === 'true' || value === true
  fields[name] = { value, mode: 'value' }
  error.value = ''
 }
-function setMode(name: string, mode: RowMode): void { if (fields[name]) fields[name].mode = mode }
+function setMode(name: string, mode: RowMode): void {
+ fileReads.delete(name)
+ if (fields[name]) fields[name].mode = mode
+}
 function disabled(col: ColumnDef): boolean { return saving.value || fields[col.name]?.mode !== 'value' }
 function valueOptions(col: ColumnDef) { return isRowBoolean(col.type) ? [{ label: 'true', value: 'true' }, { label: 'false', value: 'false' }] : (col.enumValues ?? []).map(value => ({ label: value, value })) }
 function dateDisplayValue(col: ColumnDef): string {
@@ -100,22 +117,51 @@ function formatJSON(col: ColumnDef): void {
 async function readBinary(col: ColumnDef, event: Event): Promise<void> {
  const file = (event.target as HTMLInputElement).files?.[0]
  if (!file) return
- try { const bytes = new Uint8Array(await file.arrayBuffer()); setValue(col.name, '0x' + Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')) } catch (err) { error.value = String(err) }
+ const read = Symbol()
+ fileReads.set(col.name, read)
+ try {
+   const bytes = new Uint8Array(await file.arrayBuffer())
+   if (fileReads.get(col.name) === read) {
+     setValue(col.name, '0x' + Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join(''))
+   }
+ } catch (err) {
+   if (fileReads.get(col.name) === read) error.value = String(err)
+ } finally {
+   if (fileReads.get(col.name) === read) fileReads.delete(col.name)
+ }
 }
-const canSave = computed(() => !props.loading && !saving.value && props.columns.length > 0 && !rowValueError(props.columns, fields))
+const canSave = computed(() => !props.loading && !saving.value && !fileReads.size && props.columns.length > 0 && !rowValueError(props.columns, fields))
 function close(): void { if (!saving.value) emit('update:show', false) }
-async function save(): Promise<void> {
+async function save(continueInserting = false): Promise<void> {
  if (!canSave.value) return
  const invalid = rowJSONError(props.columns, fields, props.mode === 'edit' ? original : undefined)
  if (invalid) { error.value = text.value.jsonError.replace('{column}', invalid); return }
  const values = rowPayload(props.columns, fields, props.mode === 'edit' ? original : undefined)
  if (props.mode === 'edit' && !Object.keys(values).length) { close(); return }
+ const submitted = formVersion
  saving.value = true
  try {
   await api(props.mode === 'insert' ? 'POST' : 'PATCH', props.rowsPath, props.mode === 'insert' ? values : { where: props.rowPk, values })
-  emit('saved'); emit('update:show', false)
- } catch (err) { error.value = err instanceof Error ? err.message : String(err); notification.error({ content: error.value, duration: 5000 }) }
- finally { saving.value = false }
+  if (submitted !== formVersion) return
+  if (continueInserting && props.mode === 'insert') {
+    entryNumber.value++
+    resetFields(null)
+    emit('saved', true)
+  } else {
+    emit('saved'); emit('update:show', false)
+  }
+ } catch (err) {
+   if (submitted === formVersion) {
+     error.value = err instanceof Error ? err.message : String(err)
+     notification.error({ content: error.value, duration: 5000 })
+   }
+ } finally {
+   if (submitted === formVersion) saving.value = false
+ }
+ if (submitted === formVersion && continueInserting && !error.value && props.show) {
+   await nextTick()
+   fieldList.value?.querySelector<HTMLElement>('.row-modal__control input:not(:disabled), .row-modal__control textarea:not(:disabled)')?.focus()
+ }
 }
 type ParentOption = { label: string; value: string | number }
 const parentOptions = ref<Record<string, ParentOption[]>>({})
@@ -192,7 +238,7 @@ function setParentSearchMode(name: string, mode: 'label' | 'key'): void {
  parentSearchModes[name] = mode
  searchParent(name, parentSearchTerms[name] ?? '')
 }
-watch(() => [props.show, props.foreignKeys, props.rowsPath] as const, () => {
+watch(() => [props.show, props.foreignKeys, props.rowsPath, entryNumber.value] as const, () => {
  generation++; parentOptions.value = {}
  for (const name of Object.keys(parentLabelColumns)) delete parentLabelColumns[name]
  for (const name of Object.keys(parentSearchModes)) delete parentSearchModes[name]
@@ -200,7 +246,7 @@ watch(() => [props.show, props.foreignKeys, props.rowsPath] as const, () => {
  for (const timer of Object.values(timers)) clearTimeout(timer)
  if (props.show) for (const fk of props.foreignKeys ?? []) if (fk.columns.length === 1) initialParentLoads[fk.columns[0]!] = loadParent(fk.columns[0]!)
 }, { immediate: true, deep: true })
-onBeforeUnmount(() => { generation++; for (const timer of Object.values(timers)) clearTimeout(timer) })
+onBeforeUnmount(() => { generation++; formVersion++; fileReads.clear(); for (const timer of Object.values(timers)) clearTimeout(timer) })
 </script>
 <style scoped>
 .row-modal__fields { display: flex; flex-direction: column; gap: 12px; }
@@ -213,6 +259,7 @@ onBeforeUnmount(() => { generation++; for (const timer of Object.values(timers))
 .row-modal__related { display: flex; flex-direction: column; }
 .row-modal__error { color: var(--error-color, #c33); overflow-wrap: anywhere; }
 .row-modal__date { box-sizing: border-box; padding: 5px; background: transparent; color: inherit; border: 1px solid #888; }
-.row-modal__footer { display: flex; justify-content: flex-end; gap: 8px; }
+.row-modal__status { margin: 12px 0 0; }
+.row-modal__footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 @media (max-width: 600px) { .row-modal__field { grid-template-columns: 1fr; } .row-modal__choices { max-width: none; } }
 </style>

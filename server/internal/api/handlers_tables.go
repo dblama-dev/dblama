@@ -5,8 +5,6 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/hitslab/db-manager/server/internal/driver"
 	"github.com/hitslab/db-manager/server/internal/session"
 	"github.com/hitslab/db-manager/server/internal/sqlgen"
@@ -22,7 +20,7 @@ const requestBodyLimit = 1 << 20
 // client problem and map to bad_request; everything else is a driver
 // failure on an authenticated connection and maps to driver_error.
 func classifyDriverErr(err error) (int, string) {
-	if errors.Is(err, sqlgen.ErrEmptyIdentifier) {
+	if errors.Is(err, sqlgen.ErrEmptyIdentifier) || errors.Is(err, driver.ErrDatabasePatternsDisabled) {
 		return http.StatusBadRequest, "bad_request"
 	}
 	return http.StatusInternalServerError, "driver_error"
@@ -59,7 +57,7 @@ type tablesResponse struct {
 func (s *apiServer) handleTablesList(w http.ResponseWriter, r *http.Request) {
 	sess, _ := session.FromContext(r.Context())
 
-	tables, err := sess.Driver.ListTables(r.Context(), chi.URLParam(r, "db"))
+	tables, err := sess.Driver.ListTables(r.Context(), pathParam(r, "db"))
 	if err != nil {
 		writeDriverErr(w, err)
 		return
@@ -74,7 +72,7 @@ func (s *apiServer) handleTablesList(w http.ResponseWriter, r *http.Request) {
 func (s *apiServer) handleTableDef(w http.ResponseWriter, r *http.Request) {
 	sess, _ := session.FromContext(r.Context())
 
-	def, err := sess.Driver.TableDef(r.Context(), chi.URLParam(r, "db"), chi.URLParam(r, "table"))
+	def, err := sess.Driver.TableDef(r.Context(), pathParam(r, "db"), pathParam(r, "table"))
 	if err != nil {
 		writeDriverErr(w, err)
 		return
@@ -92,11 +90,11 @@ func (s *apiServer) handleSaveTable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	table := chi.URLParam(r, "table")
+	table := pathParam(r, "table")
 	if table == "_new" {
 		table = ""
 	}
-	if err := sess.Driver.SaveTable(r.Context(), chi.URLParam(r, "db"), table, def); err != nil {
+	if err := sess.Driver.SaveTable(r.Context(), pathParam(r, "db"), table, def); err != nil {
 		writeDriverErr(w, err)
 		return
 	}
@@ -108,8 +106,8 @@ func (s *apiServer) handleSaveTable(w http.ResponseWriter, r *http.Request) {
 func (s *apiServer) handleDropTable(w http.ResponseWriter, r *http.Request) {
 	sess, _ := session.FromContext(r.Context())
 
-	db := chi.URLParam(r, "db")
-	table := chi.URLParam(r, "table")
+	db := pathParam(r, "db")
+	table := pathParam(r, "table")
 	var err error
 	if r.URL.Query().Get("isView") == "true" {
 		err = sess.Driver.DropViews(r.Context(), db, []string{table})
@@ -127,8 +125,8 @@ func (s *apiServer) handleDropTable(w http.ResponseWriter, r *http.Request) {
 func (s *apiServer) handleTruncateTable(w http.ResponseWriter, r *http.Request) {
 	sess, _ := session.FromContext(r.Context())
 
-	if err := sess.Driver.TruncateTables(r.Context(), chi.URLParam(r, "db"),
-		[]string{chi.URLParam(r, "table")}); err != nil {
+	if err := sess.Driver.TruncateTables(r.Context(), pathParam(r, "db"),
+		[]string{pathParam(r, "table")}); err != nil {
 		writeDriverErr(w, err)
 		return
 	}
@@ -143,8 +141,8 @@ func (s *apiServer) handleSaveIndexes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := sess.Driver.SaveIndexes(r.Context(), chi.URLParam(r, "db"),
-		chi.URLParam(r, "table"), indexes); err != nil {
+	if err := sess.Driver.SaveIndexes(r.Context(), pathParam(r, "db"),
+		pathParam(r, "table"), indexes); err != nil {
 		writeDriverErr(w, err)
 		return
 	}
@@ -168,9 +166,9 @@ func (s *apiServer) handleBulkTables(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch req.Action {
 	case "truncate":
-		err = sess.Driver.TruncateTables(r.Context(), chi.URLParam(r, "db"), req.Tables)
+		err = sess.Driver.TruncateTables(r.Context(), pathParam(r, "db"), req.Tables)
 	case "drop":
-		err = sess.Driver.DropTables(r.Context(), chi.URLParam(r, "db"), req.Tables)
+		err = sess.Driver.DropTables(r.Context(), pathParam(r, "db"), req.Tables)
 	default:
 		WriteErr(w, http.StatusBadRequest, ErrBadRequest("unknown action "+req.Action))
 		return
@@ -192,7 +190,7 @@ type pkResponse struct {
 func (s *apiServer) handlePrimaryKey(w http.ResponseWriter, r *http.Request) {
 	sess, _ := session.FromContext(r.Context())
 
-	cols, err := sess.Driver.PrimaryKey(r.Context(), chi.URLParam(r, "db"), chi.URLParam(r, "table"))
+	cols, err := sess.Driver.PrimaryKey(r.Context(), pathParam(r, "db"), pathParam(r, "table"))
 	if err != nil {
 		writeDriverErr(w, err)
 		return
@@ -206,7 +204,7 @@ func (s *apiServer) handlePrimaryKey(w http.ResponseWriter, r *http.Request) {
 // handleTableSQL returns the definition of the table in this request's schema.
 func (s *apiServer) handleTableSQL(w http.ResponseWriter, r *http.Request) {
 	sess, _ := session.FromContext(r.Context())
-	statement, err := sess.Driver.ShowCreateTable(r.Context(), chi.URLParam(r, "db"), chi.URLParam(r, "table"))
+	statement, err := sess.Driver.ShowCreateTable(r.Context(), pathParam(r, "db"), pathParam(r, "table"))
 	if err != nil {
 		writeDriverErr(w, err)
 		return

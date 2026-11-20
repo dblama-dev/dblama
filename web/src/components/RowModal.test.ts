@@ -120,6 +120,43 @@ describe('RowModal', () => {
     vi.clearAllMocks()
   })
 
+  it('waits for the current binary file and ignores the previous selection', async () => {
+    const wrapper = mountModal({ columns: [{ name: 'file', type: 'blob', nullable: true }] })
+    const input = wrapper.get('input[type=file]')
+    let finishOld!: (data: ArrayBuffer) => void
+    const old = { arrayBuffer: () => new Promise<ArrayBuffer>(resolve => { finishOld = resolve }) }
+    Object.defineProperty(input.element, 'files', { value: [old], configurable: true })
+    await input.trigger('change')
+    expect(saveButton(wrapper)?.props('disabled')).toBe(true)
+    const current = { arrayBuffer: async () => Uint8Array.of(42).buffer }
+    Object.defineProperty(input.element, 'files', { value: [current] })
+    await input.trigger('change')
+    await flushPromises()
+    finishOld(Uint8Array.of(99).buffer)
+    await flushPromises()
+    await saveButton(wrapper)?.trigger('click')
+    expect(mockedApi).toHaveBeenCalledWith('POST', rowsPath, { file: { $binaryHex: '2a' } })
+    wrapper.unmount()
+  })
+
+  it('keeps the newly opened form intact when an earlier insert finishes', async () => {
+    let finish!: () => void
+    mockedApi.mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve }))
+    const wrapper = mountModal({ columns: [{ name: 'label', type: 'varchar', nullable: false }] })
+    setString(wrapper, 'label', 'first')
+    await saveButton(wrapper)?.trigger('click')
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    setString(wrapper, 'label', 'next')
+    finish()
+    await flushPromises()
+    const modal = wrapper.findComponent(RowModal)
+    expect(modal.emitted('update:show')).toBeUndefined()
+    expect(fieldOf(wrapper, 'label').findComponent(NInput).props('value')).toBe('next')
+    expect(saveButton(wrapper)?.props('disabled')).toBe(false)
+    wrapper.unmount()
+  })
+
   it('renders one typed field per column: number, select, textarea, text', () => {
     const wrapper = mountModal()
 

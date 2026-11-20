@@ -25,10 +25,48 @@
       <n-button size="small" quaternary @click="emit('refresh')">
         {{ t('grid.refresh') }}
       </n-button>
-      <n-button size="small" data-testid="grid-export" @click="emit('export-selection')">{{ t('grid.exportSelection') }}</n-button>
+      <n-button
+        ref="columnTrigger" size="small" data-testid="grid-columns"
+        :aria-expanded="choosingColumns" :aria-controls="columnChooserID"
+        :disabled="!columns.length" @click="toggleColumnChooser"
+      >
+        {{ t('structure.columns') }} <span v-if="visibleMetadata.length !== columns.length" class="datagrid__column-count">{{ visibleMetadata.length }} / {{ columns.length }}</span>
+      </n-button>
+      <n-button size="small" data-testid="grid-export" :disabled="loading || !visibleMetadata.length" @click="emit('export-selection')">{{ t('rowWorkflows.exportVisible') }}</n-button>
     </div>
 
-    <div class="datagrid__filters">
+    <form
+      v-if="choosingColumns" :id="columnChooserID" ref="columnChooser" class="datagrid__chooser"
+      :aria-label="t('rowWorkflows.visibleColumns')" data-testid="grid-column-chooser"
+      @submit.prevent="applyColumnSelection" @keydown.esc.prevent="closeColumnChooser"
+    >
+      <div class="datagrid__chooser-heading">
+        <strong>{{ t('rowWorkflows.visibleColumns') }}</strong>
+        <span>{{ t('rowWorkflows.chosenCount', { chosen: columnDraft.length, total: columns.length }) }}</span>
+      </div>
+      <n-input v-if="columns.length > 8" v-model:value="columnSearch" size="small" clearable :input-props="{ 'aria-label': t('rowWorkflows.findColumn') }" :placeholder="t('rowWorkflows.findColumn')" />
+      <div class="datagrid__chooser-list">
+        <label v-for="column in matchingColumns" :key="column.name">
+          <input v-model="columnDraft" type="checkbox" :value="column.name">
+          {{ column.name }}
+        </label>
+        <span v-if="!matchingColumns.length">{{ t('rowWorkflows.noMatchingColumns') }}</span>
+      </div>
+      <div class="datagrid__chooser-footer">
+        <div class="datagrid__chooser-shortcuts">
+          <n-button size="small" quaternary data-testid="show-all-columns" :disabled="columnDraft.length === columns.length" @click="columnDraft = columns.map(col => col.name)">{{ t('rowWorkflows.showAllColumns') }}</n-button>
+          <n-button size="small" quaternary data-testid="clear-columns" :disabled="!columnDraft.length" @click="columnDraft = []">{{ t('rowWorkflows.clearColumns') }}</n-button>
+        </div>
+        <n-button size="small" @click="closeColumnChooser">{{ t('row.cancel') }}</n-button>
+        <n-button attr-type="submit" size="small" type="primary" data-testid="apply-columns" :disabled="!columnDraft.length">{{ t('grid.apply') }}</n-button>
+      </div>
+    </form>
+    <n-alert v-if="columns.length && !visibleMetadata.length" type="warning" :show-icon="false">{{ t('rowWorkflows.columnsMissing') }}</n-alert>
+
+    <button class="datagrid__filter-toggle" type="button" :aria-expanded="mobileFiltersOpen" :aria-controls="filterID" @click="mobileFiltersOpen = !mobileFiltersOpen">
+      {{ t('grid.filters') }}<span v-if="filters.length"> ({{ filters.length }})</span>
+    </button>
+    <div :id="filterID" class="datagrid__filters" :class="{ 'datagrid__filters--open': mobileFiltersOpen }">
       <span class="datagrid__filters-label">{{ t('grid.filters') }}</span>
       <div v-for="(draft, i) in drafts" :key="i" class="datagrid__filter">
         <n-select
@@ -62,8 +100,13 @@
       <n-button size="small" quaternary @click="resetFilters">{{ t('grid.reset') }}</n-button>
     </div>
 
+    <details v-if="statement" class="datagrid__statement">
+      <summary>{{ t('grid.browseSQL') }}</summary>
+      <pre tabindex="0">{{ statement.sql }}</pre>
+      <span>{{ t('grid.parameters') }}</span> <output>{{ JSON.stringify(statement.parameters) }}</output>
+    </details>
     <div class="datagrid__pagination"><span>{{ t('grid.total') }}: {{ totalRows }}</span><n-pagination v-bind="pagination" @update:page="onPage" @update:page-size="onPageSize" /></div>
-    <n-data-table
+    <n-data-table v-if="!columns.length || visibleMetadata.length"
       remote
       size="small"
       :columns="gridColumns"
@@ -84,12 +127,19 @@
     <n-modal v-model:show="inspectorShow" preset="card" :title="`${t('grid.preview')}: ${inspectedColumn}`" style="width: min(800px, 96vw)">
       <n-select v-if="inspectedRow" data-testid="grid-inspect-column" :value="inspectedColumn" :aria-label="t('structure.columns')" :options="columnOptions" @update:value="selectInspectedColumn" />
       <pre class="datagrid__full-value" data-testid="grid-inspected-value" tabindex="0" style="white-space: pre-wrap; overflow: auto; max-height: 70vh; overflow-wrap: anywhere">{{ inspectedValue }}</pre>
+      <small v-if="inspectedRow?.[inspectedColumn] === ''">{{ t('rowWorkflows.emptyString') }}</small>
+      <div v-if="inspectedFilter" class="datagrid__inspector-action">
+        <n-button size="small" data-testid="filter-inspected-value" :disabled="filtersEdited || alreadyFiltered || loading" @click="filterByInspectedValue">
+          {{ t(alreadyFiltered ? 'rowWorkflows.alreadyFiltered' : 'rowWorkflows.filterByValue') }}
+        </n-button>
+        <small v-if="filtersEdited">{{ t('rowWorkflows.unappliedFilters') }}</small>
+      </div>
     </n-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { h } from 'vue'
 import type { DataTableColumns, DataTableSortState, SelectOption } from 'naive-ui'
@@ -106,8 +156,9 @@ import {
 
 import { useMetadataStore } from '../stores/metadata'
 import BlobValue from './BlobValue.vue'
-import type { ColumnMeta } from '../api/types'
-import { isNullOperator, ROW_FILTER_OPERATORS, type RowsFilter, type RowsSort } from '../lib/tableQuery'
+import GridRowActions from './GridRowActions.vue'
+import type { ColumnMeta, Page } from '../api/types'
+import { filterForCell, isNullOperator, ROW_FILTER_OPERATORS, type RowsFilter, type RowsSort } from '../lib/tableQuery'
 
 // Grid rows are records keyed by column name plus service fields: the
 // row key and the parsed pk map used for delete calls.
@@ -125,12 +176,14 @@ interface FilterDraft {
 const props = withDefaults(
   defineProps<{
     columns: ColumnMeta[]
+    statement?: Page['statement']
     rows: unknown[][]
     totalRows: number
     loading: boolean
     pageIndex: number
     pageSize: number
     pkColumns: string[]
+    visibleColumns?: string[]
     tableName?: string
     filters?: RowsFilter[]
     sort: RowsSort | null
@@ -142,6 +195,7 @@ const emit = defineEmits<{
   'update:page': [page: number]
   'update:page-size': [size: number]
   'update:sort': [sort: RowsSort | null]
+  'update:visible-columns': [names: string[]]
   'apply-filters': [filters: RowsFilter[]]
   refresh: []
   'add-row': []
@@ -159,6 +213,44 @@ const metadata = useMetadataStore()
 void metadata.load()
 
 const hasPk = computed(() => props.pkColumns.length > 0)
+
+const visibleMetadata = computed(() => {
+  if (!props.visibleColumns) return props.columns
+  const selected = new Set(props.visibleColumns)
+  return props.columns.filter(column => selected.has(column.name))
+})
+const choosingColumns = ref(false)
+const columnChooserID = useId()
+const columnTrigger = ref<InstanceType<typeof NButton> | null>(null)
+const columnChooser = ref<HTMLFormElement | null>(null)
+const columnDraft = ref<string[]>([])
+const columnSearch = ref('')
+const matchingColumns = computed(() => {
+  const needle = columnSearch.value.trim().toLowerCase()
+  return props.columns.filter(column => column.name.toLowerCase().includes(needle))
+})
+async function toggleColumnChooser(): Promise<void> {
+  choosingColumns.value = !choosingColumns.value
+  if (!choosingColumns.value) return
+  columnDraft.value = visibleMetadata.value.map(column => column.name)
+  columnSearch.value = ''
+  await nextTick()
+  columnChooser.value?.querySelector('input')?.focus()
+}
+function closeColumnChooser(): void {
+  choosingColumns.value = false
+  columnTrigger.value?.$el.focus()
+}
+function applyColumnSelection(): void {
+  const selected = new Set(columnDraft.value)
+  const names = props.columns.map(column => column.name).filter(name => selected.has(name))
+  if (!names.length) return
+  emit('update:visible-columns', names)
+  closeColumnChooser()
+}
+watch([() => props.tableName, () => props.columns, () => props.visibleColumns], () => {
+  choosingColumns.value = false
+})
 
 // --- Grid rows ---------------------------------------------------------
 
@@ -259,10 +351,11 @@ function renderCell(row: GridRow, column: string): ReturnType<typeof h> | string
   ])
 }
 
+const rowActionsWidth = 148
 const gridColumns = computed<DataTableColumns<GridRow>>(() => {
   const cols: DataTableColumns<GridRow> = []
   cols.push({ type: 'selection' })
-  for (const meta of props.columns) {
+  for (const meta of visibleMetadata.value) {
     cols.push({
       width: Math.max(140,Math.min(300,meta.name.length*9+70)),
       title: meta.name,
@@ -274,34 +367,31 @@ const gridColumns = computed<DataTableColumns<GridRow>>(() => {
       render: (row) => renderCell(row, meta.name),
     })
   }
-  {
-    cols.push({
-      title: t('grid.actions'),
-      key: '__actions',
-      width: 300,
-      fixed: 'right',
-      render: (row) =>
-        h('span', { class: 'datagrid__row-actions', style: { whiteSpace: 'nowrap' } }, [
-          h(NButton, {size:'tiny',quaternary:true,'data-testid':'row-inspect',disabled:props.columns.length===0,onClick:()=>inspectCell(row,props.columns[0]!.name)}, {default:()=>t('grid.preview')}),
-          h(NButton, { size: 'tiny', quaternary: true, 'data-testid': 'copy-row', onClick: () => emit('copy-row', row) }, { default: () => t('grid.copy') }),
-          h(
-            NButton,
-            { size: 'tiny', quaternary: true, onClick: () => emit('edit-row', row) },
-            { default: () => t('grid.edit') },
-          ),
-          h(NPopconfirm, {onPositiveClick: () => { if (row.__pk) emit('delete-row',row.__pk) }}, {
-            trigger: () => h(NButton,{size:'tiny',quaternary:true,type:'error'},{default:()=>t('grid.delete')}),
-            default: () => `${t('grid.confirmDelete')} ${props.tableName} ${JSON.stringify(row.__pk)}`,
-          }),
-        ]),
-    })
-  }
+  cols.push({
+    title: t('grid.actions'),
+    key: '__actions',
+    width: rowActionsWidth,
+    fixed: 'right',
+    render: row => h(GridRowActions, {
+      tableName: props.tableName ?? '',
+      target: row.__pk,
+      canPreview: visibleMetadata.value.length > 0,
+      onAction: action => {
+        if (action === 'edit') emit('edit-row', row)
+        else if (action === 'copy') emit('copy-row', row)
+        else if (visibleMetadata.value[0]) inspectCell(row, visibleMetadata.value[0].name)
+      },
+      onDelete: key => emit('delete-row', key),
+    }),
+  })
   return cols
 })
 
 // --- Selection ---------------------------------------------------------
 
 const checkedKeys = ref<string[]>([])
+const filterID = useId()
+const mobileFiltersOpen = ref(false)
 
 function onCheckedRowKeys(keys: (string | number)[]): void {
   checkedKeys.value = keys.map(String)
@@ -313,6 +403,8 @@ watch(
   () => props.rows,
   () => {
     checkedKeys.value = []
+    inspectorShow.value = false
+    inspectedRow.value = null
   },
 )
 
@@ -344,7 +436,7 @@ const canBulkEdit = computed(() => hasPk.value && checkedKeys.value.length > 0 &
   const row = tableData.value.find(row => row.__key === key)
   return row && props.pkColumns.every(name => row.__pk?.[name] !== null && row.__pk?.[name] !== undefined)
 }))
-const scrollWidth = computed(() => 280 + props.columns.reduce((sum,meta)=>sum+Math.max(140,Math.min(300,meta.name.length*9+70)),0))
+const scrollWidth = computed(() => 48 + rowActionsWidth + visibleMetadata.value.reduce((sum,meta)=>sum+Math.max(140,Math.min(300,meta.name.length*9+70)),0))
 
 // --- Pagination and sorting --------------------------------------------
 
@@ -391,6 +483,29 @@ const operatorOptions = computed<SelectOption[]>(() =>
   metadata.data?.operators.map(op => ({ label:op.label,value:op.value })) ?? ROW_FILTER_OPERATORS.map(op => ({label:op,value:op})),
 )
 
+const inspectedFilter = computed(() => {
+  const col = props.columns.find(meta => meta.name === inspectedColumn.value)
+  if (!col || !inspectedRow.value) return null
+  const filter = filterForCell(col.name, col.type, inspectedRow.value[col.name])
+  return filter && operatorOptions.value.some(option => option.value === filter.op) ? filter : null
+})
+function sameFilter(a: FilterDraft, b: RowsFilter): boolean {
+  return a.column === b.column && a.op === b.op && (isNullOperator(a.op) || a.value === b.value)
+}
+const filtersEdited = computed(() => {
+  const entries = drafts.value.filter(draft => draft.column !== null || draft.op !== '=' || draft.value !== '')
+  return entries.length !== props.filters.length || entries.some((draft, i) => !sameFilter(draft, props.filters[i]!))
+})
+const alreadyFiltered = computed(() => {
+  const inspected = inspectedFilter.value
+  return !!inspected && props.filters.some(filter => sameFilter(filter, inspected))
+})
+function filterByInspectedValue(): void {
+  if (!inspectedFilter.value || alreadyFiltered.value || filtersEdited.value || props.loading) return
+  emit('apply-filters', [...props.filters, inspectedFilter.value])
+  inspectorShow.value = false
+}
+
 function addDraft(): void {
   drafts.value.push(emptyDraft())
 }
@@ -420,9 +535,22 @@ function resetFilters(): void {
 </script>
 
 <style scoped>
+.datagrid__statement { margin: 6px 0; font-size: 13px; }
+.datagrid__statement summary { width: fit-content; cursor: pointer; }
+.datagrid__statement pre { padding: 8px 10px; margin: 6px 0; border-left: 2px solid currentColor; background: #8881; white-space: pre-wrap; overflow-wrap: anywhere; }
+.datagrid__statement output { font-family: monospace; overflow-wrap: anywhere; }
 .datagrid__pagination {display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;}
 .datagrid__toolbar {position:sticky;top:0;z-index:2;background:var(--n-color,#fff);padding:6px 0;}
 .datagrid__table {max-width:100%;overflow:auto;}
+.datagrid__inspector-action { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.datagrid__column-count { margin-inline-start: 6px; font-variant-numeric: tabular-nums; }
+.datagrid__chooser { display: grid; gap: 10px; padding: 12px; border: 1px solid #8886; border-radius: 4px; }
+.datagrid__chooser-heading, .datagrid__chooser-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.datagrid__chooser-heading { justify-content: space-between; }
+.datagrid__chooser-heading span { font-variant-numeric: tabular-nums; }
+.datagrid__chooser-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 160px), 1fr)); gap: 4px 12px; max-height: 210px; overflow: auto; }
+.datagrid__chooser-list label { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; cursor: pointer; overflow-wrap: anywhere; }
+.datagrid__chooser-shortcuts { display: flex; flex-wrap: wrap; gap: 4px; margin-inline-end: auto; }
 :deep(.datagrid__inspect) {font:inherit;color:inherit;background:transparent;border:0;padding:0;cursor:pointer;text-decoration:underline;}
 .datagrid {
   display: flex;
@@ -473,7 +601,19 @@ function resetFilters(): void {
   vertical-align: bottom;
 }
 
-.datagrid__row-actions {
-  white-space: nowrap;
+.datagrid { container-type: inline-size; }
+.datagrid__filter-toggle { display: none; }
+@container (max-width: 600px) {
+  .datagrid__filter-toggle { display: block; width: fit-content; padding: 4px 8px; font: inherit; color: inherit; background: transparent; border: 1px solid #8886; border-radius: 4px; cursor: pointer; }
+  .datagrid__filter-toggle::before {
+    content: ''; display: inline-block; margin-inline-end: 6px; vertical-align: 0.08em;
+    border-block: 4px solid transparent; border-inline-start: 6px solid currentColor;
+  }
+  .datagrid__filter-toggle[aria-expanded=true]::before { transform: rotate(90deg); }
+  .datagrid__filters:not(.datagrid__filters--open), .datagrid__filters-label { display: none; }
+  .datagrid__filter { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr) minmax(70px, 105px) auto; gap: 4px; }
+  .datagrid__filter .n-select, .datagrid__filter .n-input { width: 100%; min-width: 0; }
+  .datagrid__filter-value { grid-column: 1 / 3; grid-row: 2; }
+  .datagrid__filter > button { grid-column: 3; grid-row: 1; }
 }
 </style>

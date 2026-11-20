@@ -1,9 +1,12 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { QueryResult } from '../api/types'
 import i18n from '../i18n'
 import ResultGrid from './ResultGrid.vue'
+import { downloadBlob } from '../lib/download'
+
+vi.mock('../lib/download', () => ({ downloadBlob: vi.fn() }))
 
 const rowsResult: QueryResult = {
   columns: [
@@ -85,6 +88,36 @@ describe('ResultGrid', () => {
     const wrapper = mountGrid({ ...rowsResult, truncated: true })
 
     expect(wrapper.text()).toContain('Обрезано')
+  })
+
+  it('downloads the displayed result by position and identifies a truncated result in the filename', async () => {
+    const wrapper = mountGrid({
+      columns: ['same', 'same', 'line,break', 'amount'].map(name => ({ name, type: 'text', nullable: true })),
+      rows: [
+        [null, '', 'first,"one"\nsecond', '9007199254740993.000000'],
+        ['\\N', '\\path', 'русский', '0x00ff'],
+      ],
+      truncated: true, seconds: 0.1,
+    }, 2)
+    await wrapper.get('button').trigger('click')
+    const [blob, filename] = vi.mocked(downloadBlob).mock.lastCall!
+    expect(filename).toBe('query-result-2-truncated.csv')
+    expect(blob.type).toBe('text/csv;charset=utf-8')
+    expect(await blob.text()).toBe('same,same,"line,break",amount\n\\N,,"first,""one""\nsecond",9007199254740993.000000\n\\\\N,\\\\path,русский,0x00ff\n')
+  })
+
+  it('exports headers for an empty SELECT, preserves a single empty field, and omits the action for DDL', async () => {
+    const wrapper = mountGrid({ columns: [{ name: 'v', type: 'text', nullable: false }], rows: null, seconds: 0 })
+    await wrapper.get('button').trigger('click')
+    const [headersOnly, name] = vi.mocked(downloadBlob).mock.lastCall!
+    expect(name).toBe('query-result-1.csv')
+    expect(await headersOnly.text()).toBe('v\n')
+    await wrapper.setProps({ result: { ...wrapper.props('result'), rows: [['']] } })
+    await wrapper.get('button').trigger('click')
+    const [emptyField] = vi.mocked(downloadBlob).mock.lastCall!
+    expect(await emptyField.text()).toBe('v\n""\n')
+    await wrapper.setProps({ result: { columns: null, rows: null, affectedRows: 1, seconds: 0 } })
+    expect(wrapper.find('button').exists()).toBe(false)
   })
 
   it('does not show the truncated badge for a complete result', () => {

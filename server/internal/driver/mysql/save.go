@@ -15,9 +15,10 @@ import (
 // word, the length a numeric pair — anything else (comments, parens,
 // semicolons) is rejected instead of concatenated into the DDL.
 var (
-	typeRe   = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
-	lengthRe = regexp.MustCompile(`^\d+(,\d+)?$`)
-	collRe   = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+	typeRe             = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
+	lengthRe           = regexp.MustCompile(`^\d+(,\d+)?$`)
+	collRe             = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+	timestampDefaultRe = regexp.MustCompile(`(?i)^CURRENT_TIMESTAMP(?:\([0-9]*\))?$`)
 )
 
 // SaveTable applies the desired table state: an empty table name creates
@@ -174,6 +175,8 @@ func buildAlterTable(db, table string, d driver.TableDef) ([]string, error) {
 // a mover must be listed after any rename of the column it anchors on.
 func placementClause(c driver.ColumnDef) string {
 	switch {
+	case c.AfterColumn != "":
+		return " AFTER " + sqlgen.QuoteIdent(c.AfterColumn)
 	case strings.EqualFold(c.Position, "FIRST"):
 		return " FIRST"
 	case c.Position != "":
@@ -236,7 +239,17 @@ func columnFragment(c driver.ColumnDef) (string, error) {
 		// everything else is a quoted, escaped literal.
 		switch {
 		case c.Default.IsSQLExpression:
-			sb.WriteString(" DEFAULT " + c.Default.Value)
+			expr := strings.TrimSpace(c.Default.Value)
+			if expr == "" {
+				return "", fmt.Errorf("column %s requires a default expression", c.Name)
+			}
+			// MySQL requires parentheses even for a single function call.
+			// CURRENT_TIMESTAMP and NULL retain their special DEFAULT forms.
+			if strings.EqualFold(expr, "NULL") || timestampDefaultRe.MatchString(expr) {
+				sb.WriteString(" DEFAULT " + expr)
+			} else {
+				sb.WriteString(" DEFAULT (" + expr + ")")
+			}
 		default:
 			sb.WriteString(" DEFAULT " + sqlQuoteString(c.Default.Value))
 		}

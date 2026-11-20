@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"regexp"
 	"slices"
@@ -46,28 +47,45 @@ func (d *PostgresDriver) SaveTable(ctx context.Context, db, table string, desire
 	}
 	schema := d.schemaFor(ctx)
 	name := table
-	var stmts []string
 	var err error
 	if table == "" {
+		var stmts []string
 		stmts, err = buildCreateTable(schema, desired)
-		if err != nil {
-			return fmt.Errorf("save table: %w", err)
+		if err == nil {
+			err = d.execDDL(ctx, stmts)
 		}
 		name = desired.NewName
 	} else {
-		stmts, err = buildAlterTable(schema, table, desired)
-		if err != nil {
-			return fmt.Errorf("save table %s.%s: %w", schema, table, err)
-		}
+		err = d.prepareAndExecDDL(ctx, func(tx *sql.Tx) ([]string, error) {
+			qual, err := qualify(schema, table)
+			if err != nil {
+				return nil, err
+			}
+			// An unchanged type can still reject ALTER TYPE if a generated column
+			// depends on it. Keep the comparison and ALTER under one lock.
+			if _, err := tx.ExecContext(ctx, "LOCK TABLE "+qual+" IN ACCESS EXCLUSIVE MODE"); err != nil {
+				return nil, err
+			}
+			columns, err := readTableColumns(ctx, tx, schema, table)
+			if err != nil {
+				return nil, err
+			}
+			original := make(map[string]driver.ColumnDef, len(columns))
+			for _, column := range columns {
+				original[column.Name] = column
+			}
+			return buildAlterTable(schema, table, desired, original)
+		})
 	}
-	if err := d.execDDL(ctx, stmts); err != nil {
+	if err != nil {
 		return fmt.Errorf("save table %s.%s: %w", schema, name, err)
 	}
 	// The ALTERs may have changed which column (if any) the server
 	// generates — drop the cached serial-key detection under every name
 	// the table carried through the save.
-	for _, n := range []string{name, table, desired.NewName} {
-		d.invalidateSerialPK(schema, n)
+	d.invalidateSerialPK(schema, name)
+	if desired.NewName != "" && desired.NewName != name {
+		d.invalidateSerialPK(schema, desired.NewName)
 	}
 	return nil
 }
@@ -120,11 +138,19 @@ func (d *PostgresDriver) execDDL(ctx context.Context, stmts []string) error {
 	if len(stmts) == 0 {
 		return nil
 	}
+	return d.prepareAndExecDDL(ctx, func(*sql.Tx) ([]string, error) { return stmts, nil })
+}
+
+func (d *PostgresDriver) prepareAndExecDDL(ctx context.Context, prepare func(*sql.Tx) ([]string, error)) error {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin ddl transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	stmts, err := prepare(tx)
+	if err != nil {
+		return err
+	}
 	for i, stmt := range stmts {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			_ = tx.Rollback() // best-effort; the step error is the real failure
@@ -258,7 +284,7 @@ func buildCreateTableQualified(qual string, d driver.TableDef) ([]string, error)
 // engines; the counter is a sequence property), and an empty comment is
 // not re-rendered — a comment cannot be cleared through SaveTable
 // (v0.1 limitation, same as the MySQL path).
-func buildAlterTable(schema, table string, d driver.TableDef) ([]string, error) {
+func buildAlterTable(schema, table string, d driver.TableDef, original map[string]driver.ColumnDef) ([]string, error) {
 	if table == "" {
 		return nil, fmt.Errorf("alter table: table name is empty")
 	}
@@ -294,7 +320,7 @@ func buildAlterTable(schema, table string, d driver.TableDef) ([]string, error) 
 			}
 			stmts = append(stmts, "ALTER TABLE "+current+" DROP COLUMN "+sqlgen.QuoteIdentPg(c.Name))
 		case c.OldName != "" && c.OldName != c.Name: // CHANGE: rename + redefine
-			sub, err := columnAlterStmts(current, c)
+			sub, err := columnAlterStmts(current, c, original[c.OldName])
 			if err != nil {
 				return nil, fmt.Errorf("alter table %s: column %d: %w", table, i+1, err)
 			}
@@ -304,7 +330,7 @@ func buildAlterTable(schema, table string, d driver.TableDef) ([]string, error) 
 				stmts = append(stmts, columnCommentStmt(current, c.Name, c.Comment))
 			}
 		case c.OldName != "": // MODIFY (OldName == Name)
-			sub, err := columnAlterStmts(current, c)
+			sub, err := columnAlterStmts(current, c, original[c.OldName])
 			if err != nil {
 				return nil, fmt.Errorf("alter table %s: column %d: %w", table, i+1, err)
 			}
@@ -332,28 +358,26 @@ func buildAlterTable(schema, table string, d driver.TableDef) ([]string, error) 
 // DEFAULT is rendered (desired-state semantics, like the MySQL MODIFY
 // that omits the clause). A column marked AutoIncrement renders no
 // default statement — its identity default (nextval) must survive.
-// Generated columns render nothing here: PostgreSQL cannot re-type a
-// generated column, so only renames reach them (v0.1 limitation).
-func columnAlterStmts(qual string, c driver.ColumnDef) ([]string, error) {
-	if c.Generated != "" {
-		return nil, nil
-	}
-	typePart, err := columnTypeFragmentPg(c, false)
-	if err != nil {
-		return nil, err
-	}
+// Generated columns have a generation expression instead of a DEFAULT.
+func columnAlterStmts(qual string, c, original driver.ColumnDef) ([]string, error) {
 	col := sqlgen.QuoteIdentPg(c.Name)
 	alter := "ALTER TABLE " + qual + " ALTER COLUMN " + col + " "
 	var stmts []string
-	stmts = append(stmts, alter+"TYPE "+typePart)
+	if c.Generated == "" && (!strings.EqualFold(c.Type, original.Type) || c.Length != original.Length) {
+		typePart, err := columnTypeFragmentPg(c, false)
+		if err != nil {
+			return nil, err
+		}
+		stmts = append(stmts, alter+"TYPE "+typePart)
+	}
 	if c.Nullable {
 		stmts = append(stmts, alter+"DROP NOT NULL")
 	} else {
 		stmts = append(stmts, alter+"SET NOT NULL")
 	}
 	switch {
-	case c.AutoIncrement:
-		// The identity default must survive; never SET or DROP it here.
+	case c.Generated != "" || c.AutoIncrement:
+		// Generation and identity expressions must survive.
 	case c.Default != nil && c.Default.IsSQLExpression:
 		stmts = append(stmts, alter+"SET DEFAULT "+c.Default.Value)
 	case c.Default != nil:

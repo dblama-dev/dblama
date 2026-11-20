@@ -1,15 +1,36 @@
 package api
 
 import (
+	"net/http"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/hitslab/db-manager/server/internal/driver"
 	"github.com/hitslab/db-manager/server/internal/session"
-	"net/http"
 )
 
 func (s *apiServer) registerForeignKeyRoutes(r chi.Router) {
+	r.Get("/databases/{db}/relationships", s.handleRelationships)
 	r.Post("/databases/{db}/tables/{table}/foreign-keys", s.handleForeignKeysSave)
 }
+
+func (s *apiServer) handleRelationships(w http.ResponseWriter, r *http.Request) {
+	sess, _ := session.FromContext(r.Context())
+	reader, ok := sess.Driver.(driver.RelationshipReader)
+	if !ok {
+		objectUnsupported(w)
+		return
+	}
+	relations, err := reader.ListRelationships(r.Context(), pathParam(r, "db"))
+	if err != nil {
+		writeDriverErr(w, err)
+		return
+	}
+	if relations == nil {
+		relations = []driver.TableRelationship{}
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"relationships": relations})
+}
+
 func (s *apiServer) handleForeignKeysSave(w http.ResponseWriter, r *http.Request) {
 	sess, _ := session.FromContext(r.Context())
 	m, ok := sess.Driver.(driver.ForeignKeyManager)
@@ -29,7 +50,7 @@ func (s *apiServer) handleForeignKeysSave(w http.ResponseWriter, r *http.Request
 		writeObjectErr(w, err)
 		return
 	}
-	if err := m.SaveForeignKeys(r.Context(), chi.URLParam(r, "db"), chi.URLParam(r, "table"), keys); err != nil {
+	if err := m.SaveForeignKeys(r.Context(), pathParam(r, "db"), pathParam(r, "table"), keys); err != nil {
 		writeObjectErr(w, err)
 		return
 	}

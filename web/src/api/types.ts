@@ -86,6 +86,7 @@ export interface ColumnDef {
   comment?: string
   enumValues?: string[]
   position?: string
+  afterColumn?: string
 }
 
 export interface IndexColumn {
@@ -150,6 +151,7 @@ export interface SequenceInfo {
 }
 
 export interface Page {
+  statement?: { sql: string; parameters: (string | number)[] }
   columns: ColumnMeta[]
   rows: unknown[][]
   totalRows: number

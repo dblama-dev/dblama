@@ -161,6 +161,13 @@ func TestBuildAlterTable_ReorderExistingColumns(t *testing.T) {
 	}
 }
 
+func TestPlacementAfterReservedColumnName(t *testing.T) {
+	got := placementClause(driver.ColumnDef{AfterColumn: "FiRsT"})
+	if got != " AFTER `FiRsT`" {
+		t.Errorf("placement after named column = %q", got)
+	}
+}
+
 func TestBuildCreateTable_EnumEscape(t *testing.T) {
 	desired := driver.TableDef{
 		NewName: "odd`names",

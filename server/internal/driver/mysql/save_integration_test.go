@@ -306,7 +306,10 @@ func TestSaveTable_RoundTripPreservesColumns(t *testing.T) {
 					// GENERATION_EXPRESSION and re-emitted as AS (expr).
 					{Name: "name_up", Type: "varchar", Length: "64", Nullable: true, Generated: "STORED",
 						Default: &driver.DefaultValue{Value: "UPPER(name)", IsSQLExpression: true}},
-					{Name: "kind", Type: "enum", Nullable: true, EnumValues: []string{"a", "b", "c"}},
+					{Name: "kind", Type: "enum", Nullable: true, EnumValues: []string{"", "a,b", "it's valid", " c"}, Default: &driver.DefaultValue{Value: ""}},
+					{Name: "keyword", Type: "varchar", Length: "32", Default: &driver.DefaultValue{Value: "NULL"}},
+					{Name: "literal", Type: "varchar", Length: "32", Default: &driver.DefaultValue{Value: "CURRENT_TIMESTAMP"}},
+					{Name: "computed_default", Type: "varchar", Length: "32", Default: &driver.DefaultValue{Value: `concat('O''Brien','A\\B')`, IsSQLExpression: true}},
 					{Name: "price", Type: "decimal", Length: "10,2", Nullable: true},
 					{Name: "size_code", Type: "char", Length: "2", Nullable: true, Collation: "utf8mb4_bin"},
 					{Name: "created_at", Type: "timestamp", Default: &driver.DefaultValue{Value: "CURRENT_TIMESTAMP", IsSQLExpression: true}, OnUpdate: "CURRENT_TIMESTAMP"},
@@ -330,6 +333,20 @@ func TestSaveTable_RoundTripPreservesColumns(t *testing.T) {
 			if err != nil {
 				t.Fatalf("TableDef(before round trip) error: %v", err)
 			}
+			for i, column := range first.Columns {
+				switch column.Name {
+				case "kind", "keyword", "literal":
+					if !reflect.DeepEqual(column.Default, desired.Columns[i].Default) ||
+						!reflect.DeepEqual(column.EnumValues, desired.Columns[i].EnumValues) {
+						t.Fatalf("column %q: got default %#v and enum values %q, want %#v and %q",
+							column.Name, column.Default, column.EnumValues, desired.Columns[i].Default, desired.Columns[i].EnumValues)
+					}
+				case "computed_default":
+					if column.Default == nil || !column.Default.IsSQLExpression {
+						t.Fatalf("column %q: got default %#v, want SQL expression", column.Name, column.Default)
+					}
+				}
+			}
 			// The web layer sends the read definition back with
 			// OldName == Name (the read contract); without it every
 			// column would be interpreted as an ADD.
@@ -346,14 +363,20 @@ func TestSaveTable_RoundTripPreservesColumns(t *testing.T) {
 				t.Fatalf("TableDef(after round trip) error: %v", err)
 			}
 			assertTableDef(t, second, first)
+			execDDL(t, cfg, "INSERT INTO t4_roundtrip () VALUES ()")
+			var computedDefault string
+			if err := drv.(*MysqlDriver).db.QueryRowContext(ctx, "SELECT computed_default FROM t4_roundtrip").Scan(&computedDefault); err != nil {
+				t.Fatal(err)
+			}
+			if computedDefault != `O'BrienA\B` {
+				t.Fatalf("computed default after saving = %q", computedDefault)
+			}
 		})
 	}
 }
 
-// TestSaveTable_ReorderColumns proves that reordering existing columns
-// is a real server-side effect now: [a,b,c] reordered to [c,a,b] (the
-// frontend sends every column with a Position from the desired display
-// order) reads back in the new ordinal order on both images.
+// MySQL and MariaDB must apply the requested order even when adding a
+// column after an existing column whose name is also a placement keyword.
 func TestSaveTable_ReorderColumns(t *testing.T) {
 	for _, img := range testImages {
 		t.Run(img.image, func(t *testing.T) {
@@ -361,7 +384,7 @@ func TestSaveTable_ReorderColumns(t *testing.T) {
 			drv := connectOK(t, cfg)
 			ctx := context.Background()
 
-			execDDL(t, cfg, "CREATE TABLE t4_reorder (a INT NOT NULL, b INT NOT NULL, c INT NOT NULL)")
+			execDDL(t, cfg, "CREATE TABLE t4_reorder (`FiRsT` INT NOT NULL, b INT NOT NULL, c INT NOT NULL)")
 			t.Cleanup(func() { execDDL(t, cfg, "DROP TABLE IF EXISTS t4_reorder") })
 
 			def, err := drv.TableDef(ctx, cfg.Database, "t4_reorder")
@@ -369,8 +392,6 @@ func TestSaveTable_ReorderColumns(t *testing.T) {
 				t.Fatalf("TableDef(t4_reorder) error: %v", err)
 			}
 
-			// Desired order c, a, b with positions from the display
-			// order, exactly as the structure editor sends them.
 			byName := map[string]driver.ColumnDef{}
 			for _, c := range def.Columns {
 				byName[c.Name] = c
@@ -385,8 +406,9 @@ func TestSaveTable_ReorderColumns(t *testing.T) {
 			}
 			def.Columns = []driver.ColumnDef{
 				moved("c", "FIRST"),
-				moved("a", "c"),
-				moved("b", "a"),
+				moved("FiRsT", "c"),
+				{Name: "inserted", Type: "int", AfterColumn: "FiRsT"},
+				moved("b", "inserted"),
 			}
 
 			if err := drv.SaveTable(ctx, cfg.Database, "t4_reorder", def); err != nil {
@@ -401,7 +423,7 @@ func TestSaveTable_ReorderColumns(t *testing.T) {
 			for i, c := range got.Columns {
 				names[i] = c.Name
 			}
-			want := []string{"c", "a", "b"}
+			want := []string{"c", "FiRsT", "inserted", "b"}
 			if !slices.Equal(names, want) {
 				t.Errorf("column order after reorder = %v, want %v", names, want)
 			}

@@ -33,6 +33,7 @@ const router = createRouter({
         { path: '', name: 'db', component: DbView },
         { path: 'table/:t', name: 'db-table', component: TableView },
         { path: 'console', name: 'db-console', component: ConsoleView },
+        { path: 'relationships', name: 'db-relationships', component: () => import('../views/RelationshipsView.vue') },
         { path: 'search', name: 'db-search', component: SearchView },
         { path: 'export', name: 'db-export', component: ExportView },
         { path: 'import', name: 'db-import', component: ImportView },

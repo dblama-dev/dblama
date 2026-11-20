@@ -53,8 +53,56 @@ func TestDatabaseGrantScopeEscapesWildcardCharacters(t *testing.T) {
 		t.Fatalf("escaped grant=%#v", escaped)
 	}
 	wildcard := parseGrant("GRANT SELECT ON `foo_bar%tail`.* TO `a`@`%`", false)
-	if wildcard.Editable {
-		t.Fatal("wildcard grant exposed as an exact editable scope")
+	if !wildcard.Editable || wildcard.Scope.Level != "databasePattern" || wildcard.Scope.Database != "foo_bar%tail" {
+		t.Fatalf("wildcard grant not recognized as a distinct pattern: %#v", wildcard)
+	}
+}
+
+func TestDatabasePatternGrantRoundTrip(t *testing.T) {
+	for _, tc := range []struct{ name, sql string }{
+		{`alice\_%`, "`alice\\_%`.*"},
+		{`part_\%%`, "`part_\\%%`.*"},
+		{"a`_%", "`a``_%`.*"},
+		{"%", "`%`.*"},
+		{`a\\%`, "`a\\\\%`.*"},
+	} {
+		scope := driver.GrantScope{Level: "databasePattern", Database: tc.name}
+		got, err := grantScopeSQL(scope, false)
+		if err != nil || got != tc.sql {
+			t.Errorf("pattern %q: SQL = %q, err = %v", tc.name, got, err)
+		}
+		raw := "GRANT SELECT ON " + tc.sql + " TO 'reader'@'%' WITH GRANT OPTION"
+		if g := parseGrant(raw, false); g.Scope != scope || !g.Editable || !g.GrantOption {
+			t.Errorf("parse pattern: %#v", g)
+		}
+		if _, err := grantScopeSQL(scope, true); err == nil {
+			t.Errorf("pattern %q allowed with partial_revokes", tc.name)
+		}
+		if g := parseGrant(raw, true); g.Scope.Level != "database" || g.Scope.Database != tc.name || !g.Editable {
+			t.Errorf("parse literal: %#v", g)
+		}
+	}
+	for _, name := range []string{"", "*", "*.*", "plain", `foo\_bar\%`, `%trailing\`, `%bad\q`, "bad\x00%"} {
+		if _, err := grantScopeSQL(driver.GrantScope{Level: "databasePattern", Database: name}, false); err == nil {
+			t.Errorf("invalid pattern accepted: %q", name)
+		}
+	}
+	for _, raw := range []string{
+		"GRANT ALL PRIVILEGES ON `app\\_%`.* TO 'reader'@'%'",
+		"REVOKE SELECT ON `app\\_%`.* FROM 'reader'@'%'",
+		"GRANT SELECT ON `app%\\q`.* TO 'reader'@'%'",
+	} {
+		if g := parseGrant(raw, false); g.Editable || g.Scope.Level != "databasePattern" {
+			t.Errorf("opaque pattern lost its target or became editable: %#v", g)
+		}
+	}
+	catalog := []driver.PrivilegeInfo{{Name: "SELECT", Levels: []string{"global", "database"}}, {Name: "PROCESS", Levels: []string{"global"}}}
+	scope := driver.GrantScope{Level: "databasePattern", Database: "tenant%"}
+	if got, err := privilegesSQL([]string{"SELECT"}, scope, catalog); err != nil || got != "SELECT" {
+		t.Errorf("database privilege denied: %q, %v", got, err)
+	}
+	if _, err := privilegesSQL([]string{"PROCESS"}, scope, catalog); err == nil {
+		t.Error("global-only privilege accepted for pattern")
 	}
 }
 
@@ -63,7 +111,7 @@ func TestPrivilegeCatalogContextsAndOpaqueAllGrant(t *testing.T) {
 		context string
 		want    int
 	}{{"Tables", 3}, {"Columns", 3}, {"Databases", 2}, {"Functions,Procedures", 2}, {"Server Admin", 1}} {
-		if got := privilegeLevels(tc.context); len(got) != tc.want {
+		if got := privilegeLevels("", tc.context); len(got) != tc.want {
 			t.Fatalf("context %q levels=%v", tc.context, got)
 		}
 	}
@@ -75,5 +123,41 @@ func TestPrivilegeCatalogContextsAndOpaqueAllGrant(t *testing.T) {
 func TestAnonymousAccountIsValid(t *testing.T) {
 	if err := validAccount(driver.UserAccount{User: "", Host: "localhost"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestComplexGrantsPreserveTheirReadOnlyTarget(t *testing.T) {
+	tests := []struct {
+		raw   string
+		scope driver.GrantScope
+	}{
+		{`GRANT SELECT ("col ON fake.scope", "a""b"), UPDATE ON "shop"."items" TO reader@"%"`, driver.GrantScope{Level: "table", Database: "shop", Table: "items"}},
+		{`GRANT SELECT (lowercase) ON shop.items TO reader@localhost`, driver.GrantScope{Level: "table", Database: "shop", Table: "items"}},
+		{"GRANT SELECT (`days ON field`), UPDATE ON `shop`.`items` TO 'a'@'%'", driver.GrantScope{Level: "table", Database: "shop", Table: "items"}},
+		{"REVOKE INSERT ON `shop`.* FROM `a`@`%`", driver.GrantScope{Level: "database", Database: "shop"}},
+		{"GRANT SELECT ON `shop`.`items` TO 'a'@'%' IDENTIFIED BY PASSWORD 'private'", driver.GrantScope{Level: "table", Database: "shop", Table: "items"}},
+	}
+	for _, test := range tests {
+		got := parseGrant(test.raw, false)
+		if got.Scope != test.scope || got.Editable || len(got.Privileges) != 0 {
+			t.Errorf("expected only read-only target %#v, got %#v", test.scope, got)
+		}
+	}
+}
+
+func TestParseShowGrantsIdentifierStyles(t *testing.T) {
+	for _, tc := range []struct {
+		raw   string
+		scope driver.GrantScope
+	}{
+		{`GRANT SELECT ON "qa\_demo\_%".* TO "qa_demo"@"%"`, driver.GrantScope{Level: "databasePattern", Database: `qa\_demo\_%`}},
+		{`GRANT SELECT ON "first""db"."odd""table" TO qa_demo@"%"`, driver.GrantScope{Level: "table", Database: `first"db`, Table: `odd"table`}},
+		{`GRANT SELECT ON открытая.books_2026 TO qa_demo@localhost`, driver.GrantScope{Level: "table", Database: "открытая", Table: "books_2026"}},
+		{`GRANT SELECT ON plain.* TO "an""account"@"some.host"`, driver.GrantScope{Level: "database", Database: "plain"}},
+	} {
+		g := parseGrant(tc.raw, false)
+		if !g.Editable || g.Scope != tc.scope || len(g.Privileges) != 1 || g.Privileges[0] != "SELECT" {
+			t.Errorf("grant %q: got %#v, want %#v", tc.raw, g, tc.scope)
+		}
 	}
 }

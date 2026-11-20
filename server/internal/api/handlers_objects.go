@@ -39,7 +39,7 @@ func writeObjectErr(w http.ResponseWriter, err error) {
 func (s *apiServer) handleObjects(kind string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, _ := session.FromContext(r.Context())
-		db, name := chi.URLParam(r, "db"), chi.URLParam(r, "name")
+		db, name := pathParam(r, "db"), pathParam(r, "name")
 		ctx := r.Context()
 		var list func() ([]driver.ObjectInfo, error)
 		var save func(driver.ObjectDef) error
@@ -158,7 +158,7 @@ func (s *apiServer) handleProcedureCall(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	results, err := m.CallProcedure(r.Context(), chi.URLParam(r, "db"), chi.URLParam(r, "name"), req.Identity, req.Args)
+	results, err := m.CallProcedure(r.Context(), pathParam(r, "db"), pathParam(r, "name"), req.Identity, req.Args)
 	if err != nil {
 		writeObjectErr(w, err)
 		return
@@ -183,7 +183,7 @@ func (s *apiServer) handlePartitions(w http.ResponseWriter, r *http.Request) {
 		objectUnsupported(w)
 		return
 	}
-	db, table, name := chi.URLParam(r, "db"), chi.URLParam(r, "table"), chi.URLParam(r, "name")
+	db, table, name := pathParam(r, "db"), pathParam(r, "table"), pathParam(r, "name")
 	ctx := r.Context()
 	if r.Method == http.MethodGet {
 		parts, err := m.ListPartitions(ctx, db, table)

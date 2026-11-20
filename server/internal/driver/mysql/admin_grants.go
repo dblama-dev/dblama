@@ -5,10 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/hitslab/db-manager/server/internal/driver"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/hitslab/db-manager/server/internal/driver"
 )
 
 func adminQuote(s string) string { return "`" + strings.ReplaceAll(s, "`", "``") + "`" }
@@ -43,14 +44,19 @@ func (d *MysqlDriver) ReadPrivilegeCatalog(ctx context.Context) ([]driver.Privil
 		if !privilegeNamePattern.MatchString(name) {
 			continue
 		}
-		catalog = append(catalog, driver.PrivilegeInfo{Name: name, Levels: privilegeLevels(scope)})
+		catalog = append(catalog, driver.PrivilegeInfo{Name: name, Levels: privilegeLevels(name, scope)})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	return catalog, nil
 }
-func privilegeLevels(scope string) []string {
+func privilegeLevels(name, scope string) []string {
+	// SHOW PRIVILEGES labels EVENT as "Server Admin", but both engines
+	// also grant it on individual databases.
+	if name == "EVENT" {
+		return []string{"global", "database"}
+	}
 	scope = strings.ToLower(scope)
 	levels := []string{"global"}
 	if strings.Contains(scope, "database") || strings.Contains(scope, "table") || strings.Contains(scope, "column") || strings.Contains(scope, "function") || strings.Contains(scope, "procedure") || strings.Contains(scope, "routine") {
@@ -70,31 +76,36 @@ func grantDatabaseName(name string, literal bool) string {
 	}
 	return adminQuote(name)
 }
-func (d *MysqlDriver) grantDatabaseLiteralMode(ctx context.Context) (bool, error) {
+
+// DatabasePatternsSupported reads the live server setting. MariaDB and older
+// MySQL versions have no partial_revokes variable and support wildcard grants.
+func (d *MysqlDriver) DatabasePatternsSupported(ctx context.Context) (bool, error) {
 	var name, value string
-	err := d.db.QueryRowContext(ctx, "SHOW GLOBAL VARIABLES LIKE 'partial_revokes'").Scan(&name, &value)
+	err := d.db.QueryRowContext(ctx, "SHOW GLOBAL VARIABLES WHERE Variable_name = 'partial_revokes'").Scan(&name, &value)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+		return true, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return strings.EqualFold(value, "ON") || value == "1", nil
+	return strings.EqualFold(value, "OFF") || value == "0", nil
 }
 func grantScopeSQL(s driver.GrantScope, literal bool) (string, error) {
+	if !s.Valid() {
+		return "", fmt.Errorf("invalid privilege scope")
+	}
 	switch s.Level {
 	case "global":
-		if s.Database == "" && s.Table == "" {
-			return "*.*", nil
-		}
+		return "*.*", nil
 	case "database":
-		if s.Database != "" && s.Table == "" && !strings.ContainsRune(s.Database, 0) {
-			return grantDatabaseName(s.Database, literal) + ".*", nil
+		return grantDatabaseName(s.Database, literal) + ".*", nil
+	case driver.DatabasePatternLevel:
+		if literal {
+			return "", driver.ErrDatabasePatternsDisabled
 		}
+		return adminQuote(s.Database) + ".*", nil
 	case "table":
-		if s.Database != "" && s.Table != "" && !strings.ContainsRune(s.Database+s.Table, 0) {
-			return adminQuote(s.Database) + "." + adminQuote(s.Table), nil
-		}
+		return adminQuote(s.Database) + "." + adminQuote(s.Table), nil
 	}
 	return "", fmt.Errorf("invalid privilege scope")
 }
@@ -110,7 +121,7 @@ func privilegesSQL(names []string, s driver.GrantScope, catalog []driver.Privile
 		for _, p := range catalog {
 			if name == p.Name && privilegeNamePattern.MatchString(name) {
 				for _, level := range p.Levels {
-					if level == s.Level {
+					if level == s.PrivilegeLevel() {
 						valid = true
 					}
 				}
@@ -129,7 +140,26 @@ func privilegesSQL(names []string, s driver.GrantScope, catalog []driver.Privile
 
 // The account and trailing server clauses are deliberately not returned: older
 // servers may append password hashes, SSL settings and resource limits.
-var grantPattern = regexp.MustCompile("^GRANT ([A-Z_, ]+) ON (\\*|`(?:``|[^`])+`)\\.(\\*|`(?:``|[^`])+`) TO (?:`(?:``|[^`])*`|'(?:''|[^'])*')@(?:`(?:``|[^`])*`|'(?:''|[^'])*')(.*)$")
+const (
+	// SHOW GRANTS follows ANSI_QUOTES and sql_quote_show_create. Doubled
+	// identifier quotes represent one literal quote; backslashes in schema
+	// names belong to the grant pattern and must survive unquoting.
+	grantQuotedIdentifier = "`(?:``|[^`])*`" + `|"(?:""|[^"])*"`
+	grantIdentifier       = `(?:[a-zA-Z0-9$_\x{0080}-\x{FFFF}]+|` + grantQuotedIdentifier + `)`
+	grantTarget           = `(\*|` + grantIdentifier + `)`
+	grantAccountPart      = `(?:` + grantIdentifier + `|'(?:''|[^'])*')`
+)
+
+var grantPattern = regexp.MustCompile(`^(GRANT|REVOKE) ((?:[(), ]|` + grantIdentifier + `)+) ON ` +
+	grantTarget + `\.` + grantTarget + ` (?:TO|FROM) ` + grantAccountPart + `@` + grantAccountPart + `((?: .*)?)$`)
+
+func unquoteGrantIdentifier(s string) string {
+	if s[0] == '`' || s[0] == '"' {
+		quote := s[:1]
+		return strings.ReplaceAll(s[1:len(s)-1], quote+quote, quote)
+	}
+	return s
+}
 
 func parseGrant(raw string, literal bool) driver.GrantInfo {
 	g := driver.GrantInfo{Privileges: []string{}}
@@ -137,70 +167,36 @@ func parseGrant(raw string, literal bool) driver.GrantInfo {
 	if m == nil {
 		return g
 	}
-	g.Privileges = strings.Split(m[1], ", ")
-	g.GrantOption = strings.Contains(m[4], "WITH GRANT OPTION")
-	unquote := func(s string) string { return strings.ReplaceAll(s[1:len(s)-1], "``", "`") }
-	if m[2] == "*" && m[3] == "*" {
+	validScope := true
+	switch {
+	case m[3] == "*" && m[4] == "*":
 		g.Scope.Level = "global"
-	} else if m[2] != "*" {
-		g.Scope.Database = unquote(m[2])
-		if m[3] == "*" {
-			g.Scope.Level = "database"
-			var exact bool
-			g.Scope.Database, exact = decodeGrantDatabase(g.Scope.Database, literal)
-			if !exact {
-				return g
-			}
+	case m[3] != "*" && m[4] == "*":
+		db := unquoteGrantIdentifier(m[3])
+		if literal {
+			g.Scope = driver.GrantScope{Level: "database", Database: db}
 		} else {
-			g.Scope.Level = "table"
-			g.Scope.Table = unquote(m[3])
+			g.Scope, validScope = driver.ParseDatabaseGrantName(db)
 		}
-	} else {
+	case m[3] != "*":
+		g.Scope = driver.GrantScope{Level: "table", Database: unquoteGrantIdentifier(m[3]), Table: unquoteGrantIdentifier(m[4])}
+	default:
 		return g
 	}
-	g.Privileges = strings.Split(m[1], ", ")
-	// MariaDB attaches authentication hashes and resource limits to the
-	// global grant. Extract only privilege names and never expose those clauses.
-	if g.Scope.Level != "global" && m[4] != "" && m[4] != " WITH GRANT OPTION" {
-		return driver.GrantInfo{Privileges: []string{}}
-	}
-	g.GrantOption = strings.Contains(m[4], "WITH GRANT OPTION")
-	if m[1] == "ALL PRIVILEGES" {
-		return g
-	}
-	if m[1] == "USAGE" {
-		g.Editable = true
-		return g
-	}
-	g.Editable = true
-	for _, name := range g.Privileges {
-		if !privilegeNamePattern.MatchString(name) {
-			g.Editable = false
-		}
-	}
-	return g
-}
 
-// Unescaped wildcard grants describe a pattern, not one exact database. They
-// remain visible but cannot be edited as an exact scope through this API.
-func decodeGrantDatabase(name string, literal bool) (string, bool) {
-	if literal {
-		return name, true
+	// Retain the target of restrictions and column grants so the editor can
+	// protect that scope without disclosing unparsed SQL or account clauses.
+	if m[1] == "REVOKE" || (g.Scope.Level != "global" && m[5] != "" && m[5] != " WITH GRANT OPTION") {
+		return g
 	}
-	var out strings.Builder
-	for i := 0; i < len(name); i++ {
-		c := name[i]
-		if c == '_' || c == '%' {
-			return name, false
+	names := strings.Split(m[2], ", ")
+	for _, name := range names {
+		if !privilegeNamePattern.MatchString(name) {
+			return g
 		}
-		if c == '\\' {
-			i++
-			if i >= len(name) || !strings.ContainsRune(`_%\`, rune(name[i])) {
-				return name, false
-			}
-			c = name[i]
-		}
-		out.WriteByte(c)
 	}
-	return out.String(), true
+	g.Privileges = names
+	g.GrantOption = strings.Contains(m[5], "WITH GRANT OPTION")
+	g.Editable = validScope && g.Scope.Valid() && m[2] != "ALL PRIVILEGES"
+	return g
 }

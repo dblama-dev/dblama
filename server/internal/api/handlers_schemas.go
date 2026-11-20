@@ -3,8 +3,6 @@ package api
 import (
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/hitslab/db-manager/server/internal/driver"
 	"github.com/hitslab/db-manager/server/internal/session"
 )
@@ -112,7 +110,7 @@ func (s *apiServer) handleSequenceDrop(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	name := chi.URLParam(r, "name")
+	name := pathParam(r, "name")
 	if name == "" {
 		WriteErr(w, http.StatusBadRequest, ErrBadRequest("sequence name is required"))
 		return
@@ -130,7 +128,7 @@ func (s *apiServer) handleSequenceUpdate(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	name := chi.URLParam(r, "name")
+	name := pathParam(r, "name")
 	if name == "" {
 		WriteErr(w, http.StatusBadRequest, ErrBadRequest("sequence name is required"))
 		return

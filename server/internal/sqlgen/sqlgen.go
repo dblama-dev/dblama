@@ -26,8 +26,8 @@ const defaultLimit = 50
 // Filter is a single WHERE condition. Value is always bound as a parameter.
 // For IN and NOT IN, Value is a comma-separated list that expands into one
 // placeholder per item. For IS NULL and IS NOT NULL, Value is ignored and
-// no placeholder is emitted. For every other operator a non-empty Value is
-// required.
+// no placeholder is emitted. Equality and inequality accept empty text as
+// a value; the remaining operators require a non-empty value.
 type Filter struct {
 	Column   string
 	Operator string
@@ -350,7 +350,8 @@ func buildFilter(d Dialect, ph *dialectPlaceholder, f Filter) (string, []any, er
 		return d.QuoteIdent(f.Column) + " " + f.Operator + " (" + strings.Join(markers, ",") + ")",
 			inArgs, nil
 	default:
-		if f.Value == "" {
+		// An empty string is an explicit comparison value, distinct from NULL.
+		if f.Value == "" && f.Operator != "=" && f.Operator != "!=" {
 			return "", nil, fmt.Errorf("sqlgen: filter %s on %q requires a non-empty value", f.Operator, f.Column)
 		}
 		return d.QuoteIdent(f.Column) + " " + f.Operator + " " + ph.next(), []any{f.Value}, nil

@@ -226,6 +226,50 @@ describe('StructureEditor', () => {
     wrapper.unmount()
   })
 
+  it('inserts columns at the start and after a renamed anchor directly from the overview', async () => {
+    mockBase()
+    const wrapper = await mountLoaded()
+    setString(rowByName(wrapper, 'title'), 'struct-field--name', 'FiRsT')
+    await wrapper.get('[data-add-first]').trigger('click')
+    const leading = rows(wrapper)[0]
+    setString(leading, 'struct-field--name', 'leading')
+    field(leading, 'struct-field--type').findComponent(NSelect).vm.$emit('update:value', 'int')
+    const anchor = rowByName(wrapper, 'FiRsT')
+    const insert = anchor.element.parentElement!.querySelector<HTMLButtonElement>('[data-add-after]')!
+    expect(insert).toBeTruthy()
+    insert.click()
+    await flushPromises()
+    const inserted = rows(wrapper)[3]
+    expect(inserted.attributes('open')).toBeDefined()
+    setString(inserted, 'struct-field--name', 'inserted')
+    field(inserted, 'struct-field--type').findComponent(NSelect).vm.$emit('update:value', 'text')
+    await flushPromises()
+    await clickSave(wrapper)
+    expect(putBodies()[0].columns.map(c => [c.name, c.position, c.afterColumn])).toEqual([
+      ['leading', 'FIRST', undefined], ['id', 'leading', undefined], ['FiRsT', 'id', undefined],
+      ['inserted', undefined, 'FiRsT'], ['size', 'inserted', undefined],
+    ])
+    wrapper.unmount()
+  })
+
+  it('allows choosing column order before creating a PostgreSQL table and omits placement clauses', async () => {
+    mockedApi.mockResolvedValue(undefined)
+    const wrapper = mountEditor('_new', 'public')
+    await flushPromises()
+    setString(wrapper, 'struct-field--table-name', 'events')
+    await wrapper.get('[data-testid="struct-add"]').trigger('click')
+    setString(rows(wrapper)[0], 'struct-field--name', 'value')
+    field(rows(wrapper)[0], 'struct-field--type').findComponent(NSelect).vm.$emit('update:value', 'text')
+    await wrapper.get('[data-add-first]').trigger('click')
+    setString(rows(wrapper)[0], 'struct-field--name', 'id')
+    field(rows(wrapper)[0], 'struct-field--type').findComponent(NSelect).vm.$emit('update:value', 'int')
+    await flushPromises()
+    await clickSave(wrapper)
+    const body = mockedApi.mock.calls.find(([method]) => method === 'PUT')![2] as TableDef
+    expect(body.columns).toEqual([{ name: 'id', type: 'int', nullable: true }, { name: 'value', type: 'text', nullable: true }])
+    wrapper.unmount()
+  })
+
   it('turns off a loaded auto_increment column with a real click', async () => {
     mockBase()
     const wrapper = await mountLoaded()
@@ -272,7 +316,7 @@ describe('StructureEditor', () => {
     wrapper.unmount()
   })
 
-  it('a generated column forces nullable off and carries the expression as an SQL default', async () => {
+  it('sends a generated column with the nullable flag the MySQL driver requires', async () => {
     mockBase()
     const wrapper = await mountLoaded()
 
@@ -294,9 +338,103 @@ describe('StructureEditor', () => {
     const dbl = putBodies()[0].columns.find((c) => c.name === 'dbl')
     expect(dbl).toMatchObject({
       generated: 'VIRTUAL',
-      nullable: false,
+      nullable: true,
       default: { value: 'id * 2', isSqlExpression: true },
     })
+    wrapper.unmount()
+  })
+
+  it.each(['postgres', 'mysql'])('offers generation controls supported for existing and new %s columns', async engine => {
+    const postgres = engine === 'postgres'
+    mockedApi.mockImplementation(async (method, url) => {
+      if (method === 'GET' && url.startsWith(defUrl)) return {
+        ...def, columns: [...def.columns, {
+          name: 'computed', type: 'varchar', length: '20', nullable: true, generated: 'STORED', default: { value: 'upper(title)', isSqlExpression: true },
+        }],
+      }
+      return undefined
+    })
+    const wrapper = mountEditor('users', postgres ? 'public' : undefined)
+    await flushPromises()
+    const computed = rowByName(wrapper, 'computed')
+    expect(field(computed, 'struct-field--generated').findComponent(NSelect).props('disabled')).toBe(postgres)
+    expect(field(computed, 'struct-field--type').findComponent(NSelect).props('disabled')).toBe(postgres)
+    expect(field(computed, 'struct-field--length').findComponent(NInput).props('readonly')).toBe(postgres)
+    expect(field(computed, 'struct-field--genexpr').findComponent(NInput).props('readonly')).toBe(postgres)
+    expect(field(computed, 'struct-field--nullable').findComponent(NCheckbox).props('disabled')).toBe(!postgres)
+    expect(field(computed, 'struct-field--name').findComponent(NInput).props('disabled')).toBe(false)
+    expect(field(computed, 'struct-field--generated').text().includes(i18n.global.t('structure.savedGenerationHint'))).toBe(postgres)
+    const ordinary = rowByName(wrapper, 'title')
+    expect(field(ordinary, 'struct-field--generated').findComponent(NSelect).props('disabled')).toBe(postgres)
+    expect(field(ordinary, 'struct-field--type').findComponent(NSelect).props('disabled')).toBe(false)
+    await wrapper.get('[data-testid="struct-add"]').trigger('click')
+    const added = rows(wrapper).at(-1)!
+    expect(field(added, 'struct-field--generated').findComponent(NSelect).props('disabled')).toBe(false)
+    setGenerated(added, 'STORED')
+    await flushPromises()
+    expect(field(added, 'struct-field--genexpr').findComponent(NInput).props('readonly')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('preserves an empty literal default and each ENUM label when saving another column', async () => {
+    const choices = ['', 'red, green', "O'Brien", ' leading space']
+    mockedApi.mockImplementation(async (method, url) => {
+      if (method === 'GET' && url === defUrl) return { ...def, columns: [
+        ...def.columns,
+        { name: 'choice', type: 'enum', nullable: false, enumValues: choices, default: { value: '' } },
+      ] }
+      return undefined
+    })
+    const wrapper = await mountLoaded()
+    setString(rowByName(wrapper, 'title'), 'struct-field--name', 'heading')
+    await clickSave(wrapper)
+    expect(putBodies()[0].columns.find(c => c.name === 'choice')).toMatchObject({
+      enumValues: choices, default: { value: '', isSqlExpression: false },
+    })
+    expect(rowByName(wrapper, 'choice').get('summary').text()).toContain("DEFAULT ''")
+    wrapper.unmount()
+  })
+
+  it('can create an empty-string default, remove a default, set NULL and enter an expression', async () => {
+    mockBase()
+    const wrapper = await mountLoaded()
+    async function setMode(name: string, mode: string) {
+      await rowByName(wrapper, name).get('select.default-mode').setValue(mode)
+    }
+    await setMode('id', 'none')
+    await setMode('title', 'literal')
+    setString(rowByName(wrapper, 'title'), 'struct-field--default', '')
+    await setMode('size', 'null')
+    await clickSave(wrapper)
+    expect(putBodies()[0].columns.map(c => c.default)).toEqual([
+      undefined, { value: '', isSqlExpression: false }, { value: 'NULL', isSqlExpression: true },
+    ])
+    await setMode('title', 'none')
+    await setMode('size', 'expression')
+    expect(wrapper.get('[data-testid="struct-save"]').attributes('disabled')).toBeDefined()
+    setString(rowByName(wrapper, 'size'), 'struct-field--default', '(1 + 2)')
+    await flushPromises()
+    await clickSave(wrapper)
+    expect(putBodies()[1].columns.map(c => c.default)).toEqual([
+      undefined, undefined, { value: '(1 + 2)', isSqlExpression: true },
+    ])
+    wrapper.unmount()
+  })
+
+  it.each(['enum', 'set'])('edits ordered %s choices individually', async type => {
+    mockBase()
+    const wrapper = await mountLoaded()
+    const row = rowByName(wrapper, 'title')
+    field(row, 'struct-field--type').findComponent(NSelect).vm.$emit('update:value', type)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="struct-save"]').attributes('disabled')).toBeDefined()
+    for (const value of ['remove me', "won't trim", '']) {
+      await row.get('[data-add-choice]').trigger('click')
+      await row.findAll('textarea.enum-choice').at(-1)!.setValue(value)
+    }
+    await row.get('[data-remove-choice]').trigger('click')
+    await clickSave(wrapper)
+    expect(putBodies()[0].columns.find(c => c.name === 'title')?.enumValues).toEqual(["won't trim", ''])
     wrapper.unmount()
   })
 
@@ -504,6 +642,8 @@ it('uses schema for definitions and writes and hides PostgreSQL column reorderin
   await flushPromises()
   expect(mockedApi).toHaveBeenCalledWith('GET', `${defUrl}?schema=Odd%20Schema`)
   expect(wrapper.find('[data-testid="col-up"]').exists()).toBe(false)
+  expect(wrapper.find('[data-add-after]').exists()).toBe(false)
+  expect(wrapper.find('[data-add-first]').exists()).toBe(false)
   await wrapper.find('[data-testid="struct-save"]').trigger('click')
   await flushPromises()
   expect(mockedApi).toHaveBeenCalledWith('PUT', `${defUrl}?schema=Odd%20Schema`, expect.anything())

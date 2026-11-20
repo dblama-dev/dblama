@@ -1,5 +1,6 @@
 export const databaseMessages = {
   en: { databaseOps: {
+    databaseActions: 'Database actions', emptyDatabase: 'No tables or views in this database.', noMatchingTables: 'No tables or views match your filter.', clearFilter: 'Clear filter', clearSelection: 'Clear selection', hiddenSelected: '{count} hidden by filter',
     createDatabase: 'Create database', renameDatabase: 'Rename database', dropDatabase: 'Drop database',
     create: 'Create', rename: 'Rename', confirmDrop: 'Confirm drop', cancel: 'Cancel',
     name: 'Database name', collation: 'Default collation', serverDefault: 'Server default',
@@ -13,6 +14,7 @@ export const databaseMessages = {
     moveWarning: 'Moving removes the selected tables from this database.',
   } },
   ru: { databaseOps: {
+    databaseActions: 'Операции с базой', emptyDatabase: 'В этой базе пока нет таблиц и представлений.', noMatchingTables: 'Подходящих таблиц и представлений нет.', clearFilter: 'Сбросить фильтр', clearSelection: 'Снять выделение', hiddenSelected: 'Скрыто фильтром: {count}',
     createDatabase: 'Создать БД', renameDatabase: 'Переименовать БД', dropDatabase: 'Удалить БД',
     create: 'Создать', rename: 'Переименовать', confirmDrop: 'Подтвердить удаление', cancel: 'Отмена',
     name: 'Имя базы данных', collation: 'Сортировка по умолчанию', serverDefault: 'По умолчанию на сервере',

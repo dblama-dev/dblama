@@ -1,4 +1,4 @@
-import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { reactive } from 'vue'
 import { NInput, NSelect, NTree } from 'naive-ui'
@@ -10,6 +10,7 @@ import i18n from '../i18n'
 import { useCatalogStore } from '../stores/catalog'
 import { useSessionStore } from '../stores/session'
 import ObjectTree from './ObjectTree.vue'
+import AppSidebar from './AppSidebar.vue'
 
 // The tree talks to the api client directly (databases) and through the
 // catalog store (tables); both go through the same mocked module.
@@ -51,7 +52,7 @@ function mockApi(): void {
 }
 
 async function mountTree(): Promise<ReturnType<typeof mount>> {
-  const wrapper = mount(ObjectTree, { global: { plugins: [i18n] } })
+  const wrapper = mount(ObjectTree, { global: { plugins: [i18n], stubs: { RouterLink: RouterLinkStub } } })
   await flushPromises()
   return wrapper
 }
@@ -162,27 +163,30 @@ describe('ObjectTree', () => {
     expect(pushSpy).toHaveBeenCalledWith('/db/mydb/table/users')
   })
 
-  it('pushes /db/{db}/console when the console leaf is clicked', async () => {
-    const wrapper = await mountTree()
-
-    const tree = wrapper.findComponent(NTree)
-    tree.vm.$emit('update:selected-keys', ['console'])
+  it('provides searchable database selection and one set of scoped tools above the object tree', async () => {
+    const session = useSessionStore()
+    session.sessionInfo!.caps.schemas = true
+    session.sessionInfo!.caps.users = true
+    session.sessionInfo!.caps.monitor = true
+    route.params.db = 'otherdb'
+    useCatalogStore().schema = 'Odd Schema'
+    mockedApi.mockImplementation(async (_method, path) => path === '/api/schemas' ? { schemas: ['Odd Schema'] } : path === '/api/databases' ? databasesPayload : { tables })
+    const wrapper = mount(AppSidebar, { global: { plugins: [i18n], stubs: { RouterLink: RouterLinkStub } } })
     await flushPromises()
-
-    expect(pushSpy).toHaveBeenCalledWith('/db/mydb/console')
-  })
-
-  it('pushes the export and import routes when those leaves are clicked', async () => {
-    const wrapper = await mountTree()
-
-    const tree = wrapper.findComponent(NTree)
-    tree.vm.$emit('update:selected-keys', ['export'])
-    await flushPromises()
-    expect(pushSpy).toHaveBeenCalledWith('/db/mydb/export')
-
-    tree.vm.$emit('update:selected-keys', ['import'])
-    await flushPromises()
-    expect(pushSpy).toHaveBeenCalledWith('/db/mydb/import')
+    expect(wrapper.findComponent(NSelect).props('filterable')).toBe(true)
+    const destinations = wrapper.findAllComponents(RouterLinkStub).map(link => link.props('to'))
+    const groups = wrapper.findComponent(NTree).props('data')
+    expect(groups?.map(group => group.key)).toEqual(['group:tables', 'group:views'])
+    for (const action of ['console', 'search', 'import', 'export']) {
+      expect(destinations.filter(to => to === `/db/otherdb/${action}?schema=Odd%20Schema`)).toHaveLength(1)
+    }
+    const more = wrapper.get('details.advanced-navigation')
+    expect(more.attributes('open')).toBeUndefined()
+    const secondary = wrapper.findAllComponents(RouterLinkStub).filter(link => more.element.contains(link.element)).map(link => link.props('to'))
+    expect(secondary).toContain('/server/users')
+    expect(secondary).toContain('/server/processes')
+    expect(secondary).toContain('/db/otherdb/objects/views?schema=Odd%20Schema')
+    expect(secondary).not.toContain('/db/otherdb/objects/events?schema=Odd%20Schema')
   })
 
   it('pushes the _new structure route when the tables group "+" button is clicked', async () => {
@@ -236,7 +240,7 @@ describe('ObjectTree', () => {
     const wrapper = await mountTree()
     expect(mockedApi).toHaveBeenCalledWith('GET', '/api/databases/mydb/tables?schema=public')
     expect(wrapper.find('[data-testid="schema-select"]').exists()).toBe(true)
-    wrapper.findComponent(NTree).vm.$emit('update:selected-keys', ['schema:Odd Schema'])
+    wrapper.findAllComponents(NSelect).find(select => select.attributes('data-testid') === 'schema-select')!.vm.$emit('update:value', 'Odd Schema')
     await flushPromises()
     expect(mockedApi).toHaveBeenCalledWith('GET', '/api/databases/mydb/tables?schema=Odd%20Schema')
     expect(mockedApi).toHaveBeenCalledWith('GET', '/api/sequences?schema=Odd%20Schema')
@@ -287,11 +291,11 @@ it('separates favorite tables for different connection ports',async()=>{
  route.params={db:'mydb',t:'users'}
  const wrapper=await mountTree()
  await wrapper.get('button[aria-label$=": users"]').trigger('click');await flushPromises()
- expect(wrapper.find('.object-tree__saved strong').exists()).toBe(true)
+ expect(wrapper.find('[data-favorite-tables]').exists()).toBe(true)
  session.sessionInfo!.driver.port='3307';await flushPromises()
- expect(wrapper.find('.object-tree__saved strong').exists()).toBe(false)
+ expect(wrapper.find('[data-favorite-tables]').exists()).toBe(false)
  session.sessionInfo!.driver.port='3306';await flushPromises()
- expect(wrapper.find('.object-tree__saved strong').exists()).toBe(true)
+ expect(wrapper.find('[data-favorite-tables]').exists()).toBe(true)
  wrapper.unmount();localStorage.clear()
 })
 

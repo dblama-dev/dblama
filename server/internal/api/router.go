@@ -3,6 +3,7 @@ package api
 import (
 	"io/fs"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -137,4 +138,16 @@ func (s *apiServer) loginRateLimit(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// chi matches RawPath when present, preserving escaped slashes inside a
+// single route segment. Otherwise it matches the already decoded URL.Path.
+func pathParam(r *http.Request, name string) string {
+	value := chi.URLParam(r, name)
+	if r.URL.RawPath != "" {
+		if decoded, err := url.PathUnescape(value); err == nil {
+			return decoded
+		}
+	}
+	return value
 }

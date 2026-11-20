@@ -131,10 +131,19 @@ test('copy rows generates new IDs and bulk upsert updates a conflict', async ({ 
 
 test('filters, sorting and page deletion keep results and exported selection consistent', async ({ page, db, prefix }) => {
   const table = `${prefix}_pages`
-  const values = Array.from({ length: 26 }, (_, i) => `(${i + 1}, ${i % 2 ? 'NULL' : "'odd'"})`).join(',')
+  const values = Array.from({ length: 26 }, (_, i) => `(${i + 1}, ${i === 0 ? "''" : i % 2 ? 'NULL' : "'odd'"})`).join(',')
   try {
     await runSQL(page, `CREATE TABLE ${table} (id INT PRIMARY KEY, tag VARCHAR(20) NULL); INSERT INTO ${table} VALUES ${values}`)
     await page.goto(tablePath(db, table))
+    await expect(gridRows(page)).toHaveCount(26)
+    await byId(page, 1).getByTestId('row-inspect').click()
+    await page.getByTestId('grid-inspect-column').click()
+    await page.locator('.n-base-select-option:visible').getByText('tag', { exact: true }).click()
+    await page.getByTestId('filter-inspected-value').click()
+    await expect(gridRows(page)).toHaveCount(1)
+    await expect(byId(page, 1)).toBeVisible()
+    await expect(page.locator('.datagrid__filter-op')).toHaveText('=')
+    await page.getByRole('button', { name: 'Reset', exact: true }).click()
     await expect(gridRows(page)).toHaveCount(26)
     await selectOption(page, page.locator('.datagrid__filter-column'), 'tag')
     await selectOption(page, page.locator('.datagrid__filter-op'), 'IS NULL')
@@ -151,12 +160,22 @@ test('filters, sorting and page deletion keep results and exported selection con
     await checkCell(gridRows(page).first(), 1, '26')
     await page.getByRole('columnheader', { name: 'id', exact: true }).click()
     await checkCell(gridRows(page).first(), 1, '20')
+    await page.getByTestId('grid-columns').click()
+    const chooser = page.getByTestId('grid-column-chooser')
+    await chooser.getByRole('checkbox', { name: 'tag', exact: true }).uncheck()
+    await chooser.getByRole('button', { name: 'Apply', exact: true }).click()
+    await expect(page.getByRole('columnheader', { name: 'tag', exact: true })).toHaveCount(0)
+    await page.reload()
+    await expect(gridRows(page)).toHaveCount(4)
+    await expect(page.getByRole('columnheader', { name: 'tag', exact: true })).toHaveCount(0)
     const downloaded = page.waitForEvent('download')
     await page.getByTestId('grid-export').click()
     const file = await downloaded
     expect(await file.failure()).toBeNull()
     const csv = await readFile((await file.path())!, 'utf8')
-    expect(csv.trim().split(/\r?\n/).slice(1).map(line => line.split(',')[0])).toEqual(['20', '22', '24', '26'])
+    expect(csv.trim().split(/\r?\n/)).toEqual(['id', '20', '22', '24', '26'])
+    await page.goBack()
+    await expect(page.getByRole('columnheader', { name: 'tag', exact: true })).toBeVisible()
 
     await page.getByRole('button', { name: 'Reset', exact: true }).click()
     await expect(gridRows(page)).toHaveCount(26)
@@ -202,6 +221,26 @@ test('SQL console handles multiple statements, errors, selection and explain', a
   } finally {
     await runSQL(page, `DROP TABLE IF EXISTS ${table}`)
   }
+})
+
+test('SQL console downloads one displayed JOIN result without running the batch again', async ({ page }) => {
+  await runSQL(page, `SELECT 'first result' AS label;
+    SELECT a.note AS repeated, b.note AS repeated, NULL AS missing,
+           CAST(9007199254740993.1000 AS DECIMAL(24,4)) AS amount
+    FROM (SELECT 1 AS id, 'x,y' AS note) AS a
+    JOIN (SELECT 1 AS id, '' AS note) AS b ON b.id = a.id;`)
+  const results = page.locator('.resultgrid')
+  await expect(results).toHaveCount(2)
+  const requests: string[] = []
+  page.on('request', request => {
+    if (/\/(query|export)$/.test(new URL(request.url()).pathname)) requests.push(request.url())
+  })
+  const downloaded = page.waitForEvent('download')
+  await results.nth(1).getByRole('button', { name: 'Download CSV', exact: true }).click()
+  const file = await downloaded
+  expect(file.suggestedFilename()).toBe('query-result-2.csv')
+  expect(await readFile((await file.path())!, 'utf8')).toBe('repeated,repeated,missing,amount\n"x,y",,\\N,9007199254740993.1000\n')
+  expect(requests).toEqual([])
 })
 
 test('SQL export and import restore schema, NULL, empty text and exact numbers', async ({ page, db, prefix }) => {

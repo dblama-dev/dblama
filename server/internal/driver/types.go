@@ -89,10 +89,11 @@ type ColumnDef struct {
 	// The following values are used verbatim as SQL by the save path:
 	// OnUpdate, the Default.Value of an IsSQLExpression default (incl.
 	// the expression of a Generated column) and Generated's expression.
-	Collation  string   `json:"collation,omitempty"`
-	Comment    string   `json:"comment,omitempty"`
-	EnumValues []string `json:"enumValues,omitempty"` // парсинг COLUMN_TYPE enum('a','b') с экранированием ''
-	Position   string   `json:"position,omitempty"`   // чтение = "" (позиция в ORDINAL_ORDER)
+	Collation   string   `json:"collation,omitempty"`
+	Comment     string   `json:"comment,omitempty"`
+	EnumValues  []string `json:"enumValues,omitempty"`  // парсинг COLUMN_TYPE enum('a','b') с экранированием ''
+	Position    string   `json:"position,omitempty"`    // чтение = "" (позиция в ORDINAL_ORDER)
+	AfterColumn string   `json:"afterColumn,omitempty"` // Explicit AFTER anchor, including a column named FIRST.
 }
 
 // IndexColumn is one column of an index. SubPart is the prefixed length
@@ -156,14 +157,21 @@ type ColumnMeta struct {
 	Nullable bool   `json:"nullable"`
 }
 
+// BrowseStatement describes the parameterized SELECT used to fetch a row page.
+type BrowseStatement struct {
+	SQL        string `json:"sql"`
+	Parameters []any  `json:"parameters"`
+}
+
 // Page is one page of browsed rows. Rows holds JSON-compatible values:
 // NULL → nil, binary values → hex string with the "0x" prefix
 // (spec §4.5), timestamps → RFC3339 string, the rest as
 // database/sql delivers them (int64, float64, string).
 type Page struct {
-	Columns   []ColumnMeta `json:"columns"`
-	Rows      [][]any      `json:"rows"`
-	TotalRows int64        `json:"totalRows"`
+	Statement *BrowseStatement `json:"statement,omitempty"`
+	Columns   []ColumnMeta     `json:"columns"`
+	Rows      [][]any          `json:"rows"`
+	TotalRows int64            `json:"totalRows"`
 }
 
 // RowValues holds one row's column values for a write operation; the

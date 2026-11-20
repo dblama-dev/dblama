@@ -1,0 +1,38 @@
+{
+  "en": {
+    "pattern": "Table name pattern",
+    "prefix": "Use account prefix",
+    "syntax": "Matching is case-sensitive. % matches any sequence and _ matches one character. Use \\%, \\_ and \\\\ for literal characters.",
+    "invalid": "Enter a pattern with a wildcard (% or _) and valid escapes.",
+    "targets": "Matching tables in {database} ({count})",
+    "effect": "Privileges apply once to the table names shown here.",
+    "loading": "Loading tables…",
+    "retryList": "Reload tables",
+    "privileges": "Privileges to add",
+    "noPrivileges": "No table privileges are available.",
+    "apply": "Grant privileges to these tables",
+    "progress": "Processed {done} of {total}",
+    "result": "The server confirmed grants on {done} of {total} tables.",
+    "failed": "Grant errors",
+    "retry": "Retry failed tables",
+    "again": "Choose another set of tables"
+  },
+  "ru": {
+    "pattern": "Маска имени таблицы",
+    "prefix": "Подставить префикс аккаунта",
+    "syntax": "Регистр учитывается. % означает любую последовательность символов, _ — один символ. Для буквального совпадения используйте \\%, \\_ и \\\\.",
+    "invalid": "Введите маску с подстановкой (% или _) и допустимым экранированием.",
+    "targets": "Совпавшие таблицы в базе {database} ({count})",
+    "effect": "Права будут выданы однократно для перечисленных имён таблиц.",
+    "loading": "Загрузка таблиц…",
+    "retryList": "Загрузить таблицы ещё раз",
+    "privileges": "Права для выдачи",
+    "noPrivileges": "Нет доступных прав уровня таблицы.",
+    "apply": "Выдать права на эти таблицы",
+    "progress": "Обработано {done} из {total}",
+    "result": "Сервер подтвердил выдачу прав для {done} из {total} таблиц.",
+    "failed": "Ошибки выдачи прав",
+    "retry": "Повторить для таблиц с ошибкой",
+    "again": "Выбрать другие таблицы"
+  }
+}

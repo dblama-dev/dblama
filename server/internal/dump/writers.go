@@ -41,8 +41,8 @@ func Separator(format string) (rune, error) {
 
 // CSVWriter writes delimited text: a header row (the caller always
 // writes one first) and one row per call, with minimal quoting — a
-// field is enclosed in double quotes only when it contains the
-// separator, a double quote or a line break; inside an enclosed field a
+// field is enclosed when it is the sole empty field in a record or when
+// it contains the separator, a double quote or a line break. Inside it a
 // double quote is doubled. Lines end with "\n". Every row is a single
 // Write on the underlying writer, so nothing but the current row is
 // ever held in memory.
@@ -77,7 +77,7 @@ func (c *CSVWriter) writeLine(fields []string) error {
 		if i > 0 {
 			sb.WriteRune(c.sep)
 		}
-		sb.WriteString(quoteField(f, c.sep))
+		sb.WriteString(quoteField(f, c.sep, len(fields) == 1))
 	}
 	sb.WriteByte('\n')
 	_, err := io.WriteString(c.w, sb.String())
@@ -89,7 +89,11 @@ func (c *CSVWriter) writeLine(fields []string) error {
 
 // quoteField encloses field in double quotes when it contains the
 // separator, a double quote or a line break, doubling inner quotes.
-func quoteField(field string, sep rune) string {
+func quoteField(field string, sep rune, soleField bool) string {
+	if soleField && field == "" {
+		// encoding/csv skips blank physical lines, including an empty header.
+		return `""`
+	}
 	if !strings.ContainsRune(field, sep) &&
 		!strings.ContainsAny(field, "\"\n\r") {
 		return field

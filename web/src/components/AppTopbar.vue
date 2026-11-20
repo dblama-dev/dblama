@@ -85,4 +85,9 @@ async function logout(): Promise<void> {
   gap: 4px;
   margin-left: auto;
 }
+@media (max-width: 719px) {
+  .app-topbar { height: auto; min-height: 44px; padding: 6px 10px; gap: 4px 10px; flex-wrap: wrap; }
+  .app-topbar__server { flex: 1; min-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .app-topbar__actions { flex-wrap: wrap; }
+}
 </style>

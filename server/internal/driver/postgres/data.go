@@ -96,7 +96,10 @@ func (d *PostgresDriver) SelectRows(ctx context.Context, db, table string, q sql
 		pointers[i] = &values[i]
 	}
 
-	page := driver.Page{Columns: columns, TotalRows: total}
+	page := driver.Page{
+		Columns: columns, TotalRows: total,
+		Statement: &driver.BrowseStatement{SQL: selectQuery, Parameters: args},
+	}
 	for rows.Next() {
 		if err := rows.Scan(pointers...); err != nil {
 			return driver.Page{}, fmt.Errorf("scan row of %s.%s: %w", schema, table, err)

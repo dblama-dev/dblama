@@ -182,10 +182,19 @@ func TestBuildSelect_UnknownOperator(t *testing.T) {
 	}
 }
 
-func TestBuildSelect_EmptyValueNonNullableOperator(t *testing.T) {
-	q := SelectQuery{Filters: []Filter{{Column: "a", Operator: "=", Value: ""}}}
+func TestBuildSelect_EmptyComparison(t *testing.T) {
+	for _, build := range []func(string, SelectQuery) (string, []any, error){BuildSelect, BuildSelectPg} {
+		for _, op := range []string{"=", "!="} {
+			q := SelectQuery{Filters: []Filter{{Column: "note", Operator: op, Value: ""}}}
+			_, args, err := build("items", q)
+			if err != nil || !reflect.DeepEqual(args, []any{"", 50, 0}) {
+				t.Errorf("empty string %s comparison: args=%#v, err=%v", op, args, err)
+			}
+		}
+	}
+	q := SelectQuery{Filters: []Filter{{Column: "a", Operator: ">", Value: ""}}}
 	if _, _, err := BuildSelect("t", q); err == nil {
-		t.Error("BuildSelect() with empty filter value for '=' must return error, got nil")
+		t.Error("empty ordering filter accepted")
 	}
 }
 

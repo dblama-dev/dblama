@@ -12,7 +12,7 @@
       <n-tab v-if="!isNewTable" name="operations">{{ t('navigationWorkflows.operations') }}</n-tab>
     </n-tabs>
     <nav v-if="!isNewTable" class="table-view__actions" aria-label="Table actions">
-      <n-button size="small" @click="openInsert">{{ t('navigationWorkflows.insert') }}</n-button>
+      <n-button v-if="view !== 'data'" size="small" @click="openInsert">{{ t('navigationWorkflows.insert') }}</n-button>
       <n-button v-for="action in ['console','search','import','export']" :key="action" size="small" @click="router.push(tableContextLink(db,table,action,catalog.schema))">{{ t(`navigationWorkflows.${action}`) }}</n-button>
       <n-button data-testid="table-partitions" v-if="session.sessionInfo?.caps.partitions" size="small" @click="router.push(catalog.path(`/db/${encodeURIComponent(db)}/table/${encodeURIComponent(table)}/partitions`))">{{ t('navigationWorkflows.partitions') }}</n-button>
     </nav>
@@ -26,16 +26,19 @@
       :columns="page?.columns ?? []"
       :rows="page?.rows ?? []"
       :total-rows="page?.totalRows ?? 0"
+      :statement="page?.statement"
       :loading="loading"
       :page-index="pageIndex"
       :page-size="pageSize"
       :pk-columns="pkColumns"
+      :visible-columns="visibleColumns"
       :sort="sort"
       :filters="filters"
       :table-name="`${db}.${table}`"
       @update:page="onPage"
       @update:page-size="onPageSize"
       @update:sort="onSort"
+      @update:visible-columns="onVisibleColumns"
       @apply-filters="onFilters"
       @refresh="refetch"
       @add-row="onAddRow"
@@ -148,6 +151,24 @@ const pkPath = computed(() => catalog.path(`${rowsPath.value}/pk`))
 const pkColumns = ref<string[]>([])
 const page = ref<Page | null>(null)
 const loading = ref(false)
+const visibleColumns = computed(() => {
+  const names = (page.value?.columns ?? []).map(column => column.name)
+  if (typeof route.query.columns !== 'string') return names
+  try {
+    const requested: unknown = JSON.parse(route.query.columns)
+    if (Array.isArray(requested) && requested.length && requested.every(name => typeof name === 'string')) {
+      const selected = new Set(requested)
+      return names.filter(name => selected.has(name))
+    }
+  } catch { /* Older or malformed links open with all available columns. */ }
+  return names
+})
+function onVisibleColumns(names: string[]): void {
+  const query = { ...route.query }
+  if (names.length === page.value?.columns.length) delete query.columns
+  else query.columns = JSON.stringify(names)
+  void router.push({ query })
+}
 const initialQuery = readTableRouteQuery(route.query)
 const pageIndex = ref(initialQuery.page)
 const pageSize = ref(initialQuery.pageSize)
@@ -324,7 +345,7 @@ async function fetchDef(): Promise<boolean> {
 
 async function onAddRow(): Promise<void> {
   defColumns.value = null
-  if (!await fetchDef()) return
+  if (!await fetchDef() || view.value !== 'data') return
   rowModal.value = { show: true, mode: 'insert', row: null, pk: null }
 }
 
@@ -354,6 +375,17 @@ async function openInsert(): Promise<void> {
   await onAddRow()
 }
 
+// A catalog shortcut opens the same editor as the table toolbar. Consume the
+// action once so reloading or returning to the table just shows its rows.
+watch(() => [route.query.action, rowsPath.value, catalog.schema] as const, async ([action]) => {
+  if (action !== 'insert' || isNewTable.value || view.value !== 'data') return
+  const target = catalog.path(rowsPath.value)
+  const query = { ...route.query }
+  delete query.action
+  const failure = await router.replace({ query })
+  if (!failure && catalog.path(rowsPath.value) === target && view.value === 'data') await onAddRow()
+}, { immediate: true, flush: 'post' })
+
 async function onCopyRow(row: EditableRow): Promise<void> {
   const sourcePath = catalog.path(rowsPath.value)
   if (!await fetchDef() || catalog.path(rowsPath.value) !== sourcePath) return
@@ -372,16 +404,21 @@ async function copyRows(where: Record<string,unknown>[]): Promise<void> {
 }
 
 async function exportSelection(): Promise<void> {
+  if (loading.value || !visibleColumns.value.length) return
   try {
     await downloadExport(db.value, {
       format: 'csv', tables: [table.value],
-      query: { filters: filters.value.map(f => ({column:f.column,operator:f.op,value:f.value})), sorts: sort.value ? [sort.value] : [] },
+      query: {
+        columns: visibleColumns.value,
+        filters: filters.value.map(f => ({column:f.column,operator:f.op,value:f.value})),
+        sorts: sort.value ? [sort.value] : [],
+      },
     }, catalog.schemaAware ? catalog.schema : null)
   } catch (err) { notifyError(err) }
 }
 
-function onRowSaved(): void {
-  rowModal.value = { ...rowModal.value, show: false }
+function onRowSaved(continueInserting = false): void {
+  if (!continueInserting) rowModal.value = { ...rowModal.value, show: false }
   void refetch()
 }
 </script>

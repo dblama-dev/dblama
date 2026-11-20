@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/hitslab/db-manager/server/internal/driver"
 	"github.com/hitslab/db-manager/server/internal/session"
 	"github.com/hitslab/db-manager/server/internal/sqlgen"
@@ -60,7 +58,7 @@ func (s *apiServer) handleExport(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, ErrBadRequest("export requires logging in with a database"))
 		return
 	}
-	if urlDB := chi.URLParam(r, "db"); sess.Driver.Info().Flavor == "postgres" && urlDB != sess.Database {
+	if urlDB := pathParam(r, "db"); sess.Driver.Info().Flavor == "postgres" && urlDB != sess.Database {
 		WriteErr(w, http.StatusBadRequest, ErrBadRequest(
 			"export dumps the login database "+sess.Database+", not "+urlDB))
 		return
@@ -107,7 +105,7 @@ func (s *apiServer) handleExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", meta.contentType)
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
 	out := &exportStreamWriter{w: w}
-	if err := sess.Driver.Export(r.Context(), chi.URLParam(r, "db"), req, out); err != nil {
+	if err := sess.Driver.Export(r.Context(), pathParam(r, "db"), req, out); err != nil {
 		if !out.started {
 			w.Header().Del("Content-Disposition")
 			writeDriverErr(w, err)
@@ -239,10 +237,10 @@ func (s *apiServer) handleImport(w http.ResponseWriter, r *http.Request) {
 
 	var impErr error
 	if fileType == "sql" {
-		impErr = sess.Driver.ImportSQL(r.Context(), chi.URLParam(r, "db"), file, progress)
+		impErr = sess.Driver.ImportSQL(r.Context(), pathParam(r, "db"), file, progress)
 	} else {
 		opts := driver.CSVImportOpts{Separator: separator, Enclosure: enclosure, SkipHeader: skipHeader, Columns: columns, CSVEncoding: csvEncoding}
-		impErr = sess.Driver.ImportCSV(r.Context(), chi.URLParam(r, "db"), table, file, opts, progress)
+		impErr = sess.Driver.ImportCSV(r.Context(), pathParam(r, "db"), table, file, opts, progress)
 	}
 	if impErr != nil {
 		writeImportLine(w, importProgressLine{Done: lastDone, Total: lastTotal, Error: impErr.Error()})

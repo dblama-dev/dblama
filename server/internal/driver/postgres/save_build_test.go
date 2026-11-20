@@ -156,7 +156,7 @@ func TestBuildAlterTable_PG(t *testing.T) {
 		Options: driver.TableOptions{Comment: "new comment"},
 	}
 
-	got, err := buildAlterTable(buildSchema, "child", desired)
+	got, err := buildAlterTable(buildSchema, "child", desired, nil)
 	if err != nil {
 		t.Fatalf("buildAlterTable() error: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestBuildAlterTable_PG_SerialModifyKeepsDefault(t *testing.T) {
 			},
 		},
 	}
-	got, err := buildAlterTable(buildSchema, "same", desired)
+	got, err := buildAlterTable(buildSchema, "same", desired, nil)
 	if err != nil {
 		t.Fatalf("buildAlterTable() error: %v", err)
 	}
@@ -211,11 +211,7 @@ func TestBuildAlterTable_PG_SerialModifyKeepsDefault(t *testing.T) {
 	assertStatements(t, got, want)
 }
 
-// TestBuildAlterTable_PG_GeneratedModifySkipsAttributes pins the
-// documented v0.1 limitation: a generated column can be renamed but its
-// type, nullability and default cannot be re-rendered (PostgreSQL
-// cannot re-type a generated column).
-func TestBuildAlterTable_PG_GeneratedModifySkipsAttributes(t *testing.T) {
+func TestBuildAlterTable_PG_GeneratedNullability(t *testing.T) {
 	desired := driver.TableDef{
 		NewName: "t",
 		Columns: []driver.ColumnDef{
@@ -223,11 +219,14 @@ func TestBuildAlterTable_PG_GeneratedModifySkipsAttributes(t *testing.T) {
 				Default: &driver.DefaultValue{Value: "id * 2", IsSQLExpression: true}},
 		},
 	}
-	got, err := buildAlterTable(buildSchema, "t", desired)
+	got, err := buildAlterTable(buildSchema, "t", desired, nil)
 	if err != nil {
 		t.Fatalf("buildAlterTable() error: %v", err)
 	}
-	want := []string{"ALTER TABLE \"odd schema\".\"t\" RENAME COLUMN \"g\" TO \"g2\""}
+	want := []string{
+		"ALTER TABLE \"odd schema\".\"t\" RENAME COLUMN \"g\" TO \"g2\"",
+		"ALTER TABLE \"odd schema\".\"t\" ALTER COLUMN \"g2\" DROP NOT NULL",
+	}
 	assertStatements(t, got, want)
 }
 
@@ -276,19 +275,19 @@ func TestBuildCreateTable_PG_Errors(t *testing.T) {
 
 func TestBuildAlterTable_PG_Errors(t *testing.T) {
 	t.Run("empty table", func(t *testing.T) {
-		_, err := buildAlterTable(buildSchema, "", driver.TableDef{Columns: []driver.ColumnDef{{Name: "id", OldName: "id", Type: "integer"}}})
+		_, err := buildAlterTable(buildSchema, "", driver.TableDef{Columns: []driver.ColumnDef{{Name: "id", OldName: "id", Type: "integer"}}}, nil)
 		if err == nil {
 			t.Fatal("expected error for empty table name, got nil")
 		}
 	})
 	t.Run("column with neither type nor old name", func(t *testing.T) {
-		_, err := buildAlterTable(buildSchema, "t", driver.TableDef{Columns: []driver.ColumnDef{{Name: "ghost"}}})
+		_, err := buildAlterTable(buildSchema, "t", driver.TableDef{Columns: []driver.ColumnDef{{Name: "ghost"}}}, nil)
 		if err == nil {
 			t.Fatal("expected error for column without type and old name, got nil")
 		}
 	})
 	t.Run("drop column without name", func(t *testing.T) {
-		_, err := buildAlterTable(buildSchema, "t", driver.TableDef{Columns: []driver.ColumnDef{{OldName: "x", Nullable: true}}})
+		_, err := buildAlterTable(buildSchema, "t", driver.TableDef{Columns: []driver.ColumnDef{{OldName: "x", Nullable: true}}}, nil)
 		if err == nil {
 			t.Fatal("expected error for unnamed drop, got nil")
 		}

@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/hex"
-	"github.com/go-chi/chi/v5"
 	"net/http"
 	"strings"
 
@@ -27,7 +26,7 @@ func decodeBinaryValues(w http.ResponseWriter, r *http.Request, rows ...driver.R
 		return true
 	}
 	sess, _ := session.FromContext(r.Context())
-	def, err := sess.Driver.TableDef(r.Context(), chi.URLParam(r, "db"), chi.URLParam(r, "table"))
+	def, err := sess.Driver.TableDef(r.Context(), pathParam(r, "db"), pathParam(r, "table"))
 	if err != nil {
 		writeDriverErr(w, err)
 		return false

@@ -39,19 +39,18 @@ FROM information_schema.STATISTICS
 WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
 ORDER BY INDEX_NAME, SEQ_IN_INDEX`
 
-// defForeignKeysQuery reads the foreign keys of one table, joining the
+// foreignKeysQuery reads the foreign keys of a database, joining the
 // per-column KEY_COLUMN_USAGE rows with the per-constraint rules.
-const defForeignKeysQuery = `
-SELECT kcu.CONSTRAINT_NAME, kcu.COLUMN_NAME,
+const foreignKeysQuery = `
+SELECT kcu.TABLE_NAME, kcu.CONSTRAINT_NAME, kcu.COLUMN_NAME,
        kcu.REFERENCED_TABLE_SCHEMA, kcu.REFERENCED_TABLE_NAME, kcu.REFERENCED_COLUMN_NAME,
        rc.UPDATE_RULE, rc.DELETE_RULE
 FROM information_schema.KEY_COLUMN_USAGE kcu
 JOIN information_schema.REFERENTIAL_CONSTRAINTS rc
   ON rc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA
  AND rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
-WHERE kcu.TABLE_SCHEMA = ? AND kcu.TABLE_NAME = ?
-  AND kcu.REFERENCED_TABLE_NAME IS NOT NULL
-ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION`
+ AND rc.TABLE_NAME = kcu.TABLE_NAME
+WHERE kcu.TABLE_SCHEMA = ? AND kcu.REFERENCED_TABLE_NAME IS NOT NULL`
 
 // TableDef reads the full structure of one table: columns, indexes,
 // foreign keys and table options. A missing table yields an error
@@ -74,7 +73,7 @@ func (d *MysqlDriver) TableDef(ctx context.Context, db, table string) (driver.Ta
 	if err != nil {
 		return driver.TableDef{}, err
 	}
-	fks, err := d.tableForeignKeys(ctx, db, table)
+	relationships, err := d.readRelationships(ctx, db, table)
 	if err != nil {
 		return driver.TableDef{}, err
 	}
@@ -83,7 +82,7 @@ func (d *MysqlDriver) TableDef(ctx context.Context, db, table string) (driver.Ta
 		NewName:     table,
 		Columns:     columns,
 		Indexes:     indexes,
-		ForeignKeys: fks,
+		ForeignKeys: driver.ForeignKeysOfTable(relationships),
 		Options:     options,
 	}, nil
 }
@@ -145,7 +144,7 @@ func (d *MysqlDriver) tableColumns(ctx context.Context, db, table string) ([]dri
 			// AS (expr)).
 			def = &driver.DefaultValue{Value: normalizeGenExpr(genExpr.String), IsSQLExpression: true}
 		} else {
-			def = parseColumnDefault(defRaw, extra.String)
+			def = parseColumnDefault(defRaw, extra.String, d.info.Flavor)
 		}
 		columns = append(columns, driver.ColumnDef{
 			Name:          name,
@@ -202,51 +201,24 @@ func (d *MysqlDriver) tableIndexes(ctx context.Context, db, table string) ([]dri
 	return indexes, nil
 }
 
-// tableForeignKeys reads the foreign keys declared on one table, ordered
-// by constraint name and column position.
-func (d *MysqlDriver) tableForeignKeys(ctx context.Context, db, table string) ([]driver.ForeignKey, error) {
-	rows, err := d.db.QueryContext(ctx, defForeignKeysQuery, db, table)
+// ListRelationships returns the visible foreign keys of the requested database.
+func (d *MysqlDriver) ListRelationships(ctx context.Context, db string) ([]driver.TableRelationship, error) {
+	return d.readRelationships(ctx, db, "")
+}
+
+func (d *MysqlDriver) readRelationships(ctx context.Context, db, table string) ([]driver.TableRelationship, error) {
+	query := foreignKeysQuery
+	args := []any{db}
+	if table != "" {
+		query += " AND kcu.TABLE_NAME = ?"
+		args = append(args, table)
+	}
+	rows, err := d.db.QueryContext(ctx, query+" ORDER BY kcu.TABLE_NAME, kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION", args...)
 	if err != nil {
-		return nil, fmt.Errorf("query foreign keys of %s.%s: %w", db, table, err)
+		return nil, fmt.Errorf("query foreign keys of %s: %w", db, err)
 	}
 	defer func() { _ = rows.Close() }()
-
-	var fks []driver.ForeignKey
-	for rows.Next() {
-		var (
-			name       string
-			colName    string
-			refSchema  sql.NullString
-			refTable   string
-			refColName string
-			updateRule sql.NullString
-			deleteRule sql.NullString
-		)
-		if err := rows.Scan(&name, &colName, &refSchema, &refTable, &refColName, &updateRule, &deleteRule); err != nil {
-			return nil, fmt.Errorf("scan foreign key row of %s.%s: %w", db, table, err)
-		}
-		if len(fks) == 0 || fks[len(fks)-1].Name != name {
-			fks = append(fks, driver.ForeignKey{
-				Name:     name,
-				RefTable: refTable,
-				RefSchema: func() string {
-					if refSchema.Valid && refSchema.String != db {
-						return refSchema.String
-					}
-					return ""
-				}(),
-				OnUpdate: updateRule.String,
-				OnDelete: deleteRule.String,
-			})
-		}
-		last := &fks[len(fks)-1]
-		last.Columns = append(last.Columns, colName)
-		last.RefColumns = append(last.RefColumns, refColName)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate foreign keys of %s.%s: %w", db, table, err)
-	}
-	return fks, nil
+	return driver.ReadTableRelationships(rows, db)
 }
 
 // parseColumnType splits a COLUMN_TYPE value such as "int unsigned",
@@ -304,6 +276,9 @@ func splitUnquotedCommas(s string) []string {
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		switch {
+		case c == '\\' && inQuote && i+1 < len(s):
+			cur.WriteString(s[i : i+2])
+			i++
 		case c == '\'' && inQuote && i+1 < len(s) && s[i+1] == '\'':
 			cur.WriteString("''")
 			i++
@@ -348,35 +323,35 @@ func unquoteSQLString(s string) string {
 	return b.String()
 }
 
-// sqlDefaultRe matches defaults that are SQL expressions rather than
-// literals: CURRENT_TIMESTAMP (with optional precision), NOW(...) and
-// UNIX_TIMESTAMP(...). The match is case-insensitive because MariaDB
-// reports lowercase "current_timestamp()".
-var sqlDefaultRe = regexp.MustCompile(`(?i)^(current_timestamp|now\(|unix_timestamp\()`)
+var numericDefaultRe = regexp.MustCompile(`^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$`)
 
-// parseColumnDefault converts a raw COLUMN_DEFAULT value into a
-// DefaultValue; a missing default means no DefaultValue. MySQL 8
-// reports a missing default as SQL NULL while MariaDB reports the
-// literal string "NULL" (a real string default would come back quoted).
-// MariaDB reports literal string defaults with the quotes preserved
-// ("'x'") while MySQL 8 strips them ("x"); the quotes are removed when
-// present so both flavors yield "x". Defaults reported by MySQL 8 with
-// the DEFAULT_GENERATED extra that are not quoted literals are
-// expressions.
-func parseColumnDefault(raw sql.NullString, extra string) *driver.DefaultValue {
-	if !raw.Valid || raw.String == "NULL" {
+// MySQL exposes the literal bytes and signals expression defaults in EXTRA.
+// MariaDB quotes strings, reports numbers unquoted, and uses the unquoted
+// text NULL for nullable columns without a non-NULL default.
+func parseColumnDefault(raw sql.NullString, extra, flavor string) *driver.DefaultValue {
+	if !raw.Valid {
 		return nil
 	}
-	value := raw.String
-	isExpr := sqlDefaultRe.MatchString(value)
-	if !isExpr && strings.Contains(extra, "DEFAULT_GENERATED") && !isQuotedLiteral(value) {
-		isExpr = true
+	if flavor != FlavorMariaDB {
+		isExpr := strings.Contains(extra, "DEFAULT_GENERATED")
+		value := raw.String
+		if isExpr {
+			// The MySQL catalog escapes its printed SQL expression one extra
+			// time, including quotes around string literals and backslashes.
+			value = catalogExprEscapes.Replace(value)
+		}
+		return &driver.DefaultValue{Value: value, IsSQLExpression: isExpr}
 	}
-	if !isExpr && isQuotedLiteral(value) {
-		value = unquoteSQLString(value)
+	if raw.String == "NULL" {
+		return nil
 	}
-	return &driver.DefaultValue{Value: value, IsSQLExpression: isExpr}
+	if isQuotedLiteral(raw.String) {
+		return &driver.DefaultValue{Value: unquoteSQLString(raw.String)}
+	}
+	return &driver.DefaultValue{Value: raw.String, IsSQLExpression: !numericDefaultRe.MatchString(raw.String)}
 }
+
+var catalogExprEscapes = strings.NewReplacer(`\\`, `\`, `\'`, `'`, `\"`, `"`)
 
 // genIntrocerRe matches the charset introcer MySQL prints before string
 // literals inside GENERATION_EXPRESSION (e.g. _utf8mb4'!').
@@ -401,9 +376,26 @@ func normalizeGenExpr(expr string) string {
 	return genIntrocerRe.ReplaceAllString(b.String(), "$1")
 }
 
-// isQuotedLiteral reports whether s looks like a quoted string literal.
+// isQuotedLiteral reports whether the complete expression is one SQL string.
 func isQuotedLiteral(s string) bool {
-	return len(s) >= 2 && s[0] == '\'' && s[len(s)-1] == '\''
+	if len(s) < 2 || s[0] != '\'' {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		switch s[i] {
+		case '\\':
+			i++
+		case '\'':
+			if i+1 == len(s) {
+				return true
+			}
+			if s[i+1] != '\'' {
+				return false
+			}
+			i++
+		}
+	}
+	return false
 }
 
 // onUpdateExpr extracts the expression from an EXTRA value such as

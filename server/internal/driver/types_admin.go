@@ -1,6 +1,10 @@
 package driver
 
-import "context"
+import (
+	"context"
+	"errors"
+	"strings"
+)
 
 // UserManager is an optional MySQL/MariaDB administration capability.
 type UserManager interface {
@@ -12,6 +16,7 @@ type UserManager interface {
 	SetUserLimits(context.Context, UserAccount, UserLimits) error
 	UserGrants(context.Context, UserAccount) ([]GrantInfo, error)
 	PrivilegeCatalog() []PrivilegeInfo
+	DatabasePatternsSupported(context.Context) (bool, error)
 	GrantPrivileges(context.Context, UserAccount, GrantChange) error
 	RevokePrivileges(context.Context, UserAccount, GrantChange) error
 }
@@ -37,11 +42,74 @@ type UserLimits struct {
 	UserConnections    uint32 `json:"userConnections"`
 }
 
-// GrantScope identifies one global, database or table grant target.
+// DatabasePatternLevel is a native wildcard grant on a database name.
+const DatabasePatternLevel = "databasePattern"
+
+// ErrDatabasePatternsDisabled reports a server mode that requires exact schema names.
+var ErrDatabasePatternsDisabled = errors.New("database privilege patterns are unavailable when partial_revokes is enabled")
+
+// GrantScope identifies a global, literal database, database pattern or table grant target.
 type GrantScope struct {
 	Level    string `json:"level"`
 	Database string `json:"database,omitempty"`
 	Table    string `json:"table,omitempty"`
+}
+
+// PrivilegeLevel returns the server catalog level used for validation.
+func (s GrantScope) PrivilegeLevel() string {
+	if s.Level == DatabasePatternLevel {
+		return "database"
+	}
+	return s.Level
+}
+
+// Valid checks the requested target before it can be used in a GRANT or REVOKE.
+func (s GrantScope) Valid() bool {
+	if strings.ContainsRune(s.Database+s.Table, 0) {
+		return false
+	}
+	switch s.Level {
+	case "global":
+		return s.Database == "" && s.Table == ""
+	case "database":
+		return s.Database != "" && s.Table == ""
+	case DatabasePatternLevel:
+		parsed, valid := ParseDatabaseGrantName(s.Database)
+		return s.Table == "" && valid && parsed.Level == DatabasePatternLevel
+	case "table":
+		return s.Database != "" && s.Table != ""
+	}
+	return false
+}
+
+// ParseDatabaseGrantName decodes a database-level name when the server enables
+// wildcards. Preserve patterns exactly so their escapes survive a revoke.
+// Unrecognized escapes retain their original target but cannot be edited.
+func ParseDatabaseGrantName(name string) (GrantScope, bool) {
+	scope := GrantScope{Level: "database", Database: name}
+	valid := name != "" && !strings.ContainsRune(name, 0)
+	var literal strings.Builder
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		switch c {
+		case '%', '_':
+			scope.Level = DatabasePatternLevel
+		case '\\':
+			i++
+			if i == len(name) {
+				return scope, false
+			}
+			c = name[i]
+			if c != '\\' && c != '%' && c != '_' {
+				valid = false
+			}
+		}
+		literal.WriteByte(c)
+	}
+	if scope.Level == "database" && valid {
+		scope.Database = literal.String()
+	}
+	return scope, valid
 }
 
 // PrivilegeInfo declares a privilege and the levels where it is valid.

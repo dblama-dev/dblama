@@ -57,15 +57,14 @@ LEFT JOIN pg_constraint con ON con.conindid = ix.indexrelid AND con.contype IN (
 WHERE n.nspname = $1 AND t.relname = $2
 ORDER BY i.relname`
 
-// defForeignKeysQuery reads the foreign keys of one table: conkey lists
+// foreignKeysQuery reads the foreign keys of a schema: conkey lists
 // the local column attnums and confkey the referenced ones in key order,
 // so unnest WITH ORDINALITY pairs them positionally — information_schema
 // alone cannot (constraint_column_usage exposes no ordering). confupdtype
 // / confdeltype are the one-letter referential actions, cast to text for
 // scanning.
-const defForeignKeysQuery = `
-SELECT con.conname, loc.attname, ref.attname,
-       refcl.relname, refns.nspname,
+const foreignKeysQuery = `
+SELECT t.relname, con.conname, loc.attname, refns.nspname, refcl.relname, ref.attname,
        con.confupdtype::text, con.confdeltype::text
 FROM pg_constraint con
 JOIN pg_class t ON t.oid = con.conrelid
@@ -76,8 +75,7 @@ JOIN pg_attribute loc ON loc.attrelid = t.oid AND loc.attnum = lk.attnum
 JOIN pg_class refcl ON refcl.oid = con.confrelid
 JOIN pg_namespace refns ON refns.oid = refcl.relnamespace
 JOIN pg_attribute ref ON ref.attrelid = con.confrelid AND ref.attnum = rk.attnum
-WHERE con.contype = 'f' AND n.nspname = $1 AND t.relname = $2
-ORDER BY con.conname, lk.ord`
+WHERE con.contype = 'f' AND n.nspname = $1`
 
 // TableDef reads the full structure of one table of the current schema
 // (SetSchema selects it; the pool is bound to the login database, so db
@@ -109,7 +107,7 @@ func (d *PostgresDriver) TableDef(ctx context.Context, db, table string) (driver
 	if err != nil {
 		return driver.TableDef{}, err
 	}
-	fks, err := d.tableForeignKeys(ctx, schema, table)
+	relationships, err := d.readRelationships(ctx, schema, table)
 	if err != nil {
 		return driver.TableDef{}, err
 	}
@@ -118,7 +116,7 @@ func (d *PostgresDriver) TableDef(ctx context.Context, db, table string) (driver
 		NewName:     table,
 		Columns:     columns,
 		Indexes:     indexes,
-		ForeignKeys: fks,
+		ForeignKeys: driver.ForeignKeysOfTable(relationships),
 		Options:     options,
 	}, nil
 }
@@ -142,7 +140,15 @@ func (d *PostgresDriver) tableOptions(ctx context.Context, schema, table string)
 
 // tableColumns reads and maps the columns of one table in ordinal order.
 func (d *PostgresDriver) tableColumns(ctx context.Context, schema, table string) ([]driver.ColumnDef, error) {
-	rows, err := d.db.QueryContext(ctx, defColumnsQuery, schema, table)
+	return readTableColumns(ctx, d.db, schema, table)
+}
+
+type columnQuerier interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func readTableColumns(ctx context.Context, conn columnQuerier, schema, table string) ([]driver.ColumnDef, error) {
+	rows, err := conn.QueryContext(ctx, defColumnsQuery, schema, table)
 	if err != nil {
 		return nil, fmt.Errorf("query columns of %s: %w", table, err)
 	}
@@ -506,46 +512,36 @@ func quotedIdentifier(el string) (string, bool) {
 	return "", false // unterminated quote — not a quoted identifier
 }
 
-// tableForeignKeys reads the foreign keys declared on one table, ordered
-// by constraint name and key position.
-func (d *PostgresDriver) tableForeignKeys(ctx context.Context, schema, table string) ([]driver.ForeignKey, error) {
-	rows, err := d.db.QueryContext(ctx, defForeignKeysQuery, schema, table)
+// ListRelationships returns the visible foreign keys of the requested schema.
+func (d *PostgresDriver) ListRelationships(ctx context.Context, db string) ([]driver.TableRelationship, error) {
+	if err := d.checkDatabase(db); err != nil {
+		return nil, err
+	}
+	return d.readRelationships(ctx, d.schemaFor(ctx), "")
+}
+
+func (d *PostgresDriver) readRelationships(ctx context.Context, schema, table string) ([]driver.TableRelationship, error) {
+	query := foreignKeysQuery
+	args := []any{schema}
+	if table == "" {
+		// Match ListTables visibility for users with partial grants.
+		query += ` AND EXISTS (SELECT 1 FROM information_schema.tables v
+			WHERE v.table_schema = n.nspname AND v.table_name = t.relname)`
+	} else {
+		query += " AND t.relname = $2"
+		args = append(args, table)
+	}
+	rows, err := d.db.QueryContext(ctx, query+" ORDER BY t.relname, con.conname, lk.ord", args...)
 	if err != nil {
-		return nil, fmt.Errorf("query foreign keys of %s: %w", table, err)
+		return nil, fmt.Errorf("query foreign keys of %s: %w", schema, err)
 	}
 	defer func() { _ = rows.Close() }()
-
-	var fks []driver.ForeignKey
-	for rows.Next() {
-		var (
-			name       string
-			col        string
-			refCol     string
-			refTable   string
-			refSchema  string
-			updateRule string
-			deleteRule string
-		)
-		if err := rows.Scan(&name, &col, &refCol, &refTable, &refSchema, &updateRule, &deleteRule); err != nil {
-			return nil, fmt.Errorf("scan foreign key row of %s: %w", table, err)
-		}
-		if len(fks) == 0 || fks[len(fks)-1].Name != name {
-			fks = append(fks, driver.ForeignKey{
-				Name:      name,
-				RefTable:  refTable,
-				RefSchema: referenceSchema(refSchema, schema),
-				OnUpdate:  fkRule(updateRule),
-				OnDelete:  fkRule(deleteRule),
-			})
-		}
-		last := &fks[len(fks)-1]
-		last.Columns = append(last.Columns, col)
-		last.RefColumns = append(last.RefColumns, refCol)
+	relations, err := driver.ReadTableRelationships(rows, schema)
+	for i := range relations {
+		relations[i].OnDelete = fkRule(relations[i].OnDelete)
+		relations[i].OnUpdate = fkRule(relations[i].OnUpdate)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate foreign keys of %s: %w", table, err)
-	}
-	return fks, nil
+	return relations, err
 }
 
 // fkRule maps pg_constraint's one-letter referential action to the
@@ -564,11 +560,4 @@ func fkRule(code string) string {
 	default:
 		return "NO ACTION"
 	}
-}
-
-func referenceSchema(ref, current string) string {
-	if ref == current {
-		return ""
-	}
-	return ref
 }

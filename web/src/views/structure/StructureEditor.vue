@@ -40,8 +40,7 @@ interface EditableColumn {
   length: string
   unsigned: boolean
   nullable: boolean
-  defaultNull: boolean
-  isSqlExpression: boolean
+  defaultMode: 'none' | 'literal' | 'null' | 'expression'
   defaultValue: string
   autoIncrement: boolean
   onUpdate: string
@@ -49,7 +48,7 @@ interface EditableColumn {
   generatedExpression: string
   collation: string
   comment: string
-  enumValues: string
+  enumValues: string[]
   markedForDeletion: boolean
 }
 
@@ -95,11 +94,11 @@ const ENUM_TYPES = new Set(['enum', 'set'])
 const metadata = useMetadataStore()
 void metadata.load()
 const typeOptions = computed(() => metadata.data?.columnTypes.map(type => ({label:type.name,value:type.name})) ?? COMMON_TYPES.map(type => ({label:type,value:type})))
-const generatedOptions = [
+const generatedOptions = computed(() => [
   { label: t('structure.generatedNone'), value: '' },
-  { label: 'VIRTUAL', value: 'VIRTUAL' },
+  ...(!catalog.schemaAware ? [{ label: 'VIRTUAL', value: 'VIRTUAL' }] : []),
   { label: 'STORED', value: 'STORED' },
-]
+])
 
 const path = computed(
   () =>
@@ -109,6 +108,8 @@ const path = computed(
 // Create mode: the route addresses the literal "_new" placeholder, no
 // definition exists yet.
 const createMode = computed(() => props.table === '_new')
+const canPlaceColumns = computed(() => createMode.value || !catalog.schemaAware)
+const columnsPanel = ref<HTMLElement | null>(null)
 
 const loading = ref(false)
 const saving = ref(false)
@@ -140,17 +141,10 @@ async function fksSaved():Promise<void>{fkBaseline.value=JSON.stringify(foreignK
 
 function fromDef(c: ColumnDef): EditableColumn {
   const generated = (c.generated ?? '') as EditableColumn['generated']
-  let defaultNull = false
-  let isSql = false
-  let defaultValue = ''
+  let defaultMode: EditableColumn['defaultMode'] = 'none'
   if (!generated && c.default) {
-    if (c.default.isSqlExpression && c.default.value === 'NULL') {
-      // The model's way to express an explicit DEFAULT NULL.
-      defaultNull = true
-    } else {
-      defaultValue = c.default.value
-      isSql = c.default.isSqlExpression ?? false
-    }
+    defaultMode = c.default.isSqlExpression ? 'expression' : 'literal'
+    if (c.default.isSqlExpression && c.default.value === 'NULL') defaultMode = 'null'
   }
   return {
     key: ++keySeq,
@@ -160,16 +154,15 @@ function fromDef(c: ColumnDef): EditableColumn {
     length: c.length ?? '',
     unsigned: c.unsigned ?? false,
     nullable: c.nullable,
-    defaultNull,
-    isSqlExpression: isSql,
-    defaultValue,
+    defaultMode,
+    defaultValue: defaultMode === 'literal' || defaultMode === 'expression' ? c.default!.value : '',
     autoIncrement: c.autoIncrement ?? false,
     onUpdate: c.onUpdate ?? '',
     generated,
     generatedExpression: generated ? (c.default?.value ?? '') : '',
     collation: c.collation ?? '',
     comment: c.comment ?? '',
-    enumValues: (c.enumValues ?? []).join(', '),
+    enumValues: [...(c.enumValues ?? [])],
     markedForDeletion: false,
   }
 }
@@ -231,17 +224,17 @@ function notifyError(err: unknown): void {
 
 // --- Row manipulation -----------------------------------------------------
 
-function addColumn(): void {
-  rows.value.push({
-    key: ++keySeq,
+async function addColumn(index = rows.value.length): Promise<void> {
+  const key = ++keySeq
+  rows.value.splice(index, 0, {
+    key,
     name: '',
     originalName: null,
     type: '',
     length: '',
     unsigned: false,
     nullable: true,
-    defaultNull: false,
-    isSqlExpression: false,
+    defaultMode: 'none',
     defaultValue: '',
     autoIncrement: false,
     onUpdate: '',
@@ -249,9 +242,11 @@ function addColumn(): void {
     generatedExpression: '',
     collation: '',
     comment: '',
-    enumValues: '',
+    enumValues: [],
     markedForDeletion: false,
   })
+  await nextTick()
+  columnsPanel.value?.querySelector<HTMLInputElement>(`[data-column-key="${key}"] .struct-field--name input`)?.focus()
 }
 
 function moveRow(index: number, delta: number): void {
@@ -277,9 +272,9 @@ function setAutoIncrement(row: EditableColumn, value: boolean): void {
     const enabled = r === row && value
     // PostgreSQL serial is represented by both this flag and a nextval
     // default. Keeping that default would re-enable generation on reload.
-    if (r.autoIncrement && !enabled && catalog.schemaAware && r.isSqlExpression && r.defaultValue.trim().startsWith('nextval(')) {
+    if (r.autoIncrement && !enabled && catalog.schemaAware && r.defaultMode === 'expression' && r.defaultValue.trim().startsWith('nextval(')) {
       r.defaultValue = ''
-      r.isSqlExpression = false
+      r.defaultMode = 'none'
     }
     r.autoIncrement = enabled
   }
@@ -290,16 +285,27 @@ function isNumeric(row: EditableColumn): boolean {
 }
 
 function isEnumish(row: EditableColumn): boolean {
-  return ENUM_TYPES.has(row.type.trim().toLowerCase())
+  return !catalog.schemaAware && ENUM_TYPES.has(row.type.trim().toLowerCase())
+}
+
+function isSavedPostgresColumn(row: EditableColumn): boolean {
+  return catalog.schemaAware && row.originalName !== null
+}
+
+function isSavedPostgresGenerated(row: EditableColumn): boolean {
+  return isSavedPostgresColumn(row) && row.generated !== ''
 }
 
 function onGeneratedChanged(row: EditableColumn, value: '' | 'VIRTUAL' | 'STORED'): void {
   row.generated = value
-  if (value) {
-    // Generated columns cannot carry NULL/NOT NULL or a plain default
-    // (the backend rejects NOT NULL generated columns cross-flavor).
-    row.nullable = false
-  }
+  if (value && !catalog.schemaAware) row.nullable = true
+}
+
+function defaultSummary(row: EditableColumn): string {
+  if (row.generated || row.defaultMode === 'none') return ''
+  if (row.defaultMode === 'null') return 'DEFAULT NULL'
+  if (row.defaultMode === 'expression') return `DEFAULT ${row.defaultValue}`
+  return `DEFAULT '${row.defaultValue.replaceAll("'", "''")}'`
 }
 
 // --- Save ----------------------------------------------------------------
@@ -314,14 +320,16 @@ const canSave = computed(
     (!createMode.value || rows.value.some((r) => !r.markedForDeletion)) &&
     rows.value
       .filter((r) => !r.markedForDeletion)
-      .every((r) => r.name.trim() !== '' && r.type.trim() !== ''),
+      .every((r) => r.name.trim() !== '' && r.type.trim() !== '' &&
+        (!isEnumish(r) || r.enumValues.length > 0) &&
+        (r.generated ? r.generatedExpression.trim() !== '' : r.defaultMode !== 'expression' || r.defaultValue.trim() !== '')),
 )
 
 function toColumnDef(row: EditableColumn, after: string): ColumnDef {
   const col: ColumnDef = {
     name: row.name,
     type: row.type,
-    nullable: row.generated ? false : row.nullable,
+    nullable: row.nullable,
   }
   if (row.originalName) col.oldName = row.originalName
   const length = row.length.trim()
@@ -333,24 +341,16 @@ function toColumnDef(row: EditableColumn, after: string): ColumnDef {
     // save side renders it as AS (expr).
     col.generated = row.generated
     col.default = { value: row.generatedExpression, isSqlExpression: true }
-  } else if (row.defaultNull) {
+  } else if (row.defaultMode === 'null') {
     col.default = { value: 'NULL', isSqlExpression: true }
-  } else if (row.isSqlExpression) {
-    col.default = { value: row.defaultValue, isSqlExpression: true }
-  } else if (row.defaultValue !== '') {
-    col.default = { value: row.defaultValue, isSqlExpression: false }
+  } else if (row.defaultMode !== 'none') {
+    col.default = { value: row.defaultValue, isSqlExpression: row.defaultMode === 'expression' }
   }
 
-  if (row.autoIncrement) col.autoIncrement = true
+  if (row.autoIncrement && !row.generated) col.autoIncrement = true
   const onUpdate = row.onUpdate.trim()
   if (onUpdate !== '') col.onUpdate = onUpdate
-  if (isEnumish(row)) {
-    const values = row.enumValues
-      .split(',')
-      .map((v) => v.trim())
-      .filter((v) => v !== '')
-    if (values.length > 0) col.enumValues = values
-  }
+  if (isEnumish(row)) col.enumValues = [...row.enumValues]
   const collation = row.collation.trim()
   if (collation !== '') col.collation = collation
   if (row.comment !== '') col.comment = row.comment
@@ -361,7 +361,11 @@ function toColumnDef(row: EditableColumn, after: string): ColumnDef {
   // harmless, idempotent no-op; for a moved column it is what makes the
   // reorder reach the server at all (buildAlterTable takes the placement
   // from the position field, not from the array order).
-  if (!catalog.schemaAware) col.position = after || 'FIRST'
+  if (!catalog.schemaAware) {
+    // The legacy position field reserves FIRST (case-insensitively).
+    if (after.toUpperCase() === 'FIRST') col.afterColumn = after
+    else col.position = after || 'FIRST'
+  }
   return col
 }
 
@@ -461,19 +465,27 @@ async function save(): Promise<void> {
       </div>
 
       <p>{{ t('navigationWorkflows.saveScopes') }}</p>
-      <h3 class="structure-editor__title">
-        {{ t('structure.columns') }}
-      </h3>
-      <div class="structure-editor__columns">
-        <details
+      <header class="structure-columns-heading">
+        <h3 class="structure-editor__title">{{ t('structure.columns') }}</h3>
+        <NButton v-if="canPlaceColumns && rows.length" size="small" quaternary data-add-first @click="addColumn(0)">
+          {{ t('structure.addFirst') }}
+        </NButton>
+      </header>
+      <div ref="columnsPanel" class="structure-editor__columns">
+        <div v-for="(row, index) in rows" :key="row.key" :data-column-key="row.key" class="structure-column">
+          <details
           :open="createMode || !row.originalName"
-          v-for="(row, index) in rows"
-          :key="row.key"
           class="struct-row"
           :class="{ 'struct-row--deleted': row.markedForDeletion }"
           data-testid="struct-row"
         >
-          <summary :aria-label="`${t('navigationWorkflows.editColumn')}: ${row.name}`">{{ row.name || '…' }} <code>{{ row.type }}{{ row.length ? `(${row.length})` : '' }}</code> · {{ row.nullable ? 'NULL' : 'NOT NULL' }} <span v-if="row.autoIncrement"> · ID</span><span v-if="row.defaultValue"> · DEFAULT {{ row.defaultValue }}</span><span v-if="row.generated"> · {{ row.generated }}</span></summary>
+          <summary>
+            {{ row.name || '…' }}
+            <code>{{ row.type }}{{ row.length ? `(${row.length})` : '' }}</code> · {{ row.nullable ? 'NULL' : 'NOT NULL' }}
+            <span v-if="row.autoIncrement && !row.generated"> · ID</span>
+            <span v-if="!row.generated && row.defaultMode !== 'none'"> · {{ defaultSummary(row) }}</span>
+            <span v-if="row.generated"> · {{ row.generated }}</span>
+          </summary>
           <div class="struct-row__fields">
           <label
             class="struct-field struct-field--name"
@@ -490,7 +502,7 @@ async function save(): Promise<void> {
             <NSelect
               v-model:value="row.type"
               :options="typeOptions"
-              :disabled="row.markedForDeletion"
+              :disabled="row.markedForDeletion || isSavedPostgresGenerated(row)"
               filterable
               tag
               :placeholder="t('structure.type')"
@@ -504,18 +516,24 @@ async function save(): Promise<void> {
             <NInput
               v-model:value="row.length"
               :disabled="row.markedForDeletion"
+              :readonly="isSavedPostgresGenerated(row)"
             />
           </label>
-          <label
+          <fieldset
             v-if="isEnumish(row)"
             class="struct-field struct-field--enumvalues"
+            :disabled="row.markedForDeletion"
           >
-            <span class="struct-field__label">{{ t('structure.enumValues') }}</span>
-            <NInput
-              v-model:value="row.enumValues"
-              :disabled="row.markedForDeletion"
-            />
-          </label>
+            <legend class="struct-field__label">{{ t('structure.enumValues', { type: row.type.toUpperCase() }) }}</legend>
+            <div v-for="(_, i) in row.enumValues" :key="i" class="enum-choice-row">
+              <textarea v-model="row.enumValues[i]" class="enum-choice" rows="1" :aria-label="t('structure.choiceNumber', { n: i + 1 })" />
+              <NButton size="small" quaternary data-remove-choice :disabled="row.markedForDeletion"
+                :aria-label="t('structure.removeChoice', { n: i + 1 })" @click="row.enumValues.splice(i, 1)">×</NButton>
+            </div>
+            <NButton size="small" data-add-choice :disabled="row.markedForDeletion" @click="row.enumValues.push('')">
+              {{ t('structure.addChoice') }}
+            </NButton>
+          </fieldset>
           <label
             v-if="isNumeric(row)"
             class="struct-field struct-field--unsigned"
@@ -531,59 +549,44 @@ async function save(): Promise<void> {
             <span class="struct-field__label">{{ t('structure.nullable') }}</span>
             <NCheckbox
               :checked="row.nullable"
-              :disabled="row.generated !== '' || row.markedForDeletion"
+              :disabled="(row.generated !== '' && !catalog.schemaAware) || row.markedForDeletion"
               @update:checked="row.nullable = $event"
             />
           </label>
           <label
             v-if="!row.generated"
-            class="struct-field struct-field--default"
+            class="struct-field struct-field--defaultmode"
           >
             <span class="struct-field__label">{{ t('structure.defaultValue') }}</span>
+            <select v-model="row.defaultMode" class="default-mode" :aria-label="t('structure.defaultValue')" :disabled="row.markedForDeletion">
+              <option value="none">{{ t('structure.noDefault') }}</option>
+              <option value="literal">{{ t('structure.literalDefault') }}</option>
+              <option value="null">NULL</option>
+              <option value="expression">{{ t('structure.sqlExpression') }}</option>
+            </select>
+          </label>
+          <label
+            v-if="!row.generated && (row.defaultMode === 'literal' || row.defaultMode === 'expression')"
+            class="struct-field struct-field--default"
+          >
+            <span class="struct-field__label">{{ row.defaultMode === 'literal' ? t('structure.literalDefault') : t('structure.sqlExpression') }}</span>
             <NInput
               v-model:value="row.defaultValue"
-              :disabled="row.defaultNull || row.markedForDeletion"
-            />
-          </label>
-          <label
-            v-if="!row.generated"
-            class="struct-field struct-field--defaultnull"
-          >
-            <span class="struct-field__label">{{ t('structure.nullDefault') }}</span>
-            <NCheckbox
-              :checked="row.defaultNull"
+              type="textarea"
+              :autosize="{ minRows: 1, maxRows: 4 }"
+              :placeholder="row.defaultMode === 'literal' ? t('structure.emptyString') : t('structure.sqlExpression')"
               :disabled="row.markedForDeletion"
-              @update:checked="
-                (v) => {
-                  row.defaultNull = v
-                  if (v) row.isSqlExpression = false
-                }
-              "
             />
           </label>
           <label
-            v-if="!row.generated"
-            class="struct-field struct-field--defaultsql"
-          >
-            <span class="struct-field__label">{{ t('structure.sqlExpression') }}</span>
-            <NCheckbox
-              :checked="row.isSqlExpression"
-              :disabled="row.defaultNull || row.markedForDeletion"
-              @update:checked="
-                (v) => {
-                  row.isSqlExpression = v
-                  if (v) row.defaultNull = false
-                }
-              "
-            />
-          </label>
-          <label
-            v-else
+            v-if="row.generated"
             class="struct-field struct-field--genexpr"
           >
             <span class="struct-field__label">{{ t('structure.generatedExpression') }}</span>
             <NInput
               v-model:value="row.generatedExpression"
+              :disabled="row.markedForDeletion"
+              :readonly="isSavedPostgresGenerated(row)"
               :placeholder="t('structure.generatedHint')"
             />
           </label>
@@ -608,9 +611,10 @@ async function save(): Promise<void> {
             <NSelect
               :value="row.generated"
               :options="generatedOptions"
-              :disabled="row.markedForDeletion"
+              :disabled="row.markedForDeletion || isSavedPostgresColumn(row)"
               @update:value="onGeneratedChanged(row, $event as EditableColumn['generated'])"
             />
+            <small v-if="isSavedPostgresColumn(row)" class="struct-field__help">{{ t('structure.savedGenerationHint') }}</small>
           </label>
           <label class="struct-field struct-field--collation">
             <span class="struct-field__label">{{ t('structure.collation') }}</span>
@@ -631,7 +635,7 @@ async function save(): Promise<void> {
               size="small"
               quaternary
               :disabled="index === 0"
-              v-if="!catalog.schemaAware"
+              v-if="canPlaceColumns"
               data-testid="col-up"
               :title="t('structure.moveUp')"
               @click="moveRow(index, -1)"
@@ -642,7 +646,7 @@ async function save(): Promise<void> {
               size="small"
               quaternary
               :disabled="index === rows.length - 1"
-              v-if="!catalog.schemaAware"
+              v-if="canPlaceColumns"
               data-testid="col-down"
               :title="t('structure.moveDown')"
               @click="moveRow(index, 1)"
@@ -661,21 +665,27 @@ async function save(): Promise<void> {
             </NButton>
           </div>
           <div
-            v-if="row.generated"
+            v-if="row.generated && !isSavedPostgresColumn(row)"
             class="struct-row__hint"
           >
             {{ t('structure.generatedHint') }}
           </div>
           </div>
-        </details>
+          </details>
+          <NButton v-if="canPlaceColumns && !row.markedForDeletion" class="insert-after" size="small" quaternary
+            data-add-after :title="t('structure.addAfter', { name: row.name || '…' })"
+            :aria-label="t('structure.addAfter', { name: row.name || '…' })"
+            @click="addColumn(index + 1)">＋</NButton>
+        </div>
         <NButton
           size="small"
           data-testid="struct-add"
-          @click="addColumn"
+          @click="addColumn()"
         >
           {{ t('structure.addColumn') }}
         </NButton>
       </div>
+      <p v-if="!canPlaceColumns" class="struct-row__hint">{{ t('structure.appendOnly') }}</p>
 
       <h3 class="structure-editor__title">
         {{ t('structure.indexes') }}
@@ -735,20 +745,79 @@ async function save(): Promise<void> {
   gap: 8px;
   align-items: flex-start;
 }
+.structure-columns-heading { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.structure-columns-heading h3 { margin: 0; }
+.structure-column { width: 100%; position: relative; }
+.structure-column:has(.insert-after) summary { padding-inline-end: 40px; }
+.insert-after { position: absolute; inset-inline-end: 8px; top: 6px; }
 
 .struct-row { display:block;width:100%;padding:8px;border:1px solid #8884;border-radius:4px;box-sizing:border-box; }
 .struct-row summary {cursor:pointer;padding:4px; }
 .struct-row summary code {margin-left:12px;opacity:.7;}
-.struct-row__fields {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 12px;
-  padding: 8px;
-  border: 1px solid rgba(128, 128, 128, 0.25);
+.default-mode, .enum-choice {
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid #8886;
   border-radius: 4px;
+  color: inherit;
+  background: var(--n-color, transparent);
+  font: inherit;
+}
+.default-mode option { color: CanvasText; background: Canvas; }
+.struct-field--enumvalues {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid #8884;
+  border-radius: 4px;
+}
+.enum-choice-row { display: flex; align-items: center; gap: 4px; }
+.enum-choice { resize: vertical; width: 100%; min-width: 0; }
+.struct-field--enumvalues > button { justify-self: start; }
+.struct-row__fields {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 12px 16px;
+  margin-top: 6px;
+  padding: 12px 4px 4px;
+  border-top: 1px solid rgba(128, 128, 128, 0.25);
   width: 100%;
 }
+
+.struct-row[open] { container-type: inline-size; }
+
+@container (min-width: 32rem) {
+  .struct-row__fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@container (min-width: 53rem) {
+  .struct-row__fields { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .struct-field--enumvalues { grid-column: 3; grid-row: 1 / span 3; }
+}
+
+.struct-row__fields > label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.struct-row__fields > :is(.struct-field--nullable, .struct-field--unsigned, .struct-field--autoinc) {
+  flex-direction: row;
+  align-items: center;
+  align-self: start;
+  gap: 8px;
+  min-height: 34px;
+  cursor: pointer;
+}
+
+.struct-row__fields > :is(.struct-field--nullable, .struct-field--unsigned, .struct-field--autoinc) > .struct-field__label {
+  order: 1;
+}
+
+.struct-row__fields .default-mode { width: 100%; min-height: 34px; }
 
 .struct-row--deleted .struct-field__label,
 .struct-row--deleted :deep(.n-input__input-el) {
@@ -757,15 +826,20 @@ async function save(): Promise<void> {
 }
 
 .struct-row .struct-field {
-  min-width: 130px;
+  min-width: 0;
 }
 
+.struct-field__help { display: block; max-width: 32ch; margin-top: 4px; }
+
 .struct-row__buttons {
+  grid-column: 1 / -1;
   display: flex;
+  justify-content: flex-end;
   gap: 4px;
 }
 
 .struct-row__hint {
+  grid-column: 1 / -1;
   width: 100%;
   font-size: 12px;
   opacity: 0.6;

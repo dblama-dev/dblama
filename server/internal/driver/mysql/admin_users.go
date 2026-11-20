@@ -3,8 +3,10 @@ package mysql
 import (
 	"context"
 	"fmt"
-	"github.com/hitslab/db-manager/server/internal/driver"
+	"slices"
 	"strings"
+
+	"github.com/hitslab/db-manager/server/internal/driver"
 )
 
 var _ driver.UserManager = (*MysqlDriver)(nil)
@@ -93,7 +95,7 @@ func (d *MysqlDriver) UserGrants(ctx context.Context, a driver.UserAccount) ([]d
 	if err := validAccount(a); err != nil {
 		return nil, err
 	}
-	literal, err := d.grantDatabaseLiteralMode(ctx)
+	patterns, err := d.DatabasePatternsSupported(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -103,14 +105,45 @@ func (d *MysqlDriver) UserGrants(ctx context.Context, a driver.UserAccount) ([]d
 	}
 	defer func() { _ = rows.Close() }()
 	grants := []driver.GrantInfo{}
+	var allGrants []int
 	for rows.Next() {
 		var raw string
 		if err := rows.Scan(&raw); err != nil {
 			return nil, err
 		}
-		grants = append(grants, parseGrant(raw, literal))
+		g := parseGrant(raw, !patterns)
+		if (g.Scope.Level == driver.DatabasePatternLevel || g.Scope.Level == "table") && g.Scope.Valid() && slices.Equal(g.Privileges, []string{"ALL PRIVILEGES"}) {
+			allGrants = append(allGrants, len(grants))
+		}
+		grants = append(grants, g)
 	}
-	return grants, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(allGrants) > 0 {
+		// SHOW GRANTS abbreviates complete grants. Expand them against
+		// this server's catalog so individual privileges can be revoked.
+		catalog, err := d.ReadPrivilegeCatalog(ctx)
+		if err != nil {
+			return nil, err
+		}
+		namesByLevel := make(map[string][]string)
+		for _, privilege := range catalog {
+			for _, level := range privilege.Levels {
+				namesByLevel[level] = append(namesByLevel[level], privilege.Name)
+			}
+		}
+		for _, i := range allGrants {
+			level := grants[i].Scope.PrivilegeLevel()
+			names := namesByLevel[level]
+			if len(names) == 0 {
+				return nil, fmt.Errorf("%s privilege catalog unavailable", level)
+			}
+			grants[i].Privileges = names
+			grants[i].Editable = true
+		}
+	}
+	return grants, nil
 }
 
 // GrantPrivileges grants whitelisted privileges on a structured scope.
@@ -127,12 +160,12 @@ func (d *MysqlDriver) changePrivileges(ctx context.Context, a driver.UserAccount
 		return err
 	}
 	literal := false
-	if g.Scope.Level == "database" {
-		var err error
-		literal, err = d.grantDatabaseLiteralMode(ctx)
+	if g.Scope.PrivilegeLevel() == "database" {
+		patterns, err := d.DatabasePatternsSupported(ctx)
 		if err != nil {
 			return err
 		}
+		literal = !patterns
 	}
 	scope, err := grantScopeSQL(g.Scope, literal)
 	if err != nil {
