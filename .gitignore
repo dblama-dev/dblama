@@ -4,6 +4,7 @@ node_modules/
 server/web/*
 !server/web/index.html
 dist/
+*.tsbuildinfo
 *.log
 .env
 server/dbmanager
