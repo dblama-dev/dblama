@@ -1,16 +1,15 @@
 version: 2
-project_name: db-manager
+project_name: dblama
 
 before:
   hooks:
-    - npm --prefix web ci
-    - npm --prefix web run build
+    - npm --prefix frontend ci
+    - npm --prefix frontend run build
 
 builds:
-  - id: dbmanager
-    dir: server
-    main: ./cmd/dbmanager
-    binary: dbmanager
+  - id: dblama
+    main: ./cmd/dblama
+    binary: dblama
     env:
       - CGO_ENABLED=0
     goos:
@@ -28,7 +27,7 @@ builds:
 archives:
   - id: binaries
     ids:
-      - dbmanager
+      - dblama
     formats:
       - tar.gz
     name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
@@ -38,7 +37,7 @@ archives:
           - zip
     files:
       - README.md
-      - CHANGELOG.md
+      - docs/dev.md
 
 checksum:
   name_template: checksums.txt

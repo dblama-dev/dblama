@@ -3,7 +3,7 @@
 set -euo pipefail
 release_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$release_root"
-for release_file in .goreleaser.yaml Dockerfile .dockerignore README.md CHANGELOG.md; do
+for release_file in .goreleaser.yaml Dockerfile .dockerignore README.md docs/dev.md; do
   test -s "$release_file" || { echo "Missing release input: $release_file" >&2; exit 1; }
 done
 for release_tool in goreleaser node npm go; do
@@ -20,7 +20,7 @@ import { spawn } from 'node:child_process'
 const platforms = ['linux', 'darwin', 'windows']
 const arches = ['amd64', 'arm64']
 const files = readdirSync('dist')
-const archives = files.filter(name => /^db-manager_.+_(linux|darwin|windows)_(amd64|arm64)\.(tar\.gz|zip)$/.test(name))
+const archives = files.filter(name => /^dblama_.+_(linux|darwin|windows)_(amd64|arm64)\.(tar\.gz|zip)$/.test(name))
 assert.equal(archives.length, 6, 'expected six OS/architecture archives')
 for (const platform of platforms) for (const arch of arches) {
   assert.equal(archives.filter(name => name.endsWith(`_${platform}_${arch}.${platform === 'windows' ? 'zip' : 'tar.gz'}`)).length, 1)
@@ -30,7 +30,7 @@ for (const line of readFileSync('dist/checksums.txt', 'utf8').trim().split('\n')
   assert(match, 'invalid checksum record')
   assert.equal(createHash('sha256').update(readFileSync(resolve('dist', match[2]))).digest('hex'), match[1])
 }
-const binaries = readdirSync('dist', { recursive: true }).filter(name => /[/\\]dbmanager(?:\.exe)?$/.test(name))
+const binaries = readdirSync('dist', { recursive: true }).filter(name => /[/\\]dblama(?:\.exe)?$/.test(name))
 assert.equal(binaries.length, 6, 'expected six statically built executables')
 for (const file of binaries) {
   const magic = readFileSync(resolve('dist', file)).subarray(0, 4).toString('hex')
@@ -80,10 +80,10 @@ if [[ "${1:-}" == "--docker" ]]; then
   release_arch_dir=$(mktemp -d)
   trap 'rm -rf "$release_arch_dir"' EXIT
   docker build --platform linux/arm64 --target architecture-check --output "type=local,dest=$release_arch_dir" .
-  node -e 'const b=require("node:fs").readFileSync(process.argv[1]);if(b.toString("hex",0,4)!=="7f454c46"||b.readUInt16LE(18)!==183)throw new Error("Docker arm64 binary has the wrong ELF architecture")' "$release_arch_dir/dbmanager"
-  docker build --tag db-manager:release-check .
-  test "$(docker image inspect db-manager:release-check --format '{{.Config.User}}')" = '65532:65532'
-  release_container=$(docker run --detach --rm --read-only --cap-drop=ALL --security-opt=no-new-privileges --publish 127.0.0.1::8080 db-manager:release-check)
+  node -e 'const b=require("node:fs").readFileSync(process.argv[1]);if(b.toString("hex",0,4)!=="7f454c46"||b.readUInt16LE(18)!==183)throw new Error("Docker arm64 binary has the wrong ELF architecture")' "$release_arch_dir/dblama"
+  docker build --tag dblama:release-check .
+  test "$(docker image inspect dblama:release-check --format '{{.Config.User}}')" = '65532:65532'
+  release_container=$(docker run --detach --rm --read-only --cap-drop=ALL --security-opt=no-new-privileges --publish 127.0.0.1::8080 dblama:release-check)
   trap 'docker stop "$release_container" >/dev/null 2>&1 || true; rm -rf "$release_arch_dir"' EXIT
   release_address=$(docker port "$release_container" 8080/tcp)
   curl --fail --retry 20 --retry-delay 1 --retry-connrefused --silent "http://$release_address/api/drivers" | node -e 'let raw="";process.stdin.on("data",v=>raw+=v);process.stdin.on("end",()=>{if(JSON.parse(raw).length!==3)process.exit(1)})'
