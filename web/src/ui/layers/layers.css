@@ -1,0 +1,73 @@
+.ui-modal {
+  position: fixed;
+  inset: 0;
+  width: min(32rem, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px);
+  padding: 0;
+  margin: auto;
+  border: 1px solid var(--db-line);
+  border-radius: 12px;
+  background: var(--db-panel);
+  color: var(--db-ink);
+  box-shadow: 0 20px 64px rgb(13 20 39 / 20%);
+  overflow: visible;
+}
+.ui-modal[open] { display: flex; flex-direction: column; }
+.ui-modal:focus { outline: none; }
+.ui-modal::backdrop { background: rgb(14 21 39 / 40%); }
+.ui-modal__header, .ui-modal__footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  flex: none;
+}
+.ui-modal__header { justify-content: space-between; border-bottom: 1px solid var(--db-line); }
+.ui-modal__header h2 { margin: 0; font-size: 18px; font-weight: 620; line-height: 1.3; overflow-wrap: anywhere; }
+.ui-modal__body { padding: 16px 18px; overflow: auto; overscroll-behavior: contain; }
+.ui-modal[role="alertdialog"] .ui-modal__body { overflow-wrap: anywhere; }
+.ui-modal[role="alertdialog"] .ui-modal__body p { margin: 0; }
+.ui-modal[role="alertdialog"] .ui-modal__body p + p { margin-top: 8px; }
+.ui-modal__footer { justify-content: flex-end; flex-wrap: wrap; border-top: 1px solid var(--db-line); }
+.ui-modal__footer > :only-child { flex: 1 1 auto; }
+.ui-floating {
+  position: fixed;
+  z-index: 1200;
+  box-sizing: border-box;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
+  border: 1px solid var(--db-line);
+  border-radius: 8px;
+  background: var(--db-panel);
+  color: var(--db-ink);
+  box-shadow: 0 6px 24px rgb(13 20 39 / 15%);
+}
+.ui-dropdown { display: grid; min-width: min(144px, calc(100vw - 16px)); padding: 4px; }
+.ui-dropdown-option {
+  font: inherit;
+  font-size: 13px;
+  text-align: start;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.ui-dropdown-option:hover:not(:disabled), .ui-dropdown-option:focus { color: var(--db-accent); background: var(--db-tint); }
+.ui-dropdown-option:disabled { color: var(--db-muted); opacity: .65; cursor: default; }
+.ui-popconfirm { width: max-content; max-width: min(360px, calc(100vw - 16px)); padding: 12px; }
+.ui-popconfirm p { margin: 0; overflow-wrap: anywhere; }
+.ui-popconfirm__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.ui-notices { position: fixed; z-index: 1300; top: 14px; right: 14px; display: grid; gap: 8px; width: min(360px, calc(100vw - 28px)); max-height: calc(100dvh - 28px); overflow: auto; }
+.ui-notification {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 10px;
+  padding: 12px; border: 1px solid var(--db-line); border-radius: 9px; background: var(--db-panel);
+  color: var(--db-ink); box-shadow: 0 4px 16px rgb(13 20 39 / 14%); overflow-wrap: anywhere;
+}
+.ui-notification > svg { margin-top: 2px; color: var(--db-accent); }
+.ui-notification--error > svg { color: var(--db-danger, #b64149); }
+.ui-notification p { margin: 0; white-space: pre-line; }
+.ui-notification strong { display: block; margin-bottom: 3px; }

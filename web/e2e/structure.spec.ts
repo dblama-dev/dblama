@@ -5,7 +5,7 @@ async function addColumn(page: Page, name: string, type: string) {
   await page.getByTestId('struct-add').click()
   const row = page.getByTestId('struct-row').nth(await page.getByTestId('struct-row').count() - 1)
   await row.locator('.struct-field--name input').fill(name)
-  await selectOption(page, row.locator('.struct-field--type .n-select'), type)
+  await selectOption(page, row.locator('.struct-field--type .ui-select'), type)
   return row
 }
 
@@ -33,7 +33,7 @@ test('column defaults and ordered enum values survive a structure edit', async (
       const added = rows.nth(3)
       await expect(added.locator('.struct-field--name input')).toBeFocused()
       await added.locator('.struct-field--name input').fill('middle_col')
-      await selectOption(page, added.locator('.struct-field--type .n-select'), 'int')
+      await selectOption(page, added.locator('.struct-field--type .ui-select'), 'int')
     } else {
       await expect(page.getByRole('button', { name: /Add column after/ })).toHaveCount(0)
     }
@@ -52,19 +52,42 @@ test('column defaults and ordered enum values survive a structure edit', async (
   }
 })
 
-test('autoincrement can be turned off by a second click and moved to another column', async ({ page, db }) => {
+test('column checkboxes stay together and wrap inside a narrow editor', async ({ page, db, engine }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(tablePath(db, '_new', 'structure'))
+  const column = await addColumn(page, 'quantity', 'int')
+  const labels = engine === 'postgres' ? ['Nullable', 'Auto-number'] : ['Nullable', 'unsigned', 'AUTO_INCREMENT']
+  const controls = labels.map(name =>
+    column.getByRole('checkbox', { name, exact: true }),
+  )
+  for (const control of controls) await expect(control).toBeVisible()
+  const desktop = await Promise.all(controls.map(control => control.boundingBox()))
+  for (const box of desktop) expect(box!.y).toBeCloseTo(desktop[0]!.y, 0)
+
+  await page.setViewportSize({ width: 320, height: 800 })
+  const narrow = await Promise.all(controls.map(control => control.boundingBox()))
+  const editor = (await column.boundingBox())!
+  for (const box of narrow) {
+    expect(box!.x).toBeGreaterThanOrEqual(editor.x)
+    expect(box!.x + box!.width).toBeLessThanOrEqual(editor.x + editor.width)
+  }
+  if (engine !== 'postgres') expect(narrow[2]!.y).toBeGreaterThan(narrow[0]!.y)
+})
+
+test('autoincrement can be turned off by a second click and moved to another column', async ({ page, db, engine }) => {
   await page.goto(tablePath(db, '_new', 'structure'))
   const first = await addColumn(page, 'id', 'int')
   const second = await addColumn(page, 'other_id', 'int')
-  const toggle = first.locator('.struct-field--autoinc input[type=radio], .struct-field--autoinc [role=checkbox]')
-  const button = first.locator('.struct-field--autoinc .n-radio, .struct-field--autoinc .n-checkbox')
-  await button.click()
+  const name = engine === 'postgres' ? 'Auto-number' : 'AUTO_INCREMENT'
+  const toggle = first.getByRole('checkbox', { name, exact: true })
+  const caption = first.getByText(name, { exact: true })
+  await caption.click()
   await expect(toggle).toBeChecked()
-  await button.click()
+  await caption.click()
   await expect(toggle).not.toBeChecked()
-  await button.click()
-  const other = second.locator('.struct-field--autoinc input[type=radio], .struct-field--autoinc [role=checkbox]')
-  await second.locator('.struct-field--autoinc .n-radio, .struct-field--autoinc .n-checkbox').click()
+  await toggle.press('Space')
+  const other = second.getByRole('checkbox', { name, exact: true })
+  await other.click()
   await expect(other).toBeChecked()
   await expect(toggle).not.toBeChecked()
 })
@@ -77,17 +100,19 @@ test('create generated primary key, insert without ID, edit structure and reload
     await page.locator('.db-view').getByRole('button', { name: 'New table', exact: true }).click()
     await page.locator('.struct-field--table-name input').fill(table)
     const id = await addColumn(page, 'id', 'int')
-    await id.locator('.struct-field--nullable [role=checkbox]').click()
-    await id.locator('.struct-field--autoinc .n-radio, .struct-field--autoinc .n-checkbox').click()
+    await id.locator('.struct-field--nullable input[type=checkbox]').click()
+    await id.locator('.struct-field--autoinc input[type=checkbox]').click()
     await addColumn(page, 'title', 'text')
+    await page.getByRole('button', { name:'Indexes', exact:true }).click()
     await page.getByRole('button', { name: 'Add index', exact: true }).click()
     const index = page.getByTestId('index-row')
-    await selectOption(page, index.locator('.struct-field--indextype .n-select'), 'PRIMARY')
-    await selectOption(page, index.locator('.struct-field--indexcolumns .n-select'), 'id')
+    await selectOption(page, index.locator('.struct-field--indextype .ui-select'), 'PRIMARY')
+    await selectOption(page, index.locator('.struct-field--indexcolumns .ui-select'), 'id')
     await page.getByTestId('struct-save').click()
     await expect(page).toHaveURL(new RegExp(`/table/${table}\\?view=structure`))
     await page.reload()
-    await expect(page.getByTestId('struct-row').first().locator('.struct-field--autoinc input[type=radio], .struct-field--autoinc [role=checkbox]')).toBeChecked()
+    await expect(page.getByTestId('struct-row').first().locator('.struct-field--autoinc input[type=checkbox]')).toBeChecked()
+    await page.getByRole('button', { name:'Indexes', exact:true }).click()
     await expect(page.getByTestId('index-row')).toContainText('PRIMARY')
     await runSQL(page, `INSERT INTO ${table} (title) VALUES ('first'), ('second'); SELECT id, title FROM ${table} ORDER BY id;`)
     await expect(page.locator('.resultgrid').last()).toContainText('first')
@@ -117,8 +142,8 @@ test('existing table can disable autoincrement and retain its primary key', asyn
   try {
     await runSQL(page, `CREATE TABLE ${table} (id ${engine === 'postgres' ? 'SERIAL' : 'INT AUTO_INCREMENT'} PRIMARY KEY, title TEXT);`)
     await page.goto(tablePath(db, table, 'structure'))
-    const toggle = page.getByTestId('struct-row').first().locator('.struct-field--autoinc input[type=radio], .struct-field--autoinc [role=checkbox]')
-    const button = page.getByTestId('struct-row').first().locator('.struct-field--autoinc .n-radio, .struct-field--autoinc .n-checkbox')
+    const toggle = page.getByTestId('struct-row').first().locator('.struct-field--autoinc input[type=checkbox]')
+    const button = page.getByTestId('struct-row').first().locator('.struct-field--autoinc input[type=checkbox]')
     await page.getByTestId('struct-row').first().locator('summary').click()
     await button.click()
     const saved = page.waitForResponse(r => r.request().method() === 'PUT' && new URL(r.url()).pathname.endsWith(`/tables/${table}`))
@@ -126,6 +151,7 @@ test('existing table can disable autoincrement and retain its primary key', asyn
     expect((await saved).ok()).toBe(true)
     await page.reload()
     await expect(toggle).not.toBeChecked()
+    await page.getByRole('button', { name:'Indexes', exact:true }).click()
     await expect(page.getByTestId('index-row')).toContainText('PRIMARY')
   } finally { await runSQL(page, `DROP TABLE IF EXISTS ${table};`) }
 })

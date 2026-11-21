@@ -1,5 +1,7 @@
 import { ref, type InjectionKey, type Ref } from 'vue'
 
+export const themeModeKey: InjectionKey<Ref<boolean>> = Symbol('dbm-theme-mode')
+
 const STORAGE_KEY = 'dbm-theme'
 
 /** Injection key for the app-wide theme toggle provided by App.vue and

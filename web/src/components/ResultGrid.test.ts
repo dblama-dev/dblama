@@ -31,7 +31,7 @@ describe('ResultGrid', () => {
   it('renders the statement number, column headers and cell values', () => {
     const wrapper = mountGrid(rowsResult, 3)
 
-    expect(wrapper.text()).toContain('#3')
+    expect(wrapper.text()).toContain('Результат 3')
     const headers = wrapper.findAll('th').map((th) => th.text())
     expect(headers).toEqual(['id', 'name'])
     const text = wrapper.text()
@@ -66,7 +66,7 @@ describe('ResultGrid', () => {
   it('renders a DDL outcome whose empty result slices serialize as null', () => {
     const wrapper = mountGrid({ columns: null, rows: null, seconds: 0.2 }, 4)
 
-    expect(wrapper.find('.resultgrid__index').text()).toBe('#4')
+    expect(wrapper.find('.resultgrid__index').text()).toBe('Результат 4')
     expect(wrapper.find('.resultgrid__footer').text()).toBe('0.20 с')
     expect(wrapper.find('table').exists()).toBe(false)
   })

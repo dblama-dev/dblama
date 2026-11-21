@@ -1,19 +1,21 @@
 <template>
   <section class="resultgrid">
     <header class="resultgrid__header">
-      <span class="resultgrid__index">#{{ index }}</span>
-      <n-tag v-if="result.truncated" size="small" type="warning" round>
+      <span class="resultgrid__index">{{ t('rowWorkflows.result', { n: index }) }}</span>
+      <span v-if="result.truncated" class="db-tag db-tag--warning">
         {{ t('console.truncated') }}
-      </n-tag>
-      <n-button v-if="columns.length" class="resultgrid__download" size="small" @click="saveCSV">
+      </span>
+      <ui-button v-if="columns.length" class="resultgrid__download" size="small" @click="saveCSV">
+        <template #icon><UiIcon name="download" :size="14" /></template>
         {{ t(result.truncated ? 'console.downloadDisplayedCSV' : 'console.downloadCSV') }}
-      </n-button>
+      </ui-button>
     </header>
 
     <p v-if="affectedMessage !== null" class="resultgrid__affected">
       {{ affectedMessage }}
     </p>
-    <n-table v-else-if="columns.length > 0" size="small" :single-line="false">
+    <div v-else-if="columns.length" class="resultgrid__scroll" tabindex="0" :aria-label="t('rowWorkflows.result', { n: index })">
+    <table class="db-table">
       <thead>
         <tr>
           <th v-for="(meta, position) in columns" :key="position">{{ meta.name }}</th>
@@ -31,7 +33,8 @@
           </td>
         </tr>
       </tbody>
-    </n-table>
+    </table>
+    </div>
 
     <footer class="resultgrid__footer">
       {{ t('console.seconds', { n: result.seconds.toFixed(2) }) }}
@@ -42,7 +45,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NButton, NTable, NTag } from 'naive-ui'
+import UiIcon from './UiIcon.vue'
+import { UiButton } from '../ui'
 
 import type { QueryResult } from '../api/types'
 import { downloadBlob } from '../lib/download'
@@ -78,38 +82,14 @@ const affectedMessage = computed<string | null>(() => {
 </script>
 
 <style scoped>
-.resultgrid {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px 0;
-  border-top: 1px solid rgba(128, 128, 128, 0.25);
-}
-
-.resultgrid:first-child {
-  border-top: none;
-  padding-top: 0;
-}
-
-.resultgrid__header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.resultgrid__index {
-  font-weight: 600;
-  opacity: 0.8;
-}
-
-.resultgrid__download { margin-inline-start: auto; }
-
-.resultgrid__null {
-  opacity: 0.6;
-}
-
-.resultgrid__footer {
-  opacity: 0.7;
-  font-size: 12px;
-}
+.resultgrid { min-width:0; overflow:hidden; border:1px solid var(--db-line); border-radius:10px; background:var(--db-panel); }
+.resultgrid__header { display:flex; align-items:center; gap:8px; padding:10px 14px; border-bottom:1px solid var(--db-line); }
+.resultgrid__index { font-weight:600; }
+.resultgrid__download { margin-inline-start:auto; }
+.resultgrid__scroll { overflow:auto; max-height:55vh; }
+.resultgrid__scroll th { font:550 12px var(--db-mono); }
+.resultgrid__scroll td { max-width:45ch; overflow-wrap:anywhere; }
+.resultgrid__null { color:var(--db-muted); font-family:var(--db-mono); }
+.resultgrid__footer { padding:8px 14px; color:var(--db-muted); border-top:1px solid var(--db-line); font-size:12px; }
+.resultgrid__affected { margin:0; padding:14px; }
 </style>

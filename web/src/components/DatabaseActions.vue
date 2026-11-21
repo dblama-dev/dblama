@@ -1,25 +1,25 @@
 <template>
   <section class="database-actions">
-    <n-space>
-      <n-button v-if="!db" :disabled="busy" @click="open('create')">{{ t('databaseOps.createDatabase') }}</n-button>
-      <n-button v-if="db" :disabled="busy" @click="open('rename')">{{ t('databaseOps.renameDatabase') }}</n-button>
-      <n-button v-if="db" type="error" secondary :disabled="busy" @click="open('drop')">{{ t('databaseOps.dropDatabase') }}</n-button>
-    </n-space>
+    <div class="database-action-head"><slot name="heading" /><div class="db-toolbar">
+      <ui-button v-if="!db" type="primary" :disabled="busy" @click="open('create')"><UiIcon name="plus" />{{ t('databaseOps.createDatabase') }}</ui-button>
+      <ui-button v-if="db" :disabled="busy" @click="open('rename')">{{ t('databaseOps.renameDatabase') }}</ui-button>
+      <ui-button v-if="db" type="error" secondary :disabled="busy" @click="open('drop')">{{ t('databaseOps.dropDatabase') }}</ui-button>
+    </div></div>
     <form v-if="mode" class="database-form" @submit.prevent="submit">
-      <n-alert v-if="mode === 'drop'" type="warning">{{ t('databaseOps.dropWarning') }}</n-alert>
-      <n-alert v-if="mode === 'rename' && !postgres" type="warning">{{ t('databaseOps.renameWarning') }}</n-alert>
-      <n-alert v-if="mode !== 'create' && db === session.sessionInfo?.database" type="info">{{ t('databaseOps.connectedWarning') }}</n-alert>
+      <ui-alert v-if="mode === 'drop'" type="warning">{{ t('databaseOps.dropWarning') }}</ui-alert>
+      <ui-alert v-if="mode === 'rename' && !postgres" type="warning">{{ t('databaseOps.renameWarning') }}</ui-alert>
+      <ui-alert v-if="mode !== 'create' && db === session.sessionInfo?.database" type="info">{{ t('databaseOps.connectedWarning') }}</ui-alert>
       <label :for="fieldID">{{ mode === 'drop' ? t('databaseOps.confirmName', { name: db }) : t('databaseOps.name') }}</label>
-      <n-input :input-props="{ id: fieldID }" v-model:value="name" :disabled="busy" autocomplete="off" />
+      <ui-input :input-props="{ id: fieldID }" v-model:value="name" :disabled="busy" autocomplete="off" />
       <template v-if="mode === 'create'">
         <label :for="`${fieldID}-collation`">{{ t('databaseOps.collation') }}</label>
-        <n-select :input-props="{ id: `${fieldID}-collation` }" v-model:value="collation" :options="collations" clearable filterable :loading="loadingMetadata" :disabled="busy" :placeholder="t('databaseOps.serverDefault')" />
+        <ui-select :input-props="{ id: `${fieldID}-collation` }" v-model:value="collation" :options="collations" clearable filterable :loading="loadingMetadata" :disabled="busy" :placeholder="t('databaseOps.serverDefault')" />
       </template>
-      <n-alert v-if="error" type="error" role="alert">{{ error }}</n-alert>
-      <n-space>
-        <n-button attr-type="submit" :type="mode === 'drop' ? 'error' : 'primary'" :loading="busy" :disabled="!valid || busy">{{ t(`databaseOps.${mode === 'drop' ? 'confirmDrop' : mode}`) }}</n-button>
-        <n-button :disabled="busy" @click="mode = null">{{ t('databaseOps.cancel') }}</n-button>
-      </n-space>
+      <ui-alert v-if="error" type="error" role="alert">{{ error }}</ui-alert>
+      <div class="db-toolbar">
+        <ui-button attr-type="submit" :type="mode === 'drop' ? 'error' : 'primary'" :loading="busy" :disabled="!valid || busy">{{ t(`databaseOps.${mode === 'drop' ? 'confirmDrop' : mode}`) }}</ui-button>
+        <ui-button :disabled="busy" @click="mode = null">{{ t('databaseOps.cancel') }}</ui-button>
+      </div>
     </form>
   </section>
 </template>
@@ -27,7 +27,8 @@
 <script setup lang="ts">
 import { computed, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NAlert, NButton, NInput, NSelect, NSpace } from 'naive-ui'
+import { UiAlert, UiButton, UiInput, UiSelect } from '../ui'
+import UiIcon from './UiIcon.vue'
 import { api } from '../api/client'
 import { useSessionStore } from '../stores/session'
 import { createDatabase, dropDatabase, renameDatabase, validDatabaseName, type DatabaseMetadata } from '../lib/databaseOps'
@@ -71,5 +72,6 @@ async function submit(): Promise<void> {
 </script>
 <style scoped>
 .database-actions, .database-form { display: flex; flex-direction: column; gap: 12px; }
-.database-form { max-width: 640px; padding: 16px; border: 1px solid var(--n-border-color, #8885); border-radius: 6px; }
+.database-action-head { display: flex; justify-content: space-between; flex-wrap: wrap; align-items: center; gap: 10px; }
+.database-form { background: var(--db-sidebar); max-width: 640px; padding: 16px; border: 1px solid var(--db-line); border-radius: 9px; }
 </style>

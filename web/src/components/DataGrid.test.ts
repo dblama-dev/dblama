@@ -2,12 +2,12 @@ import { createPinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import {
-  NDataTable,
-  NInput,
-  NNotificationProvider,
-  NPopconfirm,
-  NSelect,
-} from 'naive-ui'
+  UiDataTable,
+  UiInput,
+  UiNotificationProvider,
+  UiPopconfirm,
+  UiSelect,
+} from '../ui'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api, ApiError } from '../api/client'
@@ -138,6 +138,15 @@ describe('DataGrid', () => {
     wrapper.unmount()
   })
 
+  it('opens a record from its cell and keeps the inspection control independent', async () => {
+    const wrapper = mountGrid({ rows: [[1, 'Long value '.repeat(20)]] })
+    await wrapper.get('.datagrid__cell-short').trigger('click')
+    expect(wrapper.emitted('edit-row')).toHaveLength(1)
+    await wrapper.get('.datagrid__inspect').trigger('click')
+    expect(wrapper.emitted('edit-row')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   it('renders NULL cells as an italic NULL marker', () => {
     const wrapper = mountGrid()
 
@@ -156,12 +165,9 @@ describe('DataGrid', () => {
   })
 
   it('re-emits pagination page and page-size changes', async () => {
-    const wrapper = mountGrid()
-
-    const table = wrapper.findComponent(NDataTable)
-    table.vm.$emit('update:page', 3)
-    table.vm.$emit('update:page-size', 100)
-    await flushPromises()
+    const wrapper = mountGrid({ totalRows: 150 })
+    await wrapper.get('.ui-pagination button[aria-label="Страница 3"]').trigger('click')
+    await wrapper.get('.ui-pagination select').setValue('100')
 
     expect(wrapper.emitted('update:page')).toEqual([[3]])
     expect(wrapper.emitted('update:page-size')).toEqual([[100]])
@@ -192,11 +198,11 @@ describe('DataGrid', () => {
   it('emits parsed pk maps for the selected rows on delete-selected', async () => {
     const wrapper = mountGrid()
 
-    const table = wrapper.findComponent(NDataTable)
+    const table = wrapper.findComponent(UiDataTable)
     table.vm.$emit('update:checked-row-keys', ['1', '2'], [], {})
     await flushPromises()
 
-    const popconfirm = wrapper.findComponent(NPopconfirm)
+    const popconfirm = wrapper.findComponent(UiPopconfirm)
     expect(popconfirm.exists()).toBe(true)
     popconfirm.vm.$emit('positive-click')
     await flushPromises()
@@ -213,30 +219,35 @@ describe('DataGrid', () => {
     await flushPromises()
 
     expect(wrapper.emitted('delete-row')).toBeUndefined()
-    wrapper.findAllComponents(NPopconfirm)[1].vm.$emit('positive-click')
+    wrapper.findAllComponents(UiPopconfirm)[1].vm.$emit('positive-click')
     await flushPromises()
     expect(wrapper.emitted('delete-row')).toEqual([[{ id: 2 }]])
   })
 
-  it('emits add-row from the toolbar', async () => {
+  it('opens and closes filter controls without discarding an unfinished value', async () => {
     const wrapper = mountGrid()
-
-    const add = wrapper.findAll('button').find((b) => b.text() === 'Добавить строку')
-    expect(add).toBeDefined()
-    await add?.trigger('click')
-
-    expect(wrapper.emitted('add-row')).toHaveLength(1)
+    const trigger = wrapper.get('.datagrid__filter-toggle')
+    expect(trigger.attributes('aria-expanded')).toBe('false')
+    await trigger.trigger('click')
+    expect(trigger.attributes('aria-expanded')).toBe('true')
+    const panel = wrapper.get('.datagrid__filters')
+    panel.findComponent(UiInput).vm.$emit('update:value', 'keep me')
+    await trigger.trigger('click')
+    expect(panel.attributes('hidden')).toBeDefined()
+    await trigger.trigger('click')
+    expect(panel.findComponent(UiInput).props('value')).toBe('keep me')
+    wrapper.unmount()
   })
 
   it('collects the filter drafts into filters on apply and resets them', async () => {
     const wrapper = mountGrid()
     const filtersEl = wrapper.find('.datagrid__filters')
-    const selects = filtersEl.findAllComponents(NSelect)
+    const selects = filtersEl.findAllComponents(UiSelect)
     expect(selects.length).toBeGreaterThanOrEqual(2)
 
     selects[0].vm.$emit('update:value', 'name')
     selects[1].vm.$emit('update:value', 'LIKE')
-    filtersEl.findComponent(NInput).vm.$emit('update:value', '%a%')
+    filtersEl.findComponent(UiInput).vm.$emit('update:value', '%a%')
     await flushPromises()
 
     const apply = wrapper.findAll('button').find((b) => b.text() === 'Применить')
@@ -255,10 +266,10 @@ describe('DataGrid', () => {
     const wrapper = mountGrid()
     const filtersEl = wrapper.find('.datagrid__filters')
 
-    filtersEl.findAllComponents(NSelect)[1].vm.$emit('update:value', 'IS NULL')
+    filtersEl.findAllComponents(UiSelect)[1].vm.$emit('update:value', 'IS NULL')
     await flushPromises()
 
-    expect(filtersEl.findComponent(NInput).props('disabled')).toBe(true)
+    expect(filtersEl.findComponent(UiInput).props('disabled')).toBe(true)
   })
 
   it('uses all original values for row actions when there is no primary key', async () => {
@@ -270,7 +281,7 @@ describe('DataGrid', () => {
     const deletes = wrapper.findAll('button').filter(b => b.attributes('aria-label') === 'Удалить')
     await deletes[1]!.trigger('click')
     expect(wrapper.emitted('delete-row')).toBeUndefined()
-    wrapper.findAllComponents(NPopconfirm)[1].vm.$emit('positive-click')
+    wrapper.findAllComponents(UiPopconfirm)[1].vm.$emit('positive-click')
     await flushPromises()
     expect(wrapper.emitted('delete-row')).toEqual([[{id:2,name:null}]])
     wrapper.unmount()
@@ -315,7 +326,7 @@ describe('TableView data view', () => {
 
   const TableViewInProvider = defineComponent({
     setup() {
-      return () => h(NNotificationProvider, null, { default: () => h(TableView) })
+      return () => h(UiNotificationProvider, null, { default: () => h(TableView) })
     },
   })
 
@@ -444,22 +455,24 @@ describe('TableView data view', () => {
 
 it('restores the visible controlled filter and applies it with Enter',async()=>{
  const wrapper=mountGrid({filters:[{column:'name',op:'LIKE',value:'%restored%'}]})
- expect(wrapper.findComponent(NInput).props('value')).toBe('%restored%')
- await wrapper.findComponent(NInput).trigger('keydown.enter')
+ expect(wrapper.findComponent(UiInput).props('value')).toBe('%restored%')
+ await wrapper.get('.datagrid__filter-value input').trigger('keydown.enter')
  expect(wrapper.emitted('apply-filters')).toEqual([[[{column:'name',op:'LIKE',value:'%restored%'}]]])
  wrapper.unmount()
 })
 it('clears captured selection when rows are replaced in a keyless table',async()=>{
  const wrapper=mountGrid({pkColumns:[]})
- wrapper.findComponent(NDataTable).vm.$emit('update:checked-row-keys',['__idx_0'])
- await flushPromises();await wrapper.setProps({rows:[[9,'different']]})
- expect(wrapper.findComponent(NDataTable).props('checkedRowKeys')).toEqual([])
+ await wrapper.get('tbody input[type=checkbox]').setValue(true)
+ expect(wrapper.get<HTMLInputElement>('thead input[type=checkbox]').element.indeterminate).toBe(true)
+ await wrapper.setProps({rows:[[9,'different']]})
+ expect(wrapper.get<HTMLInputElement>('tbody input[type=checkbox]').element.checked).toBe(false)
+ expect(wrapper.get<HTMLInputElement>('thead input[type=checkbox]').element.indeterminate).toBe(false)
  wrapper.unmount()
 })
 
 it('disables bulk editing of one selected duplicate in a keyless table', async () => {
  const wrapper = mountGrid({ pkColumns: [], rows: [[1, 'same'], [1, 'same']] })
- wrapper.findComponent(NDataTable).vm.$emit('update:checked-row-keys', ['__idx_0'])
+ wrapper.findComponent(UiDataTable).vm.$emit('update:checked-row-keys', ['__idx_0'])
  await flushPromises()
  const edit = wrapper.findAll('button').find(button => button.text().startsWith('Изменить выбранные'))!
  expect(edit.attributes('disabled')).toBeDefined()
@@ -471,7 +484,7 @@ it('disables bulk editing of one selected duplicate in a keyless table', async (
 
 it('emits only complete composite primary keys for a captured bulk selection', async () => {
  const wrapper = mountGrid({ pkColumns: ['id', 'name'] })
- wrapper.findComponent(NDataTable).vm.$emit('update:checked-row-keys', ['[1,"alice"]'])
+ wrapper.findComponent(UiDataTable).vm.$emit('update:checked-row-keys', ['[1,"alice"]'])
  await flushPromises()
  await wrapper.findAll('button').find(button => button.text().startsWith('Изменить выбранные'))!.trigger('click')
  expect(wrapper.emitted('edit-rows')).toEqual([[[{ id: 1, name: 'alice' }]]])
@@ -532,7 +545,7 @@ it('offers keyboard-operable row inspection for clipped values below 120 charact
   expect(row.findAll('td')[2]!.text()).toBe(value)
   await row.get('[data-testid="row-inspect"]').trigger('click')
   await flushPromises()
-  const picker = wrapper.findAllComponents(NSelect).find(select => select.attributes('data-testid') === 'grid-inspect-column')!
+  const picker = wrapper.findAllComponents(UiSelect).find(select => select.attributes('data-testid') === 'grid-inspect-column')!
   picker.vm.$emit('update:value', 'name')
   await flushPromises()
   expect(document.body.querySelector('[data-testid="grid-inspected-value"]')?.textContent).toBe(value)
@@ -541,7 +554,9 @@ it('offers keyboard-operable row inspection for clipped values below 120 charact
 })
 it('keeps the table body viewport bounded so its horizontal scrollbar stays reachable', () => {
   const wrapper = mountGrid({ rows: Array.from({length:50}, (_, i) => [i, 'row']) })
-  expect(wrapper.findComponent(NDataTable).props('maxHeight')).toBe('max(240px, calc(100vh - 360px))')
+  const expected = document.createElement('div')
+  expected.style.maxHeight = 'max(240px, calc(100vh - 360px))'
+  expect(wrapper.get<HTMLElement>('.ui-data-table-wrapper').element.style.maxHeight).toBe(expected.style.maxHeight)
   wrapper.unmount()
 })
 
@@ -570,15 +585,15 @@ describe('filtering from the value inspector', () => {
     const wrapper = mountGrid({ filters: [{ column: 'id', op: '=', value: '1' }] })
     try {
       const filters = wrapper.get('.datagrid__filters')
-      filters.findComponent(NInput).vm.$emit('update:value', '7')
+      filters.findComponent(UiInput).vm.$emit('update:value', '7')
       await wrapper.get('[data-testid="row-inspect"]').trigger('click')
       await flushPromises()
-      const picker = wrapper.findAllComponents(NSelect).find(select => select.attributes('data-testid') === 'grid-inspect-column')!
+      const picker = wrapper.findAllComponents(UiSelect).find(select => select.attributes('data-testid') === 'grid-inspect-column')!
       picker.vm.$emit('update:value', 'name')
       await flushPromises()
       expect(button()?.disabled).toBe(true)
-      expect(filters.findComponent(NInput).props('value')).toBe('7')
-      filters.findComponent(NInput).vm.$emit('update:value', '1')
+      expect(filters.findComponent(UiInput).props('value')).toBe('7')
+      filters.findComponent(UiInput).vm.$emit('update:value', '1')
       await flushPromises()
       expect(button()?.disabled).toBe(false)
       picker.vm.$emit('update:value', 'id')
@@ -609,8 +624,8 @@ it('keeps compact row actions named and reachable without opening a menu', async
   const actions = wrapper.get('tbody tr td:last-child').findAll('button')
   expect(actions.map(button => button.attributes('aria-label'))).toEqual(['Изменить', 'Превью', 'Копировать', 'Удалить'])
   for (const button of actions) expect(button.attributes('title')).toBe(button.attributes('aria-label'))
-  const actionColumn = wrapper.getComponent(NDataTable).props('columns')?.at(-1)
-  expect(actionColumn?.width).toBeLessThanOrEqual(150)
+  const actionColumn = wrapper.get<HTMLTableColElement>('col:last-child')
+  expect(parseFloat(actionColumn.element.style.width)).toBeLessThanOrEqual(150)
   await actions[0]!.trigger('click')
   expect(wrapper.emitted('edit-row')?.[0]?.[0]).toMatchObject({id:1,name:'alice'})
   wrapper.unmount()
@@ -618,7 +633,7 @@ it('keeps compact row actions named and reachable without opening a menu', async
 
 it('dismisses a pending row delete when a keyless position changes', async () => {
   const wrapper = mountGrid({ pkColumns: [] }, document.body)
-  const original = wrapper.get('tbody tr').findAllComponents(NPopconfirm)[0]!
+  const original = wrapper.get('tbody tr').findAllComponents(UiPopconfirm)[0]!
   await original.get('button').trigger('click'); await flushPromises()
   await wrapper.setProps({ rows: [[3, 'new search result'], [2, null]] })
   original.vm.$emit('positive-click'); await flushPromises()

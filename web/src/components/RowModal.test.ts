@@ -2,13 +2,13 @@ import { createPinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, type PropType } from 'vue'
 import {
-  NButton,
-  NCheckbox,
-  NInput,
-  NInputNumber,
-  NNotificationProvider,
-  NSelect,
-} from 'naive-ui'
+  UiButton,
+  UiCheckbox,
+  UiInput,
+  UiInputNumber,
+  UiNotificationProvider,
+  UiSelect,
+} from '../ui'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api/client'
@@ -62,7 +62,7 @@ const ModalInProvider = defineComponent({
   },
   setup(p) {
     return () =>
-      h(NNotificationProvider, null, {
+      h(UiNotificationProvider, null, {
         default: () =>
           h(RowModal, {
             show: p.show,
@@ -77,20 +77,29 @@ const ModalInProvider = defineComponent({
   },
 })
 
-// Teleport is stubbed so the modal content stays inside the wrapper and
-// the field wrappers can be located per column.
+// Render the row form in place. The built-in Teleport test stub remounts
+// its children during updates and discards the active field and its listeners.
+const formStubs = {
+  teleport: true,
+  UiModal: defineComponent({
+    props: { show: Boolean },
+    setup(props, { slots }) {
+      return () => props.show ? h('dialog', { open: true }, [slots.default?.(), slots.footer?.()]) : null
+    },
+  }),
+}
 function mountModal(props: Record<string, unknown> = {}, flavor = 'postgres') {
   const pinia = createPinia()
   useSessionStore(pinia).sessionInfo = { driver: { flavor } } as SessionInfo
   return mount(ModalInProvider, {
     props,
-    global: { plugins: [pinia, i18n], stubs: { teleport: true } },
+    global: { plugins: [pinia, i18n], stubs: formStubs },
   })
 }
 
-// Per-field helpers keyed by the column label. Naive-ui's NInputNumber and
-// NSelect embed their own NInput internally, so fields are addressed through
-// their wrapper element, not by a global NInput index.
+// Per-field helpers keyed by the column label. UiInputNumber and
+// UiSelect embed their own UiInput internally, so fields are addressed through
+// their wrapper element, not by a global UiInput index.
 function fieldOf(wrapper: ReturnType<typeof mount>, name: string) {
   const field = wrapper
     .findAll('.row-modal__field')
@@ -100,19 +109,19 @@ function fieldOf(wrapper: ReturnType<typeof mount>, name: string) {
 }
 
 function setString(wrapper: ReturnType<typeof mount>, name: string, value: string): void {
-  fieldOf(wrapper, name).findComponent(NInput).vm.$emit('update:value', value)
+  fieldOf(wrapper, name).findComponent(UiInput).vm.$emit('update:value', value)
 }
 
 function setNumber(wrapper: ReturnType<typeof mount>, name: string, value: number | null): void {
-  fieldOf(wrapper, name).findComponent(NInputNumber).vm.$emit('update:value', value)
+  fieldOf(wrapper, name).findComponent(UiInputNumber).vm.$emit('update:value', value)
 }
 
 function checkNull(wrapper: ReturnType<typeof mount>, name: string): void {
-  fieldOf(wrapper, name).findComponent(NCheckbox).vm.$emit('update:checked', true)
+  fieldOf(wrapper, name).findComponent(UiCheckbox).vm.$emit('update:checked', true)
 }
 
 function saveButton(wrapper: ReturnType<typeof mount>) {
-  return wrapper.findAllComponents(NButton).find((b) => b.text() === 'Сохранить')
+  return wrapper.findAllComponents(UiButton).find((b) => b.text() === 'Сохранить')
 }
 
 describe('RowModal', () => {
@@ -152,7 +161,7 @@ describe('RowModal', () => {
     await flushPromises()
     const modal = wrapper.findComponent(RowModal)
     expect(modal.emitted('update:show')).toBeUndefined()
-    expect(fieldOf(wrapper, 'label').findComponent(NInput).props('value')).toBe('next')
+    expect(fieldOf(wrapper, 'label').findComponent(UiInput).props('value')).toBe('next')
     expect(saveButton(wrapper)?.props('disabled')).toBe(false)
     wrapper.unmount()
   })
@@ -163,28 +172,28 @@ describe('RowModal', () => {
     const names = wrapper.findAll('.row-modal__field').map((f) => f.find('.row-modal__label').text())
     expect(names).toEqual(['name', 'age', 'role', 'bio', 'email', 'id'])
 
-    expect(fieldOf(wrapper, 'name').findComponent(NInput).props('type')).toBe('text')
-    expect(fieldOf(wrapper, 'bio').findComponent(NInput).props('type')).toBe('textarea')
+    expect(fieldOf(wrapper, 'name').findComponent(UiInput).props('type')).toBe('text')
+    expect(fieldOf(wrapper, 'bio').findComponent(UiInput).props('type')).toBe('textarea')
 
-    expect(fieldOf(wrapper, 'age').findComponent(NInputNumber).exists()).toBe(true)
-    expect(fieldOf(wrapper, 'id').findComponent(NInputNumber).exists()).toBe(true)
+    expect(fieldOf(wrapper, 'age').findComponent(UiInputNumber).exists()).toBe(true)
+    expect(fieldOf(wrapper, 'id').findComponent(UiInputNumber).exists()).toBe(true)
 
-    const roleSelect = fieldOf(wrapper, 'role').findComponent(NSelect)
+    const roleSelect = fieldOf(wrapper, 'role').findComponent(UiSelect)
     expect(roleSelect.exists()).toBe(true)
     expect(roleSelect.props('options')).toEqual([
       { label: 'admin', value: 'admin' },
       { label: 'user', value: 'user' },
     ])
-    expect(fieldOf(wrapper, 'role').findComponent(NInputNumber).exists()).toBe(false)
+    expect(fieldOf(wrapper, 'role').findComponent(UiInputNumber).exists()).toBe(false)
   })
 
   it('shows a NULL toggle only for nullable columns', () => {
     const wrapper = mountModal()
 
     // 4 nullable columns get a toggle; email and id do not.
-    expect(wrapper.findAllComponents(NCheckbox)).toHaveLength(4)
-    expect(fieldOf(wrapper, 'email').findComponent(NCheckbox).exists()).toBe(false)
-    expect(fieldOf(wrapper, 'id').findComponent(NCheckbox).exists()).toBe(false)
+    expect(wrapper.findAllComponents(UiCheckbox)).toHaveLength(4)
+    expect(fieldOf(wrapper, 'email').findComponent(UiCheckbox).exists()).toBe(false)
+    expect(fieldOf(wrapper, 'id').findComponent(UiCheckbox).exists()).toBe(false)
     expect(fieldOf(wrapper, 'email').get('.row-modal__required').attributes('title')).toContain('NOT NULL')
   })
 
@@ -197,7 +206,7 @@ describe('RowModal', () => {
     checkNull(wrapper, 'name')
     await flushPromises()
 
-    expect(fieldOf(wrapper, 'name').findComponent(NInput).props('disabled')).toBe(true)
+    expect(fieldOf(wrapper, 'name').findComponent(UiInput).props('disabled')).toBe(true)
 
     // The non-nullable required fields must be filled for Save to enable.
     setString(wrapper, 'email', 'x@y.z')
@@ -435,11 +444,11 @@ describe('RowModal', () => {
     ]
     const wrapper = mountModal({ columns: cols })
 
-    expect(fieldOf(wrapper, 'status').findComponent(NInput).props('value')).toBe('active')
+    expect(fieldOf(wrapper, 'status').findComponent(UiInput).props('value')).toBe('active')
     expect((fieldOf(wrapper, 'created').find('input').element as HTMLInputElement).value).toBe('')
   })
 
-  it('shows a notification with the ApiError message and keeps the modal open on failure', async () => {
+  it('announces the API error once and keeps the modal open on failure', async () => {
     const { ApiError } = await import('../api/client')
     mockedApi.mockRejectedValue(new ApiError('bad_request', 'cannot insert', 400))
     const wrapper = mountModal()
@@ -451,7 +460,7 @@ describe('RowModal', () => {
     await saveButton(wrapper)?.trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('cannot insert')
+    expect(wrapper.findAll('[role=alert]').map(alert => alert.text())).toEqual(['cannot insert'])
     const modal = wrapper.findComponent(RowModal)
     expect(modal.emitted('update:show')).toBeUndefined()
     expect(modal.emitted('saved')).toBeUndefined()
@@ -491,7 +500,7 @@ describe('TableView row modal and stale-response guard', () => {
 
   const TableViewInProvider = defineComponent({
     setup() {
-      return () => h(NNotificationProvider, null, { default: () => h(TableView) })
+      return () => h(UiNotificationProvider, null, { default: () => h(TableView) })
     },
   })
 
@@ -510,8 +519,7 @@ describe('TableView row modal and stale-response guard', () => {
     mockBase()
     const wrapper = await mountView()
 
-    const grid = wrapper.findComponent(DataGrid)
-    grid.vm.$emit('add-row')
+    await wrapper.get('[data-testid=table-add-row]').trigger('click')
     await flushPromises()
 
     const modal = wrapper.findComponent(RowModal)
@@ -580,14 +588,13 @@ describe('TableView row modal and stale-response guard', () => {
     })
     const wrapper = await mountView()
 
-    const grid = wrapper.findComponent(DataGrid)
-    grid.vm.$emit('add-row')
+    await wrapper.get('[data-testid=table-add-row]').trigger('click')
     await flushPromises()
 
     // id is auto-increment (exempt from the required check), name is
     // nullable — Save is enabled with both fields untouched.
     const modal = wrapper.findComponent(RowModal)
-    const save = modal.findAllComponents(NButton).find((b) => b.text() === 'Сохранить')
+    const save = modal.findAllComponents(UiButton).find((b) => b.text() === 'Сохранить')
     expect(save?.props('disabled')).toBe(false)
     await save?.trigger('click')
     await flushPromises()
@@ -612,8 +619,7 @@ describe('TableView row modal and stale-response guard', () => {
     })
     const wrapper = await mountView()
 
-    const grid = wrapper.findComponent(DataGrid)
-    grid.vm.$emit('add-row')
+    await wrapper.get('[data-testid=table-add-row]').trigger('click')
     await flushPromises()
 
     const modal = wrapper.findComponent(RowModal)
@@ -673,18 +679,18 @@ describe('TableView row modal and stale-response guard', () => {
 it('prefills an insert from copied values while leaving identity empty', async () => {
  const wrapper = mountModal({row:{name:'copied',email:'x@y.z'}})
  await flushPromises()
- expect(fieldOf(wrapper,'name').findComponent(NInput).props('value')).toBe('copied')
- expect(fieldOf(wrapper,'id').findComponent(NInputNumber).props('value')).toBe(null)
+ expect(fieldOf(wrapper,'name').findComponent(UiInput).props('value')).toBe('copied')
+ expect(fieldOf(wrapper,'id').findComponent(UiInputNumber).props('value')).toBe(null)
  wrapper.unmount()
 })
 
 it('loads parent key choices using the referenced schema and preserves numeric keys', async () => {
  mockedApi.mockResolvedValue({columns:[{name:'parent_id',type:'int',nullable:false}],rows:[[7],[9]],totalRows:2})
  const pinia=createPinia()
- const wrapper=mount(defineComponent({setup:()=>()=>h(NNotificationProvider,null,{default:()=>h(RowModal,{show:true,mode:'insert',rowsPath:'/api/databases/mydb/tables/child/rows',columns:[{name:'parent_id',type:'int',nullable:false}],row:null,rowPk:null,foreignKeys:[{name:'fk',columns:['parent_id'],refTable:'parents',refColumns:['parent_id']}]})})}),{global:{plugins:[pinia,i18n],stubs:{teleport:true}}})
+ const wrapper=mount(defineComponent({setup:()=>()=>h(UiNotificationProvider,null,{default:()=>h(RowModal,{show:true,mode:'insert',rowsPath:'/api/databases/mydb/tables/child/rows',columns:[{name:'parent_id',type:'int',nullable:false}],row:null,rowPk:null,foreignKeys:[{name:'fk',columns:['parent_id'],refTable:'parents',refColumns:['parent_id']}]})})}),{global:{plugins:[pinia,i18n],stubs:formStubs}})
  await flushPromises()
  expect(mockedApi).toHaveBeenCalledWith('GET','/api/databases/mydb/tables/parents/rows?limit=200&offset=0')
- const select=wrapper.findComponent(NSelect)
+ const select=wrapper.findComponent(UiSelect)
  expect(select.props('options')).toEqual([{label:'7',value:7},{label:'9',value:9}])
  wrapper.unmount()
 })
@@ -693,7 +699,7 @@ it('copies exact decimal and binary values without numeric rounding or text rein
  mockedApi.mockResolvedValue({lastInsertId:2})
  const wrapper=mountModal({columns:[{name:'amount',type:'decimal',nullable:false},{name:'data',type:'blob',nullable:false}],row:{amount:'9007199254740993.12',data:'0x00ff'}})
  await flushPromises()
- expect(fieldOf(wrapper,'amount').findComponent(NInput).props('value')).toBe('9007199254740993.12')
+ expect(fieldOf(wrapper,'amount').findComponent(UiInput).props('value')).toBe('9007199254740993.12')
  await saveButton(wrapper)?.trigger('click');await flushPromises()
  expect(mockedApi).toHaveBeenCalledWith('POST',rowsPath,{amount:'9007199254740993.12',data:{$binaryHex:'00ff'}})
  wrapper.unmount()
@@ -721,7 +727,7 @@ it('omits generated identity and literal or expression defaults on insert', asyn
 it('preserves explicit empty string and NULL instead of server defaults', async () => {
  mockedApi.mockResolvedValue({lastInsertId:1})
  const wrapper=mountModal({columns:[{name:'status',type:'varchar',nullable:false,default:{value:'active'}},{name:'notes',type:'text',nullable:true,default:{value:'note'}}]})
- fieldOf(wrapper,'status').find('.row-modal__mode').findComponent(NSelect).vm.$emit('update:value','value')
+ fieldOf(wrapper,'status').find('.row-modal__mode').findComponent(UiSelect).vm.$emit('update:value','value')
  setString(wrapper,'status','')
  checkNull(wrapper,'notes')
  await flushPromises();await saveButton(wrapper)?.trigger('click');await flushPromises()
@@ -748,12 +754,12 @@ it('shows an actionable JSON validation error without sending invalid input',asy
 
 it('searches remote FK keys while keeping the selected exact manual ID available',async()=>{
  mockedApi.mockResolvedValue({columns:[{name:'id',type:'bigint',nullable:false},{name:'name',type:'text',nullable:false}],rows:[['8','Eight']],totalRows:1})
- const wrapper=mount(defineComponent({setup:()=>()=>h(NNotificationProvider,null,{default:()=>h(RowModal,{show:true,mode:'edit',rowsPath:'/api/databases/mydb/tables/child/rows?schema=public',columns:[{name:'parent_id',type:'bigint',nullable:false}],row:{parent_id:'9007199254740993'},rowPk:{id:1},foreignKeys:[{name:'fk',columns:['parent_id'],refSchema:'other',refTable:'parents',refColumns:['id']}]})})}),{global:{plugins:[createPinia(),i18n],stubs:{teleport:true}}})
+ const wrapper=mount(defineComponent({setup:()=>()=>h(UiNotificationProvider,null,{default:()=>h(RowModal,{show:true,mode:'edit',rowsPath:'/api/databases/mydb/tables/child/rows?schema=public',columns:[{name:'parent_id',type:'bigint',nullable:false}],row:{parent_id:'9007199254740993'},rowPk:{id:1},foreignKeys:[{name:'fk',columns:['parent_id'],refSchema:'other',refTable:'parents',refColumns:['id']}]})})}),{global:{plugins:[createPinia(),i18n],stubs:formStubs}})
  await flushPromises()
- const select=fieldOf(wrapper,'parent_id').findComponent(NSelect)
+ const select=fieldOf(wrapper,'parent_id').findComponent(UiSelect)
  expect(select.props('options')).toContainEqual({label:'9007199254740993',value:'9007199254740993'})
  expect(select.props('options')).toContainEqual({label:'Eight (8)',value:'8'})
- fieldOf(wrapper,'parent_id').find('.row-modal__fk-search-mode').findComponent(NSelect).vm.$emit('update:value','key')
+ fieldOf(wrapper,'parent_id').find('.row-modal__fk-search-mode').findComponent(UiSelect).vm.$emit('update:value','key')
  select.vm.$emit('search','999')
  await new Promise(resolve=>setTimeout(resolve,350));await flushPromises()
  const searches=mockedApi.mock.calls.filter(([method,url])=>method==='GET'&&new URL(String(url),'http://test').searchParams.has('filter'))
@@ -765,7 +771,7 @@ it('searches remote FK keys while keeping the selected exact manual ID available
 it('renders boolean choices with a selected false value and preserves boolean payloads', async()=>{
  mockedApi.mockResolvedValue(undefined)
  const wrapper=mountModal({mode:'edit',columns:[{name:'enabled',type:'boolean',nullable:false}],row:{enabled:false},rowPk:{id:1}})
- const select=fieldOf(wrapper,'enabled').findComponent(NSelect)
+ const select=fieldOf(wrapper,'enabled').findComponent(UiSelect)
  expect(select.props('value')).toBe('false')
  select.vm.$emit('update:value','true');await flushPromises();await saveButton(wrapper)?.trigger('click');await flushPromises()
  expect(mockedApi).toHaveBeenCalledWith('PATCH',rowsPath,{where:{id:1},values:{enabled:true}})
@@ -789,7 +795,7 @@ it('builds referenced table navigation with encoded identifiers and PostgreSQL s
  const pinia=createPinia()
  const {useCatalogStore}=await import('../stores/catalog')
  useCatalogStore(pinia).schemaAware=true
- const wrapper=mount(defineComponent({setup:()=>()=>h(NNotificationProvider,null,{default:()=>h(RowModal,{show:true,mode:'insert',rowsPath:'/api/databases/my%20db/tables/child/rows?schema=public',columns:[{name:'parent_id',type:'int',nullable:true}],row:null,rowPk:null,foreignKeys:[{name:'fk',columns:['parent_id'],refSchema:'other schema',refTable:'parent/table',refColumns:['id']}]})})}),{global:{plugins:[pinia,i18n],stubs:{teleport:true}}})
+ const wrapper=mount(defineComponent({setup:()=>()=>h(UiNotificationProvider,null,{default:()=>h(RowModal,{show:true,mode:'insert',rowsPath:'/api/databases/my%20db/tables/child/rows?schema=public',columns:[{name:'parent_id',type:'int',nullable:true}],row:null,rowPk:null,foreignKeys:[{name:'fk',columns:['parent_id'],refSchema:'other schema',refTable:'parent/table',refColumns:['id']}]})})}),{global:{plugins:[pinia,i18n],stubs:formStubs}})
  await flushPromises()
  expect(wrapper.find('.row-modal__related a').attributes('href')).toBe('/db/my%20db/table/parent%2Ftable?schema=other+schema')
  const request=String(mockedApi.mock.calls[0]?.[1])
@@ -815,9 +821,9 @@ it('does not let an old FK response overwrite a newer search', async () => {
  mockedApi.mockResolvedValueOnce({ columns: parentColumns, rows: [['initial']], totalRows: 1 })
   .mockImplementationOnce(() => new Promise<Page>(resolve => { oldResponse = resolve }))
   .mockResolvedValue({ columns: parentColumns, rows: [['new']], totalRows: 1 })
- const wrapper = mount(defineComponent({ setup: () => () => h(NNotificationProvider, null, { default: () => h(RowModal, { show: true, mode: 'insert', rowsPath: '/api/databases/mydb/tables/child/rows', columns: [{ name: 'parent_id', type: 'bigint', nullable: true }], row: null, rowPk: null, foreignKeys: [{ name: 'fk', columns: ['parent_id'], refTable: 'parents', refColumns: ['id'] }] }) }) }), { global: { plugins: [createPinia(), i18n], stubs: { teleport: true } } })
+ const wrapper = mount(defineComponent({ setup: () => () => h(UiNotificationProvider, null, { default: () => h(RowModal, { show: true, mode: 'insert', rowsPath: '/api/databases/mydb/tables/child/rows', columns: [{ name: 'parent_id', type: 'bigint', nullable: true }], row: null, rowPk: null, foreignKeys: [{ name: 'fk', columns: ['parent_id'], refTable: 'parents', refColumns: ['id'] }] }) }) }), { global: { plugins: [createPinia(), i18n], stubs: formStubs } })
  await flushPromises()
- const select = fieldOf(wrapper, 'parent_id').findComponent(NSelect)
+ const select = fieldOf(wrapper, 'parent_id').findComponent(UiSelect)
  select.vm.$emit('search', 'old'); await new Promise(resolve => setTimeout(resolve, 300)); await flushPromises()
  select.vm.$emit('search', 'new'); await new Promise(resolve => setTimeout(resolve, 300)); await flushPromises()
  oldResponse({ columns: parentColumns, rows: [['old']], totalRows: 1 }); await flushPromises()
@@ -835,9 +841,9 @@ it('finds an FK record by name beyond the first 200 rows while preserving the se
   const filter = new URL(String(url), 'http://test').searchParams.get('filter')
   return { columns: parentColumns, rows: filter === `name:CONTAINS:${search}` ? [['9007199254740995', `The ${search} record`]] : filter ? [] : firstPage, totalRows: filter ? 1 : 201 }
  })
- const wrapper = mount(defineComponent({ setup: () => () => h(NNotificationProvider, null, { default: () => h(RowModal, { show: true, mode: 'edit', rowsPath: '/api/databases/mydb/tables/child/rows', columns: [{ name: 'parent_id', type: 'bigint', nullable: false }], row: { parent_id: '9007199254740993' }, rowPk: { id: 1 }, foreignKeys: [{ name: 'fk', columns: ['parent_id'], refTable: 'parents', refColumns: ['id'] }] }) }) }), { global: { plugins: [createPinia(), i18n], stubs: { teleport: true } } })
+ const wrapper = mount(defineComponent({ setup: () => () => h(UiNotificationProvider, null, { default: () => h(RowModal, { show: true, mode: 'edit', rowsPath: '/api/databases/mydb/tables/child/rows', columns: [{ name: 'parent_id', type: 'bigint', nullable: false }], row: { parent_id: '9007199254740993' }, rowPk: { id: 1 }, foreignKeys: [{ name: 'fk', columns: ['parent_id'], refTable: 'parents', refColumns: ['id'] }] }) }) }), { global: { plugins: [createPinia(), i18n], stubs: formStubs } })
  await flushPromises()
- const picker = fieldOf(wrapper, 'parent_id').findComponent(NSelect)
+ const picker = fieldOf(wrapper, 'parent_id').findComponent(UiSelect)
  expect(picker.props('options')).not.toContainEqual(expect.objectContaining({ value: '9007199254740995' }))
  picker.vm.$emit('search', search)
  await new Promise(resolve => setTimeout(resolve, 300)); await flushPromises()

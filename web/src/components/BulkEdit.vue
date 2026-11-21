@@ -1,28 +1,30 @@
 <template>
-  <n-modal :show="show" preset="card" :title="text.bulkTitle" :style="{ width: 'min(680px, 96vw)' }" :mask-closable="!running" :close-on-esc="!running" :closable="!running" @update:show="close">
-    <p>{{ tableName }} · {{ capturedKeys.length }}</p>
+  <ui-modal :show="show" :title="text.bulkTitle" :style="{ width: 'min(680px, 96vw)' }" :mask-closable="!running" :close-on-esc="!running" :closable="!running" @update:show="close">
+    <p class="bulk-edit__scope">{{ tableName }} · {{ capturedKeys.length }}</p>
+    <div class="bulk-edit__fields">
     <div v-for="col in editableColumns" :key="col.name" class="bulk-edit__field">
-      <n-checkbox :checked="selected[col.name] === true" :disabled="locked" @update:checked="selected[col.name] = $event">{{ col.name }}</n-checkbox>
-      <n-select v-if="col.enumValues?.length || isRowBoolean(col.type)" :value="String(fields[col.name]?.value ?? '')" :disabled="!selected[col.name] || fields[col.name]?.mode === 'null' || locked" :options="col.enumValues?.map(value => ({label:value,value})) ?? [{label:'true',value:'true'},{label:'false',value:'false'}]" @update:value="setValue(col, $event)" />
-      <n-input v-else :value="String(fields[col.name]?.value ?? '')" :type="/text|json|blob|bytea/i.test(col.type) ? 'textarea' : 'text'" :disabled="!selected[col.name] || fields[col.name]?.mode === 'null' || locked" @update:value="setValue(col, $event)" />
-      <n-checkbox v-if="col.nullable" :checked="fields[col.name]?.mode === 'null'" :disabled="!selected[col.name] || locked" @update:checked="fields[col.name]!.mode = $event ? 'null' : 'value'">NULL</n-checkbox>
+      <ui-checkbox :checked="selected[col.name] === true" :disabled="locked" @update:checked="selected[col.name] = $event">{{ col.name }}</ui-checkbox>
+      <ui-select v-if="col.enumValues?.length || isRowBoolean(col.type)" class="bulk-edit__value" :aria-label="col.name" :value="String(fields[col.name]?.value ?? '')" :disabled="!selected[col.name] || fields[col.name]?.mode === 'null' || locked" :options="col.enumValues?.map(value => ({label:value,value})) ?? [{label:'true',value:'true'},{label:'false',value:'false'}]" @update:value="setValue(col, $event)" />
+      <ui-input v-else class="bulk-edit__value" :aria-label="col.name" :value="String(fields[col.name]?.value ?? '')" :type="/text|json|blob|bytea/i.test(col.type) ? 'textarea' : 'text'" :disabled="!selected[col.name] || fields[col.name]?.mode === 'null' || locked" @update:value="setValue(col, $event)" />
+      <ui-checkbox v-if="col.nullable" class="bulk-edit__null" :aria-label="col.name + ' · NULL'" :checked="fields[col.name]?.mode === 'null'" :disabled="!selected[col.name] || locked" @update:checked="fields[col.name]!.mode = $event ? 'null' : 'value'">NULL</ui-checkbox>
+    </div>
     </div>
     <p v-if="reviewing" class="bulk-edit__confirmation">{{ text.confirmText.replace('{count}', String(capturedKeys.length)).replace('{table}', tableName) }}</p>
     <p v-if="started" class="bulk-edit__progress" role="status">{{ text.progress.replace('{applied}', String(applied)).replace('{total}', String(capturedKeys.length)) }}</p>
     <p v-if="stopped">{{ text.stopped }}</p>
     <p v-if="error" role="alert" class="bulk-edit__error">{{ error }}</p>
     <template #footer><div class="bulk-edit__footer">
-      <n-button v-if="running" @click="stopRequested = true" :disabled="stopRequested">{{ text.stop }}</n-button>
-      <n-button v-else @click="close">{{ text.close }}</n-button>
-      <n-button v-if="reviewing && !started" data-testid="bulk-confirm" type="warning" @click="apply">{{ text.confirm }}</n-button>
-      <n-button v-else-if="!started" data-testid="bulk-review" type="primary" :disabled="!canReview" @click="review">{{ text.review }}</n-button>
+      <ui-button v-if="running" @click="stopRequested = true" :disabled="stopRequested">{{ text.stop }}</ui-button>
+      <ui-button v-else @click="close">{{ text.close }}</ui-button>
+      <ui-button v-if="reviewing && !started" data-testid="bulk-confirm" type="warning" @click="apply">{{ text.confirm }}</ui-button>
+      <ui-button v-else-if="!started" data-testid="bulk-review" type="primary" :disabled="!canReview" @click="review">{{ text.review }}</ui-button>
     </div></template>
-  </n-modal>
+  </ui-modal>
 </template>
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NButton, NCheckbox, NInput, NModal, NSelect } from 'naive-ui'
+import { UiButton, UiCheckbox, UiInput, UiModal, UiSelect } from '../ui'
 import { api } from '../api/client'
 import type { ColumnDef } from '../api/types'
 import { isRowBoolean, rowField, rowJSONError, rowPayload, rowValueError, type RowField } from '../lib/rowValues'
@@ -82,8 +84,15 @@ async function apply(): Promise<void> {
 }
 </script>
 <style scoped>
-.bulk-edit__field { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; gap: 10px; align-items: start; margin-bottom: 12px; }
-.bulk-edit__error { color: var(--error-color, #c33); overflow-wrap: anywhere; }
-.bulk-edit__footer { display: flex; justify-content: flex-end; gap: 8px; }
-@media (max-width: 600px) { .bulk-edit__field { grid-template-columns: 1fr; } }
+.bulk-edit__scope { margin:0 0 12px; color:var(--db-muted); font:13px var(--db-mono); }
+.bulk-edit__fields { max-height:54dvh; overflow:auto; }
+.bulk-edit__field + .bulk-edit__field { border-top:1px solid var(--db-line); }
+.bulk-edit__field { padding:9px 0; display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; gap: 10px; align-items: start; margin:0; }
+.bulk-edit__error { color: var(--db-danger); overflow-wrap: anywhere; }
+.bulk-edit__footer { display: flex; justify-content: flex-end; flex-wrap:wrap; gap: 8px; }
+@media (max-width: 600px) {
+  .bulk-edit__field { grid-template-columns: minmax(0, 1fr) auto; gap: 5px 12px; }
+  .bulk-edit__value { grid-area: 2 / 1 / 3 / -1; }
+  .bulk-edit__null { grid-area: 1 / 2; }
+}
 </style>

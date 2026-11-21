@@ -1,17 +1,16 @@
 <template>
-  <div class="database-table">
+  <div class="database-table db-panel">
     <div class="database-table__toolbar">
-      <input v-model="filter" type="search" :aria-label="t('server.filterDatabases')" :placeholder="t('server.filterDatabases')" />
-      <n-button size="small" :loading="loading" @click="emit('refresh')">
-        {{ t('server.refresh') }}
-      </n-button>
+      <label class="db-search"><UiIcon name="search" /><input v-model="filter" type="search" :aria-label="t('server.filterDatabases')" :placeholder="t('server.filterDatabases')" /></label>
+      <ui-button size="small" :loading="loading" @click="emit('refresh')">
+        <UiIcon name="refresh" :size="14" />{{ t('server.refresh') }}
+      </ui-button>
     </div>
-    <n-data-table
+    <ui-data-table
       :columns="columns"
       :data="visibleDatabases"
       :loading="loading"
       :row-props="rowProps"
-      :bordered="false"
     />
   </div>
 </template>
@@ -19,9 +18,10 @@
 <script setup lang="ts">
 import { computed, h, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NButton, NDataTable, useThemeVars, type DataTableColumns } from 'naive-ui'
+import { UiButton, UiDataTable, type DataTableColumns } from '../ui'
 
 import type { DatabaseInfo } from '../api/types'
+import UiIcon from './UiIcon.vue'
 import { formatBytes } from '../lib/format'
 
 const props = defineProps<{
@@ -32,7 +32,6 @@ const props = defineProps<{
 const emit = defineEmits<{ refresh: []; open: [name: string] }>()
 
 const { t } = useI18n()
-const theme = useThemeVars()
 const filter = ref('')
 const visibleDatabases = computed(() => {
   const text = filter.value.trim().toLowerCase()
@@ -42,16 +41,24 @@ const visibleDatabases = computed(() => {
 const columns = computed<DataTableColumns<DatabaseInfo>>(() => [
   {
     title: t('server.columns.name'), key: 'name',
-    render: row => h('a', {
-      href: '/db/' + encodeURIComponent(row.name),
-      style: { color: theme.value.primaryColorPressed, textUnderlineOffset: '3px' },
-      onClick(event: MouseEvent) {
-        event.stopPropagation()
-        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-        event.preventDefault()
-        emit('open', row.name)
-      },
-    }, row.name),
+    render: row => h('div', [
+      h('a', {
+        href: '/db/' + encodeURIComponent(row.name),
+        class: 'database-name',
+        onClick(event: MouseEvent) {
+          event.stopPropagation()
+          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+          event.preventDefault()
+          emit('open', row.name)
+        },
+      }, [
+        h('span', { class: 'db-object-icon' }, [h(UiIcon, { name: 'db', size: 15 })]),
+        h('span', row.name),
+      ]),
+      row.collation && h('small', { class: 'database-collation' }, [
+        h('span', { class: 'collation-label' }, t('server.columns.collation') + ' '), row.collation,
+      ]),
+    ]),
   },
   {
     title: t('server.columns.size'),
@@ -69,12 +76,15 @@ const rowProps = (row: DatabaseInfo): Record<string, unknown> => ({
 </script>
 
 <style scoped>
-.database-table__toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
+.database-table { overflow: hidden; min-width: 0; container-type: inline-size; }
+.database-table__toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--db-line); }
+.database-table :deep(.database-name) { display: inline-flex; align-items: center; gap: 10px; color: var(--db-ink); text-decoration: none; font: 550 13px var(--db-mono); overflow-wrap: anywhere; }
+.database-table :deep(.database-name:hover) { color: var(--db-accent); text-decoration: underline; }
+.database-table :deep(.database-collation) { display: none; }
+@container (max-width: 480px) {
+  .database-table :deep(:is(th, td, col):last-child) { display: none; }
+  .database-table :deep(:is(th, td):nth-child(2)) { white-space: nowrap; text-align: end; }
+  .database-table :deep(.database-collation) { display: block; margin-inline-start: 38px; overflow-wrap: anywhere; color: var(--db-muted); font: 11px var(--db-mono); }
+  .database-table :deep(.collation-label) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }
-.database-table__toolbar input { box-sizing: border-box; min-width: 0; width: min(310px, 100%); padding: 6px 10px; font: inherit; color: inherit; background: v-bind('theme.inputColor'); border: 1px solid v-bind('theme.borderColor'); border-radius: 4px; }
 </style>

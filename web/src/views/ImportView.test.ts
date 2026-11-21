@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import { defineComponent, h } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { NButton, NCheckbox, NInput, NNotificationProvider, NRadioGroup, NSelect } from 'naive-ui'
+import { UiButton, UiCheckbox, UiInput, UiNotificationProvider, UiRadioGroup, UiSelect } from '../ui'
 
 import type { TableInfo } from '../api/types'
 import i18n from '../i18n'
@@ -65,7 +65,7 @@ function mockFetch(importResponse: Response): ReturnType<typeof vi.fn> {
 // it with; useNotification throws without it.
 function mountView(pinia: Pinia) {
   const host = defineComponent({
-    setup: () => () => h(NNotificationProvider, null, { default: () => h(ImportView) }),
+    setup: () => () => h(UiNotificationProvider, null, { default: () => h(ImportView) }),
   })
   return mount(host, { global: { plugins: [pinia, i18n] } })
 }
@@ -104,21 +104,21 @@ describe('ImportView', () => {
     await flushPromises()
 
     const view = wrapper.findComponent(ImportView)
-    expect(view.findComponent(NButton).attributes('disabled')).toBeDefined()
+    expect(view.findComponent(UiButton).attributes('disabled')).toBeDefined()
 
     await chooseFile(view, 'dump.sql', 'CREATE TABLE t (id int);')
-    expect(view.findComponent(NButton).attributes('disabled')).toBeUndefined()
+    expect(view.findComponent(UiButton).attributes('disabled')).toBeUndefined()
 
     // csv without a table is invalid per the backend contract.
-    view.findComponent(NRadioGroup).vm.$emit('update:value', 'csv')
+    view.findComponent(UiRadioGroup).vm.$emit('update:value', 'csv')
     await flushPromises()
-    expect(view.findComponent(NButton).attributes('disabled')).toBeDefined()
+    expect(view.findComponent(UiButton).attributes('disabled')).toBeDefined()
 
-    view.findComponent(NSelect).vm.$emit('update:value', 'users')
+    view.findComponent(UiSelect).vm.$emit('update:value', 'users')
     await flushPromises()
     await new Promise(resolve => setTimeout(resolve, 30))
     await flushPromises()
-    expect(view.findComponent(NButton).attributes('disabled')).toBeUndefined()
+    expect(view.findComponent(UiButton).attributes('disabled')).toBeUndefined()
   })
 
   it('posts multipart with the fields before the file part and the X-Requested-With header', async () => {
@@ -126,14 +126,14 @@ describe('ImportView', () => {
     await flushPromises()
 
     const view = wrapper.findComponent(ImportView)
-    view.findComponent(NRadioGroup).vm.$emit('update:value', 'csv')
+    view.findComponent(UiRadioGroup).vm.$emit('update:value', 'csv')
     await flushPromises()
-    view.findComponent(NSelect).vm.$emit('update:value', 'users')
+    view.findComponent(UiSelect).vm.$emit('update:value', 'users')
     await flushPromises()
     // Tweak the csv options: separator ";" and skipHeader on.
-    const inputs = view.findAllComponents(NInput)
+    const inputs = view.findAllComponents(UiInput)
     await inputs[0].find('input').setValue(';')
-    view.findAllComponents(NCheckbox)[0].vm.$emit('update:checked', true)
+    view.findAllComponents(UiCheckbox)[0].vm.$emit('update:checked', true)
     await flushPromises()
     await chooseFile(view, 'rows.csv', 'id;name\n1;2\n')
 
@@ -211,8 +211,8 @@ describe('ImportView', () => {
     routeState.table = 'orders'
     const wrapper = mountView(pinia); await flushPromises()
     const view = wrapper.findComponent(ImportView)
-    view.findComponent(NRadioGroup).vm.$emit('update:value', 'csv'); await flushPromises()
-    expect(view.findComponent(NSelect).props('value')).toBe('orders')
+    view.findComponent(UiRadioGroup).vm.$emit('update:value', 'csv'); await flushPromises()
+    expect(view.findComponent(UiSelect).props('value')).toBe('orders')
   })
 
   it('stops an active import and reports possible partial work without success', async () => {
@@ -235,13 +235,13 @@ describe('ImportView', () => {
   it('previews quoted values and submits reordered and ignored source fields', async () => {
     const wrapper = mountView(pinia); await flushPromises()
     const view = wrapper.findComponent(ImportView)
-    view.findComponent(NRadioGroup).vm.$emit('update:value', 'csv'); await flushPromises()
-    view.findComponent(NSelect).vm.$emit('update:value', 'users'); await flushPromises()
+    view.findComponent(UiRadioGroup).vm.$emit('update:value', 'csv'); await flushPromises()
+    view.findComponent(UiSelect).vm.$emit('update:value', 'users'); await flushPromises()
     await chooseFile(view, 'rows.csv', '"Привет,\nмир",ignored,9007199254740993\n')
     expect(view.find('[data-testid="csv-preview"]').text()).toContain('Привет,')
-    view.findAllComponents(NSelect).find(select => select.attributes('data-testid') === 'csv-map-0')!.vm.$emit('update:value', 'name')
-    view.findAllComponents(NSelect).find(select => select.attributes('data-testid') === 'csv-map-1')!.vm.$emit('update:value', '')
-    view.findAllComponents(NSelect).find(select => select.attributes('data-testid') === 'csv-map-2')!.vm.$emit('update:value', 'id')
+    view.findAllComponents(UiSelect).find(select => select.attributes('data-testid') === 'csv-map-0')!.vm.$emit('update:value', 'name')
+    view.findAllComponents(UiSelect).find(select => select.attributes('data-testid') === 'csv-map-1')!.vm.$emit('update:value', '')
+    view.findAllComponents(UiSelect).find(select => select.attributes('data-testid') === 'csv-map-2')!.vm.$emit('update:value', 'id')
     await flushPromises()
     await view.find('[data-testid="import-submit"]').trigger('click'); await flushPromises()
     const form = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/import'))![1].body as FormData
@@ -251,10 +251,10 @@ describe('ImportView', () => {
   it('can map ordinary external CSV without decoding NULL or backslash markers', async () => {
     const wrapper = mountView(pinia); await flushPromises()
     const view = wrapper.findComponent(ImportView)
-    view.findComponent(NRadioGroup).vm.$emit('update:value', 'csv'); await flushPromises()
-    view.findComponent(NSelect).vm.$emit('update:value', 'users'); await flushPromises()
+    view.findComponent(UiRadioGroup).vm.$emit('update:value', 'csv'); await flushPromises()
+    view.findComponent(UiSelect).vm.$emit('update:value', 'users'); await flushPromises()
     await chooseFile(view, 'external.csv', '1,\\N\n')
-    const encoding = view.findAllComponents(NSelect).find(select => select.attributes('data-testid') === 'csv-value-encoding')!
+    const encoding = view.findAllComponents(UiSelect).find(select => select.attributes('data-testid') === 'csv-value-encoding')!
     encoding.vm.$emit('update:value', 'literal'); await flushPromises()
     await view.find('[data-testid="import-submit"]').trigger('click'); await flushPromises()
     const form = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/import'))![1].body as FormData
@@ -264,9 +264,9 @@ describe('ImportView', () => {
   it('accepts MySQL pipe delimiters and rejects them after switching to PostgreSQL', async () => {
     const wrapper = mountView(pinia); await flushPromises()
     const view = wrapper.findComponent(ImportView)
-    view.findComponent(NRadioGroup).vm.$emit('update:value', 'csv'); await flushPromises()
-    view.findComponent(NSelect).vm.$emit('update:value', 'users'); await flushPromises()
-    await view.findAllComponents(NInput)[0]!.find('input').setValue('|')
+    view.findComponent(UiRadioGroup).vm.$emit('update:value', 'csv'); await flushPromises()
+    view.findComponent(UiSelect).vm.$emit('update:value', 'users'); await flushPromises()
+    await view.findAllComponents(UiInput)[0]!.find('input').setValue('|')
     await chooseFile(view, 'external.csv', '1|value\n')
     expect(view.find('[data-testid="csv-preview-error"]').exists()).toBe(false)
     useCatalogStore().schemaAware = true
@@ -277,13 +277,13 @@ describe('ImportView', () => {
   it('blocks malformed CSV and duplicate target mappings', async () => {
     const wrapper = mountView(pinia); await flushPromises()
     const view = wrapper.findComponent(ImportView)
-    view.findComponent(NRadioGroup).vm.$emit('update:value', 'csv'); await flushPromises()
-    view.findComponent(NSelect).vm.$emit('update:value', 'users'); await flushPromises()
+    view.findComponent(UiRadioGroup).vm.$emit('update:value', 'csv'); await flushPromises()
+    view.findComponent(UiSelect).vm.$emit('update:value', 'users'); await flushPromises()
     await chooseFile(view, 'bad.csv', '1,"unclosed')
     expect(view.find('[data-testid="csv-preview-error"]').exists()).toBe(true)
     expect(view.find('[data-testid="import-submit"]').attributes('disabled')).toBeDefined()
     await chooseFile(view, 'rows.csv', '1,value\n')
-    view.findAllComponents(NSelect).find(select => select.attributes('data-testid') === 'csv-map-1')!.vm.$emit('update:value', 'id'); await flushPromises()
+    view.findAllComponents(UiSelect).find(select => select.attributes('data-testid') === 'csv-map-1')!.vm.$emit('update:value', 'id'); await flushPromises()
     expect(view.find('[data-testid="import-submit"]').attributes('disabled')).toBeDefined()
   })
 
@@ -294,7 +294,7 @@ describe('ImportView', () => {
     const view = wrapper.findComponent(ImportView)
     expect(view.text()).not.toContain('Разделитель')
 
-    view.findComponent(NRadioGroup).vm.$emit('update:value', 'csv')
+    view.findComponent(UiRadioGroup).vm.$emit('update:value', 'csv')
     await flushPromises()
     expect(view.text()).toContain('Разделитель')
     expect(view.text()).toContain('Ограничитель')

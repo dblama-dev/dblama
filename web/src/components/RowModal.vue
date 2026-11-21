@@ -1,25 +1,25 @@
 <template>
-  <n-modal :show="show" preset="card" :title="mode === 'insert' ? t('row.insert') : t('row.edit')" class="row-modal" :style="{ width: 'min(720px, 96vw)' }" :mask-closable="!saving" :close-on-esc="!saving" :closable="!saving" @update:show="close">
+  <ui-modal :show="show" :title="mode === 'insert' ? t('row.insert') : t('row.edit')" class="row-modal" :style="{ width: 'min(720px, 96vw)' }" :mask-closable="!saving" :close-on-esc="!saving" :closable="!saving" @update:show="close">
     <div v-if="loading">{{ t('common.loading') }}</div>
     <div v-else :key="entryNumber" ref="fieldList" class="row-modal__fields">
       <div v-for="col in columns" :key="col.name" class="row-modal__field">
-        <label class="row-modal__label" :for="`row-${col.name}`">{{ col.name }}</label>
+        <div class="row-modal__caption"><label class="row-modal__label" :for="`row-${col.name}`">{{ col.name }}</label><small>{{ col.type }}</small></div>
         <div class="row-modal__control">
           <span v-if="col.generated">{{ text.generated }}</span>
           <template v-else>
-            <n-select v-if="singleFK(col.name)" :id="`row-${col.name}`" :value="selectValue(col.name)" :options="fkOptions(col.name)" remote filterable tag :disabled="disabled(col)" :loading="parentLoading[col.name]" size="small" class="row-modal__input" @search="searchParent(col.name, $event)" @update:value="setValue(col.name, $event)" />
-            <n-input-number v-else-if="isRowNumeric(col.type)" :id="`row-${col.name}`" :value="numberValue(col.name)" :disabled="disabled(col)" size="small" class="row-modal__input" @update:value="setValue(col.name, $event)" />
-            <n-select v-else-if="col.enumValues?.length || isRowBoolean(col.type)" :id="`row-${col.name}`" :value="isRowBoolean(col.type) ? stringValue(col.name) : selectValue(col.name)" :options="valueOptions(col)" :disabled="disabled(col)" size="small" class="row-modal__input" @update:value="setValue(col.name, $event)" />
+            <ui-select v-if="singleFK(col.name)" :id="`row-${col.name}`" :value="selectValue(col.name)" :options="fkOptions(col.name)" remote filterable tag :disabled="disabled(col)" :loading="parentLoading[col.name]" size="small" class="row-modal__input" @search="searchParent(col.name, $event)" @update:value="setValue(col.name, $event)" />
+            <ui-input-number v-else-if="isRowNumeric(col.type)" :id="`row-${col.name}`" :value="numberValue(col.name)" :disabled="disabled(col)" size="small" class="row-modal__input" @update:value="setValue(col.name, $event)" />
+            <ui-select v-else-if="col.enumValues?.length || isRowBoolean(col.type)" :id="`row-${col.name}`" :value="isRowBoolean(col.type) ? stringValue(col.name) : selectValue(col.name)" :options="valueOptions(col)" :disabled="disabled(col)" size="small" class="row-modal__input" @update:value="setValue(col.name, $event)" />
             <input v-else-if="dateType(col)" :id="`row-${col.name}`" :type="dateType(col)" :value="dateDisplayValue(col)" :disabled="disabled(col)" step="any" class="row-modal__input row-modal__date" @input="setValue(col.name, ($event.target as HTMLInputElement).value)">
-            <n-input v-else :id="`row-${col.name}`" :value="stringValue(col.name)" :type="/text|json|blob|bytea/i.test(col.type) ? 'textarea' : 'text'" :disabled="disabled(col)" size="small" class="row-modal__input" @update:value="setValue(col.name, $event)" />
-            <n-button v-if="isRowJSON(col.type)" size="tiny" :disabled="disabled(col)" @click="formatJSON(col)">{{ text.format }}</n-button>
+            <ui-input v-else :id="`row-${col.name}`" :value="stringValue(col.name)" :type="/text|json|blob|bytea/i.test(col.type) ? 'textarea' : 'text'" :disabled="disabled(col)" size="small" class="row-modal__input" @update:value="setValue(col.name, $event)" />
+            <ui-button v-if="isRowJSON(col.type)" size="tiny" :disabled="disabled(col)" @click="formatJSON(col)">{{ text.format }}</ui-button>
             <template v-if="isRowBinary(col.type)">
               <small>{{ text.binary }}</small>
               <input type="file" :aria-label="col.name" :disabled="disabled(col)" @change="readBinary(col, $event)">
               <small v-if="/^0x(?:[0-9a-f]{2})*$/i.test(stringValue(col.name))">{{ text.binarySize.replace('{count}', String((stringValue(col.name).length - 2) / 2)) }}</small>
             </template>
             <div v-if="singleFK(col.name)" class="row-modal__related">
-              <n-select v-if="parentLabelColumns[col.name]" class="row-modal__fk-search-mode" :value="parentSearchModes[col.name] ?? 'label'" :options="[{label: text.searchName.replace('{column}', parentLabelColumns[col.name]!), value: 'label'}, {label: text.searchKey, value: 'key'}]" :disabled="disabled(col)" size="tiny" @update:value="setParentSearchMode(col.name, $event)" />
+              <ui-select v-if="parentLabelColumns[col.name]" class="row-modal__fk-search-mode" :aria-label="text.searchMode.replace('{column}', col.name)" :value="parentSearchModes[col.name] ?? 'label'" :options="[{label: text.searchName.replace('{column}', parentLabelColumns[col.name]!), value: 'label'}, {label: text.searchKey, value: 'key'}]" :disabled="disabled(col)" size="tiny" @update:value="setParentSearchMode(col.name, $event)" />
               <small>{{ parentErrors[col.name] ? text.unavailable : parentLabelColumns[col.name] ? text.manual : text.manualKey }}</small>
               <a :href="relatedHref(singleFK(col.name)!)">{{ text.related }}</a>
             </div>
@@ -27,8 +27,8 @@
           </template>
         </div>
         <div class="row-modal__choices">
-          <n-select v-if="mode === 'insert' && !col.generated && (col.default != null || col.autoIncrement)" class="row-modal__mode" :value="fields[col.name]?.mode === 'default' ? 'default' : 'value'" :options="[{ label: text.value, value: 'value' }, { label: text.default, value: 'default' }]" size="small" :disabled="saving" @update:value="setMode(col.name, $event)" />
-          <n-checkbox v-if="col.nullable && !col.generated" class="row-modal__null" size="small" :checked="fields[col.name]?.mode === 'null'" :disabled="saving" @update:checked="setMode(col.name, $event ? 'null' : 'value')">{{ t('row.nullToggle') }}</n-checkbox>
+          <ui-select v-if="mode === 'insert' && !col.generated && (col.default != null || col.autoIncrement)" class="row-modal__mode" :aria-label="`${col.name} · ${t('structure.defaultValue')}`" :value="fields[col.name]?.mode === 'default' ? 'default' : 'value'" :options="[{ label: text.value, value: 'value' }, { label: text.default, value: 'default' }]" size="small" :disabled="saving" @update:value="setMode(col.name, $event)" />
+          <ui-checkbox v-if="col.nullable && !col.generated" class="row-modal__null" size="small" :checked="fields[col.name]?.mode === 'null'" :disabled="saving" @update:checked="setMode(col.name, $event ? 'null' : 'value')">{{ t('row.nullToggle') }}</ui-checkbox>
           <span v-else-if="!col.generated && fields[col.name]?.mode !== 'default'" class="row-modal__required" :title="text.required">NOT NULL</span>
         </div>
       </div>
@@ -36,16 +36,16 @@
     <p v-if="entryNumber && !error" role="status" class="row-modal__status">{{ t('row.insertedCount', { count: entryNumber }) }}</p>
     <p v-if="error" class="row-modal__error" role="alert">{{ error }}</p>
     <template #footer><div class="row-modal__footer">
-      <n-button size="small" :disabled="saving" @click="close">{{ t('row.cancel') }}</n-button>
-      <n-button v-if="mode === 'insert'" size="small" :disabled="!canSave" @click="save(true)">{{ t('row.saveAnother') }}</n-button>
-      <n-button size="small" type="primary" :loading="saving" :disabled="!canSave" @click="save()">{{ t('row.save') }}</n-button>
+      <ui-button size="small" :disabled="saving" @click="close">{{ t('row.cancel') }}</ui-button>
+      <ui-button v-if="mode === 'insert'" size="small" :disabled="!canSave" @click="save(true)">{{ t('row.saveAnother') }}</ui-button>
+      <ui-button size="small" type="primary" :loading="saving" :disabled="!canSave" @click="save()">{{ t('row.save') }}</ui-button>
     </div></template>
-  </n-modal>
+  </ui-modal>
 </template>
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NButton, NCheckbox, NInput, NInputNumber, NModal, NSelect, useNotification } from 'naive-ui'
+import { UiButton, UiCheckbox, UiInput, UiInputNumber, UiModal, UiSelect } from '../ui'
 import { api } from '../api/client'
 import { useCatalogStore } from '../stores/catalog'
 import { useSessionStore } from '../stores/session'
@@ -56,7 +56,6 @@ const props = defineProps<{ show: boolean; mode: 'insert' | 'edit'; rowsPath: st
 const emit = defineEmits<{ 'update:show': [show: boolean]; saved: [continueInserting?: boolean] }>()
 const { t, locale } = useI18n()
 const text = computed(() => rowWorkflowMessages[locale.value === 'ru' ? 'ru' : 'en'].rowWorkflows)
-const notification = useNotification()
 const catalog = useCatalogStore()
 const session = useSessionStore()
 const fields = reactive<Record<string, RowField>>({})
@@ -153,7 +152,6 @@ async function save(continueInserting = false): Promise<void> {
  } catch (err) {
    if (submitted === formVersion) {
      error.value = err instanceof Error ? err.message : String(err)
-     notification.error({ content: error.value, duration: 5000 })
    }
  } finally {
    if (submitted === formVersion) saving.value = false
@@ -249,17 +247,27 @@ watch(() => [props.show, props.foreignKeys, props.rowsPath, entryNumber.value] a
 onBeforeUnmount(() => { generation++; formVersion++; fileReads.clear(); for (const timer of Object.values(timers)) clearTimeout(timer) })
 </script>
 <style scoped>
-.row-modal__fields { display: flex; flex-direction: column; gap: 12px; }
-.row-modal__field { display: grid; grid-template-columns: minmax(90px, 130px) minmax(0, 1fr) auto; align-items: start; gap: 8px; }
-.row-modal__label { overflow-wrap: anywhere; }
-.row-modal__control { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.row-modal__input { width: 100%; }
-.row-modal__choices { display: flex; flex-direction: column; gap: 4px; max-width: 170px; }
-.row-modal__required { font-size: 12px; opacity: .6; }
-.row-modal__related { display: flex; flex-direction: column; }
-.row-modal__error { color: var(--error-color, #c33); overflow-wrap: anywhere; }
-.row-modal__date { box-sizing: border-box; padding: 5px; background: transparent; color: inherit; border: 1px solid #888; }
-.row-modal__status { margin: 12px 0 0; }
-.row-modal__footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-@media (max-width: 600px) { .row-modal__field { grid-template-columns: 1fr; } .row-modal__choices { max-width: none; } }
+.row-modal__fields { display:grid; max-height: min(62dvh,680px); overflow:auto; padding:2px 3px; }
+.row-modal__field { display:grid; grid-template-columns:minmax(85px,130px) minmax(0,1fr) minmax(145px,165px); align-items:start; gap:14px; padding:13px 0; }
+.row-modal__field + .row-modal__field { border-top:1px solid var(--db-line); }
+.row-modal__caption { display:grid; gap:3px; min-width:0; overflow-wrap:anywhere; font:550 13px var(--db-mono); }
+.row-modal__caption small { color:var(--db-muted); font-size:11px; font-weight:400; }
+.row-modal__control,.row-modal__choices,.row-modal__related { display:flex; flex-direction:column; gap:5px; min-width:0; }
+.row-modal__control small { color:var(--db-muted); line-height:1.4; }
+.row-modal__related a { color:var(--db-accent); font-size:12px; }
+.row-modal__input { width:100%; }
+.row-modal__required { align-self:flex-start; padding:2px 5px; border-radius:4px; color:var(--db-muted); background:var(--db-sidebar); font:10px/1.5 var(--db-mono); }
+.row-modal__error { color:var(--db-danger,#c54754); overflow-wrap:anywhere; }
+.row-modal__date { box-sizing:border-box; min-height:30px; padding:5px 8px; border:1px solid var(--db-line); border-radius:6px; color:var(--db-ink); background:var(--db-panel); }
+.row-modal__status { margin:12px 0 0; color:var(--db-muted); }
+.row-modal__footer { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
+@media (max-width:600px) {
+  .row-modal__field { grid-template-columns: minmax(0,1fr); gap:6px; }
+  .row-modal__choices { flex-direction:row; align-items:center; flex-wrap:wrap; }
+  .row-modal__mode { max-width:165px; }
+}
+@media (max-width: 440px) {
+  .row-modal__footer { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.6fr); }
+  .row-modal__footer > :nth-child(3) { grid-column: 1 / -1; }
+}
 </style>

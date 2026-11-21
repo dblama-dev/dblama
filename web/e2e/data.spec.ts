@@ -13,7 +13,7 @@ async function saveRow(page: Page): Promise<void> {
 }
 
 async function confirm(page: Page): Promise<void> {
-  await page.locator('.n-popconfirm').getByRole('button', { name: /^(Confirm|OK)$/ }).click()
+  await page.locator('.ui-popconfirm').getByRole('button', { name: /^(Confirm|OK)$/ }).click()
 }
 
 async function checkCell(row: Locator, column: number, text: string): Promise<void> {
@@ -106,6 +106,7 @@ test('copy rows generates new IDs and bulk upsert updates a conflict', async ({ 
     await expect(gridRows(page)).toHaveCount(3)
     await checkCell(byId(page, 3), 2, 'single copy')
 
+    await page.getByText('Table tools', { exact: true }).click()
     await page.getByRole('button', { name: 'Insert or update JSON', exact: true }).click()
     await page.locator('form textarea').fill(JSON.stringify([
       { id: 1, name: 'updated', note: '' },
@@ -137,12 +138,12 @@ test('filters, sorting and page deletion keep results and exported selection con
     await page.goto(tablePath(db, table))
     await expect(gridRows(page)).toHaveCount(26)
     await byId(page, 1).getByTestId('row-inspect').click()
-    await page.getByTestId('grid-inspect-column').click()
-    await page.locator('.n-base-select-option:visible').getByText('tag', { exact: true }).click()
+    await selectOption(page, page.getByTestId('grid-inspect-column'), 'tag')
     await page.getByTestId('filter-inspected-value').click()
     await expect(gridRows(page)).toHaveCount(1)
     await expect(byId(page, 1)).toBeVisible()
-    await expect(page.locator('.datagrid__filter-op')).toHaveText('=')
+    await page.getByRole('button', { name: 'Filters (1)', exact: true }).click()
+    await expect(page.locator('.datagrid__filter-op option:checked')).toHaveText('=')
     await page.getByRole('button', { name: 'Reset', exact: true }).click()
     await expect(gridRows(page)).toHaveCount(26)
     await selectOption(page, page.locator('.datagrid__filter-column'), 'tag')
@@ -176,17 +177,17 @@ test('filters, sorting and page deletion keep results and exported selection con
     expect(csv.trim().split(/\r?\n/)).toEqual(['id', '20', '22', '24', '26'])
     await page.goBack()
     await expect(page.getByRole('columnheader', { name: 'tag', exact: true })).toBeVisible()
-
+    await page.getByRole('button', { name: 'Filters (2)', exact: true }).click()
     await page.getByRole('button', { name: 'Reset', exact: true }).click()
     await expect(gridRows(page)).toHaveCount(26)
-    await selectOption(page, page.locator('.n-pagination .n-select').first(), '25 / page')
+    await page.locator('.ui-pagination select').selectOption('25')
     await expect(gridRows(page)).toHaveCount(25)
-    await page.locator('.n-pagination-item').filter({ hasText: /^2$/ }).first().click()
+    await page.locator('.ui-pagination-item').filter({ hasText: /^2$/ }).first().click()
     await expect(gridRows(page)).toHaveCount(1)
     await gridRows(page).first().getByRole('button', { name: 'Delete', exact: true }).click()
     await confirm(page)
     await expect(gridRows(page)).toHaveCount(25)
-    await expect(page.locator('.n-pagination-item--active').first()).toHaveText('1')
+    await expect(page.locator('.ui-pagination-item--active').first()).toHaveText('1')
   } finally {
     await runSQL(page, `DROP TABLE IF EXISTS ${table}`)
   }
@@ -283,7 +284,7 @@ test('CSV export and import roundtrip commas, quotes, Unicode and multiline text
     expect(csv).toContain('Юникод')
     await runSQL(page, `DELETE FROM ${table}`)
     await page.goto(dbPath(db, 'import'))
-    await page.locator('.n-radio').filter({ has: page.locator('input[value="csv"]') }).click()
+    await page.locator('.ui-radio').filter({ has: page.locator('input[value="csv"]') }).click()
     await selectOption(page, page.getByTestId('import-table'), table)
     await page.getByRole('checkbox', { name: 'Skip the header row', exact: true }).check()
     await importFile(page, path)

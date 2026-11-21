@@ -10,7 +10,7 @@ import type { TableInfo } from '../api/types'
 export const useCatalogStore = defineStore('catalog', {
   state: () => ({
     tables: [] as TableInfo[],
-    loading: false,
+    loadingPath: null as string | null,
     error: null as string | null,
     requestID: 0,
     tablesPath: null as string | null,
@@ -20,9 +20,18 @@ export const useCatalogStore = defineStore('catalog', {
     schema: null as string | null,
     schemaAware: false,
   }),
+  getters: {
+    loading: state => state.loadingPath !== null,
+  },
   actions: {
     path(path: string): string {
       return withSchema(path, this.schema, this.schemaAware)
+    },
+    /** Initial readers of the same database and schema share the current catalog. */
+    async ensureTables(db: string): Promise<void> {
+      const path = this.path(`/api/databases/${encodeURIComponent(db)}/tables`)
+      if (this.loadingPath === path || (!this.loading && !this.error && this.tablesPath === path)) return
+      await this.fetchTables(db)
     },
     /** GET /api/databases/{db}/tables → {tables}. loading is true only
      * while the request is in flight; on failure error carries the
@@ -30,7 +39,7 @@ export const useCatalogStore = defineStore('catalog', {
     async fetchTables(db: string): Promise<void> {
       const requestID = ++this.requestID
       const path = this.path(`/api/databases/${encodeURIComponent(db)}/tables`)
-      this.loading = true
+      this.loadingPath = path
       try {
         const body = await api<{ tables: TableInfo[] }>(
           'GET',
@@ -44,7 +53,7 @@ export const useCatalogStore = defineStore('catalog', {
         if (requestID !== this.requestID) return
         this.error = err instanceof Error ? err.message : String(err)
       } finally {
-        if (requestID === this.requestID) this.loading = false
+        if (requestID === this.requestID) this.loadingPath = null
       }
     },
     /** Refetch after DDL. Same request as fetchTables; the distinct name

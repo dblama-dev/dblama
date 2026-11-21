@@ -1,46 +1,117 @@
 <template>
-  <section class="search-view">
-    <h2>{{ t('searchWorkflows.title') }}: {{ db }}<small v-if="catalog.schema"> / {{ catalog.schema }}</small></h2>
-    <p><a :href="databaseLink" @click.prevent="router.push(databaseLink)">{{ t('searchWorkflows.database') }}: {{ db }}</a></p>
-    <n-alert type="info">{{ t('searchWorkflows.limits') }}<br />{{ t('searchWorkflows.semantics') }}</n-alert>
-    <n-alert v-if="catalog.error || error" type="error">{{ catalog.error || error }}</n-alert>
-    <form class="search-view__form" @submit.prevent="start">
-      <label>{{ t('searchWorkflows.text') }}<input v-model="text" data-search-text type="text" :disabled="busy" :aria-label="t('searchWorkflows.text')" /></label>
-      <fieldset :disabled="busy || catalog.loading">
-        <legend>{{ t('searchWorkflows.tables') }}</legend>
-        <div class="search-view__tables">
-          <label v-for="table in catalog.tables" :key="table.name"><input v-model="selected" type="checkbox" :value="table.name" :disabled="!selected.includes(table.name) && selected.length >= 20" />{{ table.name }}</label>
+  <section class="search-view db-page tool-workspace">
+    <ToolHeading icon="search" :title="t('searchWorkflows.title')" />
+    <ui-alert v-if="catalog.error || error" type="error">{{ catalog.error || error }}</ui-alert>
+    <form class="tool-card search-view__form" @submit.prevent="start">
+      <div class="tool-card__body tool-stack">
+        <label class="tool-field search-view__term">
+          {{ t('searchWorkflows.text') }}
+          <input
+            v-model="text"
+            data-search-text
+            type="text"
+            :disabled="busy"
+            :aria-label="t('searchWorkflows.text')"
+          />
+        </label>
+        <fieldset :disabled="busy || catalog.loading">
+          <legend>{{ t('searchWorkflows.tables') }}</legend>
+          <div class="search-view__tables">
+            <label v-for="table in catalog.tables" :key="table.name">
+              <input
+                v-model="selected"
+                type="checkbox"
+                :value="table.name"
+                :disabled="!selected.includes(table.name) && selected.length >= 20"
+              />
+              {{ table.name }}
+            </label>
+          </div>
+          <p v-if="!catalog.loading && !catalog.tables.length" class="tool-note">
+            {{ t('searchWorkflows.noCatalog') }}
+          </p>
+        </fieldset>
+      </div>
+      <footer class="tool-card__foot">
+        <div class="tool-actions">
+          <ui-button attr-type="submit" type="primary" :disabled="busy || catalog.loading">
+            <template #icon><UiIcon name="search" /></template>
+            {{ t('searchWorkflows.start') }}
+          </ui-button>
+          <ui-button v-if="busy" data-search-stop @click="stop">{{ t('searchWorkflows.stop') }}</ui-button>
         </div>
-        <p v-if="!catalog.loading && !catalog.tables.length">{{ t('searchWorkflows.noCatalog') }}</p>
-      </fieldset>
-      <p>{{ t('searchWorkflows.selected', { count: selected.length }) }}</p>
-      <n-space><n-button attr-type="submit" type="primary" :disabled="busy || catalog.loading">{{ t('searchWorkflows.start') }}</n-button><n-button v-if="busy" data-search-stop @click="stop">{{ t('searchWorkflows.stop') }}</n-button></n-space>
+        <span class="tool-note">{{ t('searchWorkflows.selected', { count: selected.length }) }}</span>
+      </footer>
     </form>
+    <details class="tool-card tool-details">
+      <summary>{{ t('searchWorkflows.options') }}</summary>
+      <div class="tool-card__body tool-note">
+        <p>{{ t('searchWorkflows.limits') }}</p>
+        <p>{{ t('searchWorkflows.semantics') }}</p>
+      </div>
+    </details>
     <div v-if="status !== 'idle'" role="status" aria-live="polite">
-      <p>{{ t(`searchWorkflows.${status}`) }}</p>
-      <p>{{ t('searchWorkflows.progress', { done: progress.completedTables, total: progress.totalTables, columns: progress.searchedColumns }) }}</p>
+      <h2>{{ t(`searchWorkflows.${status}`) }}</h2>
+      <p class="tool-note">
+        {{
+          t('searchWorkflows.progress', {
+            done: progress.completedTables,
+            total: progress.totalTables,
+            columns: progress.searchedColumns,
+          })
+        }}
+      </p>
     </div>
-    <n-alert v-if="errors.length" type="warning" :title="t('searchWorkflows.errors')"><ul><li v-for="(item, index) in errors" :key="index">{{ item.table }}<span v-if="item.column"> / {{ item.column }}</span>: {{ localError(item.message) }}</li></ul></n-alert>
-    <p v-if="status === 'complete' && !results.length && !errors.length">{{ t('searchWorkflows.noResults') }}</p>
-    <section v-for="result in results" :key="JSON.stringify([result.table,result.column])" class="search-view__result">
-      <h3>{{ result.table }} / {{ result.column }}</h3>
-      <p>{{ t('searchWorkflows.showing', { count: result.rows.length, total: result.totalRows }) }}</p>
-      <a data-search-result :href="result.href" @click.prevent="router.push(result.href)">{{ t('searchWorkflows.open') }}</a>
-      <ol :aria-label="t('searchWorkflows.results')"><li v-for="(row, index) in result.rows" :key="index"><pre>{{ preview(row[result.columns.findIndex(column => column.name === result.column)]) }}</pre></li></ol>
+    <ui-alert v-if="errors.length" type="warning" :title="t('searchWorkflows.errors')">
+      <ul>
+        <li v-for="(item, index) in errors" :key="index">
+          {{ item.table }}
+          <span v-if="item.column">/ {{ item.column }}</span>
+          · {{ localError(item.message) }}
+        </li>
+      </ul>
+    </ui-alert>
+    <p v-if="status === 'complete' && !results.length && !errors.length" class="tool-card tool-empty">
+      {{ t('searchWorkflows.noResults') }}
+    </p>
+    <section
+      v-for="result in results"
+      :key="JSON.stringify([result.table, result.column])"
+      class="tool-card search-view__result"
+    >
+      <header class="tool-card__head">
+        <div>
+          <h3>{{ result.table }} / {{ result.column }}</h3>
+          <p class="tool-note">
+            {{ t('searchWorkflows.showing', { count: result.rows.length, total: result.totalRows }) }}
+          </p>
+        </div>
+        <a data-search-result :href="result.href" @click.prevent="router.push(result.href)">
+          {{ t('searchWorkflows.open') }}
+          <UiIcon name="arrow-up-right" :size="14" />
+        </a>
+      </header>
+      <ol :aria-label="t('searchWorkflows.results')">
+        <li v-for="(row, index) in result.rows" :key="index">
+          <pre>{{ preview(row[result.columns.findIndex((column) => column.name === result.column)]) }}</pre>
+        </li>
+      </ol>
     </section>
   </section>
 </template>
+
 <script setup lang="ts">
+import ToolHeading from '../components/ToolHeading.vue'
+import UiIcon from '../components/UiIcon.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { NAlert, NButton, NSpace } from 'naive-ui'
+import { UiAlert, UiButton } from '../ui'
 import { useCatalogStore } from '../stores/catalog'
 import { searchDatabase, type SearchError, type SearchProgress, type SearchResult } from '../lib/databaseSearch'
 const route = useRoute(), router = useRouter(), catalog = useCatalogStore()
 const { t } = useI18n()
 const db = computed(() => String(route.params.db ?? ''))
-const databaseLink = computed(() => catalog.path(`/db/${encodeURIComponent(db.value)}`))
 const selected = ref<string[]>([]), text = ref(''), error = ref(''), busy = ref(false)
 const status = ref<'idle'|'running'|'complete'|'cancelled'>('idle')
 const results = ref<SearchResult[]>([]), errors = ref<SearchError[]>([])
@@ -83,5 +154,53 @@ watch(() => [catalog.loading, catalog.tablesPath, catalog.tables, catalog.error]
 onBeforeUnmount(() => { pendingContext = undefined; stop(); run++ })
 </script>
 <style scoped>
-.search-view{display:flex;flex-direction:column;gap:12px;max-width:100%;}.search-view h2,.search-view p{margin:0;}.search-view__form{display:flex;flex-direction:column;gap:12px;}.search-view__form>label{display:flex;flex-direction:column;gap:6px;max-width:560px;}.search-view__form input[type=text]{font:inherit;padding:8px;border:1px solid #8888;border-radius:4px;background:transparent;color:inherit;}.search-view__tables{display:flex;gap:8px 20px;flex-wrap:wrap;max-height:220px;overflow:auto;}.search-view__tables label{display:flex;gap:6px;align-items:center;overflow-wrap:anywhere;}fieldset{border:1px solid #8888;border-radius:4px;min-width:0;}.search-view__result{border-top:1px solid #8885;padding-top:8px;min-width:0;}.search-view__result pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;}small{font-weight:normal;}
+.search-view__term {
+  max-width: 560px;
+}
+fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+legend {
+  font-weight: 550;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.search-view__tables {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(190px, 100%), 1fr));
+  gap: 2px 12px;
+  max-height: 300px;
+  overflow: auto;
+}
+.search-view__tables label {
+  min-height: 30px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font: 13px var(--db-mono);
+  overflow-wrap: anywhere;
+}
+.search-view__result h3 {
+  font-family: var(--db-mono);
+}
+.search-view__result ol {
+  padding: 0 24px 0 42px;
+  max-height: 250px;
+  overflow: auto;
+}
+.search-view__result pre {
+  font: 13px var(--db-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.search-view__result a {
+  color: var(--db-accent);
+}
+@media (pointer: coarse) {
+  .search-view__tables label { min-height: 38px; }
+}
 </style>

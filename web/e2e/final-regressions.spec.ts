@@ -12,9 +12,9 @@ test('direct operations load resolves a view with the sidebar collapsed', async 
   await expect(page.getByRole('button', { name: 'Truncate', exact: true })).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Drop', exact: true })).toBeEnabled()
   await page.getByRole('button', { name: 'Drop', exact: true }).click()
-  await expect(page.locator('.n-popconfirm')).toContainText(view)
+  await expect(page.locator('.ui-popconfirm')).toContainText(view)
   const deletion = page.waitForResponse(response => response.request().method() === 'DELETE' && new URL(response.url()).pathname.endsWith(`/tables/${view}`))
-  await page.locator('.n-popconfirm').getByRole('button', { name: /^(Confirm|OK)$/ }).click()
+  await page.locator('.ui-popconfirm').getByRole('button', { name: /^(Confirm|OK)$/ }).click()
   const response = await deletion
   expect(new URL(response.url()).searchParams.get('isView')).toBe('true')
   expect(response.ok(), `DELETE returned HTTP ${response.status()}`).toBe(true)

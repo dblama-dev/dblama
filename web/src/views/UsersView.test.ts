@@ -59,7 +59,7 @@ it('creates an anonymous account only with its explicit checkbox enabled', async
  wrapper.unmount()
 })
 
-// Clicking the real button exercises NButton's native form activation.
+// Clicking the real button exercises UiButton's native form activation.
 it('renames the selected account when its Save button is clicked', async () => {
  const { wrapper, fetcher } = setup(); await flushPromises()
  await wrapper.get('[data-test="select-user"]').trigger('click'); await flushPromises()

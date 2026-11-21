@@ -2,13 +2,14 @@
 import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { routerKey } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useNotification } from 'naive-ui'
-import { NButton, NCheckbox, NInput, NSelect } from 'naive-ui'
+import { useNotification } from '../../ui'
+import { UiButton, UiCheckbox, UiInput, UiSelect } from '../../ui'
 
 import { api, ApiError } from '../../api/client'
 import { useCatalogStore } from '../../stores/catalog'
 import type { ColumnDef, ForeignKey, Index, TableDef, TableOptions } from '../../api/types'
 import IndexEditor from './IndexEditor.vue'
+import UiIcon from '../../components/UiIcon.vue'
 import { useMetadataStore } from '../../stores/metadata'
 import ForeignKeyEditor from './ForeignKeyEditor.vue'
 import OptionsEditor from './OptionsEditor.vue'
@@ -43,6 +44,7 @@ interface EditableColumn {
   defaultMode: 'none' | 'literal' | 'null' | 'expression'
   defaultValue: string
   autoIncrement: boolean
+  savedSequence?: 'serial' | 'identity'
   onUpdate: string
   generated: '' | 'VIRTUAL' | 'STORED'
   generatedExpression: string
@@ -93,6 +95,12 @@ const ENUM_TYPES = new Set(['enum', 'set'])
 
 const metadata = useMetadataStore()
 void metadata.load()
+const defaultOptions = computed(() => [
+  { value: 'none', label: t('structure.noDefault') },
+  { value: 'literal', label: t('structure.literalDefault') },
+  { value: 'null', label: 'NULL' },
+  { value: 'expression', label: t('structure.sqlExpression') },
+])
 const typeOptions = computed(() => metadata.data?.columnTypes.map(type => ({label:type.name,value:type.name})) ?? COMMON_TYPES.map(type => ({label:type,value:type})))
 const generatedOptions = computed(() => [
   { label: t('structure.generatedNone'), value: '' },
@@ -109,6 +117,13 @@ const path = computed(
 // definition exists yet.
 const createMode = computed(() => props.table === '_new')
 const canPlaceColumns = computed(() => createMode.value || !catalog.schemaAware)
+const sections = [
+  { name: 'columns', icon: 'columns' },
+  { name: 'indexes', icon: 'key' },
+  { name: 'foreignKeys', icon: 'network' },
+  { name: 'options', icon: 'settings' },
+] as const
+const currentSection = ref<(typeof sections)[number]['name']>('columns')
 const columnsPanel = ref<HTMLElement | null>(null)
 
 const loading = ref(false)
@@ -157,6 +172,7 @@ function fromDef(c: ColumnDef): EditableColumn {
     defaultMode,
     defaultValue: defaultMode === 'literal' || defaultMode === 'expression' ? c.default!.value : '',
     autoIncrement: c.autoIncrement ?? false,
+    savedSequence: c.autoIncrement ? c.default?.value.startsWith('nextval(') ? 'serial' : 'identity' : undefined,
     onUpdate: c.onUpdate ?? '',
     generated,
     generatedExpression: generated ? (c.default?.value ?? '') : '',
@@ -213,7 +229,7 @@ function resetEditor(): void {
 
 watch(
   () => [props.db, props.table, catalog.schema],
-  () => void load(),
+  () => { currentSection.value = 'columns'; void load() },
   { immediate: true },
 )
 
@@ -269,6 +285,7 @@ function toggleDeletion(row: EditableColumn): void {
 function setAutoIncrement(row: EditableColumn, value: boolean): void {
   // At most one AUTO_INCREMENT column per table.
   for (const r of rows.value) {
+    if (catalog.schemaAware && r.savedSequence === 'identity') continue
     const enabled = r === row && value
     // PostgreSQL serial is represented by both this flag and a nextval
     // default. Keeping that default would re-enable generation on reload.
@@ -445,31 +462,37 @@ async function save(): Promise<void> {
       {{ t('structure.loading') }}
     </div>
     <template v-else>
-      <div class="structure-editor__header">
+      <nav class="structure-sections" :aria-label="t('table.structure')">
+        <button v-for="section in sections" :key="section.name" type="button" :data-structure-section="section.name"
+          :aria-pressed="section.name === currentSection" @click="currentSection = section.name">
+          <UiIcon :name="section.icon" :size="15" />{{ t('structure.' + section.name) }}
+        </button>
+      </nav>
+      <div v-if="createMode || currentSection === 'columns' || currentSection === 'options'" class="structure-editor__header">
         <label class="struct-field struct-field--table-name">
           <span class="struct-field__label">{{ t('structure.tableName') }}</span>
-          <NInput
+          <UiInput
             v-model:value="tableName"
             :placeholder="t('structure.tableName')"
           />
         </label>
-        <NButton
+        <UiButton
           type="primary"
           :disabled="!canSave || saving"
           :loading="saving"
           data-testid="struct-save"
           @click="save"
         >
-          {{ t('navigationWorkflows.columnSave') }}
-        </NButton>
+          {{ t(createMode ? 'rowWorkflows.createTable' : 'navigationWorkflows.columnSave') }}
+        </UiButton>
       </div>
 
-      <p>{{ t('navigationWorkflows.saveScopes') }}</p>
+      <section v-show="currentSection === 'columns'" class="structure-box">
       <header class="structure-columns-heading">
         <h3 class="structure-editor__title">{{ t('structure.columns') }}</h3>
-        <NButton v-if="canPlaceColumns && rows.length" size="small" quaternary data-add-first @click="addColumn(0)">
+        <UiButton v-if="canPlaceColumns && rows.length" size="small" quaternary data-add-first @click="addColumn(0)">
           {{ t('structure.addFirst') }}
-        </NButton>
+        </UiButton>
       </header>
       <div ref="columnsPanel" class="structure-editor__columns">
         <div v-for="(row, index) in rows" :key="row.key" :data-column-key="row.key" class="structure-column">
@@ -480,11 +503,14 @@ async function save(): Promise<void> {
           data-testid="struct-row"
         >
           <summary>
-            {{ row.name || '…' }}
-            <code>{{ row.type }}{{ row.length ? `(${row.length})` : '' }}</code> · {{ row.nullable ? 'NULL' : 'NOT NULL' }}
-            <span v-if="row.autoIncrement && !row.generated"> · ID</span>
-            <span v-if="!row.generated && row.defaultMode !== 'none'"> · {{ defaultSummary(row) }}</span>
-            <span v-if="row.generated"> · {{ row.generated }}</span>
+            <UiIcon name="chevron-right" class="struct-disclosure" :size="14" />
+            <strong>{{ row.name || '…' }}</strong>
+            <code>{{ row.type }}{{ row.length ? `(${row.length})` : '' }}</code>
+            <span class="struct-row__flags">{{ row.nullable ? 'NULL' : 'NOT NULL' }}
+              <span v-if="row.autoIncrement && !row.generated"> · ID</span>
+              <span v-if="!row.generated && row.defaultMode !== 'none'"> · {{ defaultSummary(row) }}</span>
+              <span v-if="row.generated"> · {{ row.generated }}</span>
+            </span>
           </summary>
           <div class="struct-row__fields">
           <label
@@ -492,14 +518,14 @@ async function save(): Promise<void> {
             :title="row.originalName ?? ''"
           >
             <span class="struct-field__label">{{ t('structure.name') }}</span>
-            <NInput
+            <UiInput
               v-model:value="row.name"
               :disabled="row.markedForDeletion"
             />
           </label>
           <label class="struct-field struct-field--type">
             <span class="struct-field__label">{{ t('structure.type') }}</span>
-            <NSelect
+            <UiSelect
               v-model:value="row.type"
               :options="typeOptions"
               :disabled="row.markedForDeletion || isSavedPostgresGenerated(row)"
@@ -513,7 +539,7 @@ async function save(): Promise<void> {
             class="struct-field struct-field--length"
           >
             <span class="struct-field__label">{{ t('structure.length') }}</span>
-            <NInput
+            <UiInput
               v-model:value="row.length"
               :disabled="row.markedForDeletion"
               :readonly="isSavedPostgresGenerated(row)"
@@ -527,50 +553,27 @@ async function save(): Promise<void> {
             <legend class="struct-field__label">{{ t('structure.enumValues', { type: row.type.toUpperCase() }) }}</legend>
             <div v-for="(_, i) in row.enumValues" :key="i" class="enum-choice-row">
               <textarea v-model="row.enumValues[i]" class="enum-choice" rows="1" :aria-label="t('structure.choiceNumber', { n: i + 1 })" />
-              <NButton size="small" quaternary data-remove-choice :disabled="row.markedForDeletion"
-                :aria-label="t('structure.removeChoice', { n: i + 1 })" @click="row.enumValues.splice(i, 1)">×</NButton>
+              <UiButton size="small" quaternary data-remove-choice :disabled="row.markedForDeletion"
+                :aria-label="t('structure.removeChoice', { n: i + 1 })" @click="row.enumValues.splice(i, 1)">×</UiButton>
             </div>
-            <NButton size="small" data-add-choice :disabled="row.markedForDeletion" @click="row.enumValues.push('')">
+            <UiButton size="small" data-add-choice :disabled="row.markedForDeletion" @click="row.enumValues.push('')">
               {{ t('structure.addChoice') }}
-            </NButton>
+            </UiButton>
           </fieldset>
-          <label
-            v-if="isNumeric(row)"
-            class="struct-field struct-field--unsigned"
-          >
-            <span class="struct-field__label">{{ t('structure.unsigned') }}</span>
-            <NCheckbox
-              :checked="row.unsigned"
-              :disabled="row.markedForDeletion"
-              @update:checked="row.unsigned = $event"
-            />
-          </label>
-          <label class="struct-field struct-field--nullable">
-            <span class="struct-field__label">{{ t('structure.nullable') }}</span>
-            <NCheckbox
-              :checked="row.nullable"
-              :disabled="(row.generated !== '' && !catalog.schemaAware) || row.markedForDeletion"
-              @update:checked="row.nullable = $event"
-            />
-          </label>
           <label
             v-if="!row.generated"
             class="struct-field struct-field--defaultmode"
           >
             <span class="struct-field__label">{{ t('structure.defaultValue') }}</span>
-            <select v-model="row.defaultMode" class="default-mode" :aria-label="t('structure.defaultValue')" :disabled="row.markedForDeletion">
-              <option value="none">{{ t('structure.noDefault') }}</option>
-              <option value="literal">{{ t('structure.literalDefault') }}</option>
-              <option value="null">NULL</option>
-              <option value="expression">{{ t('structure.sqlExpression') }}</option>
-            </select>
+            <UiSelect v-model:value="row.defaultMode" :options="defaultOptions" class="default-mode"
+              :aria-label="t('structure.defaultValue')" :disabled="row.markedForDeletion" />
           </label>
           <label
             v-if="!row.generated && (row.defaultMode === 'literal' || row.defaultMode === 'expression')"
             class="struct-field struct-field--default"
           >
             <span class="struct-field__label">{{ row.defaultMode === 'literal' ? t('structure.literalDefault') : t('structure.sqlExpression') }}</span>
-            <NInput
+            <UiInput
               v-model:value="row.defaultValue"
               type="textarea"
               :autosize="{ minRows: 1, maxRows: 4 }"
@@ -583,86 +586,108 @@ async function save(): Promise<void> {
             class="struct-field struct-field--genexpr"
           >
             <span class="struct-field__label">{{ t('structure.generatedExpression') }}</span>
-            <NInput
+            <UiInput
               v-model:value="row.generatedExpression"
               :disabled="row.markedForDeletion"
               :readonly="isSavedPostgresGenerated(row)"
               :placeholder="t('structure.generatedHint')"
             />
           </label>
-          <label class="struct-field struct-field--autoinc">
-            <span class="struct-field__label">{{ t('structure.autoIncrement') }}</span>
-            <NCheckbox
-              :checked="row.autoIncrement"
-              :disabled="row.generated !== '' || row.markedForDeletion"
-              @update:checked="setAutoIncrement(row, $event)"
-            />
-          </label>
-          <label class="struct-field struct-field--onupdate">
+          <label v-if="!catalog.schemaAware || row.onUpdate" class="struct-field struct-field--onupdate">
             <span class="struct-field__label">{{ t('structure.onUpdate') }}</span>
-            <NInput
+            <UiInput
               v-model:value="row.onUpdate"
+              :readonly="catalog.schemaAware"
               :disabled="row.markedForDeletion"
               :placeholder="t('structure.onUpdateHint')"
             />
           </label>
           <label class="struct-field struct-field--generated">
             <span class="struct-field__label">{{ t('structure.generated') }}</span>
-            <NSelect
+            <UiSelect
               :value="row.generated"
               :options="generatedOptions"
               :disabled="row.markedForDeletion || isSavedPostgresColumn(row)"
               @update:value="onGeneratedChanged(row, $event as EditableColumn['generated'])"
             />
-            <small v-if="isSavedPostgresColumn(row)" class="struct-field__help">{{ t('structure.savedGenerationHint') }}</small>
+            <small v-if="isSavedPostgresGenerated(row)" class="struct-field__help">{{ t('structure.savedGenerationHint') }}</small>
           </label>
-          <label class="struct-field struct-field--collation">
+          <label v-if="!catalog.schemaAware || row.collation" class="struct-field struct-field--collation">
             <span class="struct-field__label">{{ t('structure.collation') }}</span>
-            <NInput
+            <UiInput
               v-model:value="row.collation"
+              :readonly="catalog.schemaAware"
               :disabled="row.markedForDeletion"
             />
           </label>
           <label class="struct-field struct-field--comment">
             <span class="struct-field__label">{{ t('structure.comment') }}</span>
-            <NInput
+            <UiInput
               v-model:value="row.comment"
               :disabled="row.markedForDeletion"
             />
           </label>
-          <div class="struct-row__buttons">
-            <NButton
-              size="small"
-              quaternary
-              :disabled="index === 0"
-              v-if="canPlaceColumns"
-              data-testid="col-up"
-              :title="t('structure.moveUp')"
-              @click="moveRow(index, -1)"
-            >
-              ↑
-            </NButton>
-            <NButton
-              size="small"
-              quaternary
-              :disabled="index === rows.length - 1"
-              v-if="canPlaceColumns"
-              data-testid="col-down"
-              :title="t('structure.moveDown')"
-              @click="moveRow(index, 1)"
-            >
-              ↓
-            </NButton>
-            <NButton
-              size="small"
-              quaternary
-              type="error"
-              data-testid="col-delete"
-              :title="row.markedForDeletion ? t('structure.restore') : t('structure.delete')"
-              @click="toggleDeletion(row)"
-            >
-              ✕
-            </NButton>
+          <div class="struct-row__footer">
+            <div class="struct-row__checks">
+              <div class="struct-field--nullable">
+                <UiCheckbox
+                  :label="t('structure.nullable')"
+                  :checked="row.nullable"
+                  :disabled="(row.generated !== '' && !catalog.schemaAware) || row.markedForDeletion"
+                  @update:checked="row.nullable = $event"
+                />
+              </div>
+              <div v-if="!catalog.schemaAware && isNumeric(row)" class="struct-field--unsigned">
+                <UiCheckbox
+                  :label="t('structure.unsigned')"
+                  :checked="row.unsigned"
+                  :disabled="row.markedForDeletion"
+                  @update:checked="row.unsigned = $event"
+                />
+              </div>
+              <div v-if="!catalog.schemaAware || row.savedSequence || /^(int|integer|bigint)$/i.test(row.type)" class="struct-field--autoinc">
+                <UiCheckbox
+                  :label="t(catalog.schemaAware ? 'structure.sequence' : 'structure.autoIncrement')"
+                  :checked="row.autoIncrement"
+                  :disabled="row.generated !== '' || row.markedForDeletion || (isSavedPostgresColumn(row) && row.savedSequence !== 'serial')"
+                  @update:checked="setAutoIncrement(row, $event)"
+                />
+              </div>
+            </div>
+            <div class="struct-row__buttons">
+              <UiButton
+                size="small"
+                quaternary
+                :disabled="index === 0"
+                v-if="canPlaceColumns"
+                data-testid="col-up"
+                :title="t('structure.moveUp')"
+                @click="moveRow(index, -1)"
+              >
+                ↑
+              </UiButton>
+              <UiButton
+                size="small"
+                quaternary
+                :disabled="index === rows.length - 1"
+                v-if="canPlaceColumns"
+                data-testid="col-down"
+                :title="t('structure.moveDown')"
+                @click="moveRow(index, 1)"
+              >
+                ↓
+              </UiButton>
+              <UiButton
+                size="small"
+                quaternary
+                type="error"
+                data-testid="col-delete"
+                :title="row.markedForDeletion ? t('structure.restore') : t('structure.delete')"
+                @click="toggleDeletion(row)"
+              >
+                ✕
+              </UiButton>
+            </div>
           </div>
           <div
             v-if="row.generated && !isSavedPostgresColumn(row)"
@@ -672,24 +697,23 @@ async function save(): Promise<void> {
           </div>
           </div>
           </details>
-          <NButton v-if="canPlaceColumns && !row.markedForDeletion" class="insert-after" size="small" quaternary
+          <UiButton v-if="canPlaceColumns && !row.markedForDeletion" class="insert-after" size="small" quaternary
             data-add-after :title="t('structure.addAfter', { name: row.name || '…' })"
             :aria-label="t('structure.addAfter', { name: row.name || '…' })"
-            @click="addColumn(index + 1)">＋</NButton>
+            @click="addColumn(index + 1)">＋</UiButton>
         </div>
-        <NButton
+        <UiButton
           size="small"
           data-testid="struct-add"
           @click="addColumn()"
         >
           {{ t('structure.addColumn') }}
-        </NButton>
+        </UiButton>
       </div>
       <p v-if="!canPlaceColumns" class="struct-row__hint">{{ t('structure.appendOnly') }}</p>
 
-      <h3 class="structure-editor__title">
-        {{ t('structure.indexes') }}
-      </h3>
+      </section>
+      <section v-show="currentSection === 'indexes'" class="structure-box">
       <!-- The indexes endpoint only exists for a saved table; on create
            the inline indexes list of the PUT body is used instead. -->
       <IndexEditor
@@ -702,16 +726,17 @@ async function save(): Promise<void> {
         @saved="indexesSaved"
       />
 
-      <h3 class="structure-editor__title">
-        {{ t('structure.options') }}
-      </h3>
+      </section>
+      <section v-show="currentSection === 'options'" class="structure-box">
       <OptionsEditor
         v-model:options="options"
       />
 
-      <h3 class="structure-editor__title">{{ t('structure.foreignKeys') }}</h3>
+      </section>
+      <section v-show="currentSection === 'foreignKeys'" class="structure-box">
       <ForeignKeyEditor v-model="foreignKeys" :db="db" :table="table"
         :column-names="rows.filter(r => !r.markedForDeletion).map(r => r.name)" @saved="fksSaved" />
+      </section>
 
     </template>
   </section>
@@ -727,10 +752,14 @@ async function save(): Promise<void> {
 .structure-editor__header {
   display: flex;
   align-items: flex-end;
+  flex-wrap:wrap;
+  justify-content:space-between;
+  padding: 2px 0 10px;
   gap: 12px;
 }
 
 .structure-editor__header .struct-field--table-name {
+  display:grid; gap:4px; flex:1; min-width:min(100%, 180px);
   max-width: 320px;
 }
 
@@ -739,31 +768,46 @@ async function save(): Promise<void> {
   font-size: 14px;
 }
 
+.structure-sections { display:flex; align-items:center; flex-wrap:wrap; gap:3px; width:fit-content; margin-bottom:8px; padding:3px; background:var(--db-sidebar); border:1px solid var(--db-line); border-radius:9px; }
+.structure-sections button { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; background:none; border:1px solid transparent; border-radius:6px; font:inherit; font-size:12px; color:var(--db-muted); cursor:pointer; }
+.structure-sections button[aria-pressed=true] { background:var(--db-panel); color:var(--db-accent); border-color:var(--db-line); }
+.structure-box { min-width:0; padding:16px; border:1px solid var(--db-line); border-radius:10px; background:var(--db-panel); }
+.struct-field__label { font-size:12px; font-weight:550; color:var(--db-muted); }
 .structure-editor__columns {
   display: flex;
   flex-direction: column;
   gap: 8px;
   align-items: flex-start;
 }
-.structure-columns-heading { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.structure-columns-heading { display: flex; align-items: center; justify-content:space-between; gap: 12px; margin:0 0 12px; }
 .structure-columns-heading h3 { margin: 0; }
 .structure-column { width: 100%; position: relative; }
 .structure-column:has(.insert-after) summary { padding-inline-end: 40px; }
 .insert-after { position: absolute; inset-inline-end: 8px; top: 6px; }
 
-.struct-row { display:block;width:100%;padding:8px;border:1px solid #8884;border-radius:4px;box-sizing:border-box; }
-.struct-row summary {cursor:pointer;padding:4px; }
-.struct-row summary code {margin-left:12px;opacity:.7;}
-.default-mode, .enum-choice {
+.struct-row { width:100%; border:1px solid var(--db-line); border-radius:7px; box-sizing:border-box; background:var(--db-panel); }
+.struct-row summary { display:grid; grid-template-columns:15px minmax(0,1fr) minmax(70px,.8fr) minmax(0,1.4fr); gap:8px; align-items:center; min-height:40px; padding:6px 12px; list-style:none; cursor:pointer; font-size:12px; overflow-wrap:anywhere; }
+.struct-row summary::-webkit-details-marker { display:none; }
+.struct-row summary:hover { background:var(--db-sidebar); }
+.struct-row summary strong, .struct-row summary code { font-family:var(--db-mono); }
+.struct-row summary code { color:var(--db-accent); }
+.struct-row__flags, .struct-disclosure { color:var(--db-muted); }
+.struct-row[open] .struct-disclosure { transform:rotate(90deg); }
+@media (max-width:620px) {
+  .structure-box { padding:10px; }
+  .structure-sections button { padding:6px 8px; }
+  .struct-row summary { grid-template-columns:12px minmax(0,1fr) minmax(70px,.9fr); }
+  .struct-row__flags { grid-column:2 / -1; font-size:11px; }
+}
+.enum-choice {
   box-sizing: border-box;
   padding: 6px 8px;
-  border: 1px solid #8886;
-  border-radius: 4px;
+  border: 1px solid var(--db-line);
+  border-radius: 6px;
   color: inherit;
-  background: var(--n-color, transparent);
+  background: var(--db-panel);
   font: inherit;
 }
-.default-mode option { color: CanvasText; background: Canvas; }
 .struct-field--enumvalues {
   display: grid;
   gap: 4px;
@@ -782,8 +826,8 @@ async function save(): Promise<void> {
   align-items: start;
   gap: 12px 16px;
   margin-top: 6px;
-  padding: 12px 4px 4px;
-  border-top: 1px solid rgba(128, 128, 128, 0.25);
+  padding: 12px;
+  border-top: 1px solid var(--db-line);
   width: 100%;
 }
 
@@ -804,23 +848,8 @@ async function save(): Promise<void> {
   gap: 4px;
 }
 
-.struct-row__fields > :is(.struct-field--nullable, .struct-field--unsigned, .struct-field--autoinc) {
-  flex-direction: row;
-  align-items: center;
-  align-self: start;
-  gap: 8px;
-  min-height: 34px;
-  cursor: pointer;
-}
-
-.struct-row__fields > :is(.struct-field--nullable, .struct-field--unsigned, .struct-field--autoinc) > .struct-field__label {
-  order: 1;
-}
-
-.struct-row__fields .default-mode { width: 100%; min-height: 34px; }
-
 .struct-row--deleted .struct-field__label,
-.struct-row--deleted :deep(.n-input__input-el) {
+.struct-row--deleted :deep(.ui-input__control) {
   text-decoration: line-through;
   opacity: 0.5;
 }
@@ -831,10 +860,32 @@ async function save(): Promise<void> {
 
 .struct-field__help { display: block; max-width: 32ch; margin-top: 4px; }
 
-.struct-row__buttons {
+.struct-row__footer {
   grid-column: 1 / -1;
   display: flex;
-  justify-content: flex-end;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  padding-top: 8px;
+  border-top: 1px solid var(--db-line);
+}
+
+.struct-row__checks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 20px;
+}
+
+.struct-row__checks :deep(.ui-checkbox) {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+}
+
+.struct-row__buttons {
+  display: flex;
+  margin-inline-start: auto;
   gap: 4px;
 }
 

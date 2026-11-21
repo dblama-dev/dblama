@@ -9,7 +9,7 @@ describe('MonitorView', () => {
   it('loads processes, status, variables and kills only after confirmation', async () => {
     const fetcher = vi.fn(async (url: string) => response(url === '/api/processes' ? { processes: [{ id: 7, user: 'alice', host: 'localhost', database: 'app', command: 'Query', seconds: 2, state: 'active', query: 'SELECT 1' }] } : url === '/api/status' ? { status: [{ name: 'Uptime', value: '20' }] } : { variables: [{ name: 'max_connections', value: '100' }] }))
     vi.stubGlobal('fetch', fetcher)
-    const wrapper = mount(MonitorView, { global: { plugins: [createI18n({ legacy: false, locale: 'en', messages: adminMessages })] } }); await flushPromises()
+    const wrapper = mount(MonitorView, { global: { stubs: { teleport: true }, plugins: [createI18n({ legacy: false, locale: 'en', messages: adminMessages })] } }); await flushPromises()
     expect(wrapper.text()).toContain('SELECT 1'); expect(wrapper.text()).toContain('max_connections'); expect(wrapper.text()).toContain('Uptime')
     await wrapper.get('[data-test="kill"]').trigger('click'); await flushPromises()
     expect(fetcher).not.toHaveBeenCalledWith('/api/processes/7/kill', expect.anything())

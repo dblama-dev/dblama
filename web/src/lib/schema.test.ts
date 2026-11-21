@@ -19,6 +19,6 @@ it('preserves query parameters and leaves MySQL paths unchanged', () => {
 })
 it('alters a sequence in its explicit schema and rejects zero increment', async () => {
   await alterSequence('Odd Name', {restartWith: 20, increment:-2}, 'Odd Schema')
-  expect(api).toHaveBeenCalledWith('PATCH','/api/sequences/Odd%20Name?schema=Odd%20Schema',{restartWith:20,increment:-2})
+  expect(api).toHaveBeenCalledWith('PATCH','/api/sequences/Odd%20Name?schema=Odd%20Schema',{restart:20,increment:-2})
   await expect(alterSequence('seq',{increment:0},'public')).rejects.toThrow()
 })

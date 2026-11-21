@@ -2,8 +2,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { expect, it } from 'vitest'
 import { EditorView } from '@codemirror/view'
 import SqlEditor from './SqlEditor.vue'
-import { defineComponent, h, ref } from 'vue'
-import { darkTheme, NConfigProvider } from 'naive-ui'
+import { ref } from 'vue'
+import { themeModeKey } from '../theme'
 
 it('keeps typed SQL when asynchronous completion metadata changes', async () => {
   const wrapper = mount(SqlEditor,{props:{modelValue:'SELECT draft',dialect:'mysql',schema:{}}})
@@ -47,7 +47,7 @@ function contrast(foreground: string, background: string): number {
 it('keeps SQL, selection and readable syntax/gutters when the application theme changes', async () => {
  const dark = ref(false)
  const document = 'SELECT 1;\nSELECT 2; -- retained'
- const wrapper = mount(defineComponent({ setup: () => () => h(NConfigProvider, { theme: dark.value ? darkTheme : null }, { default: () => h(SqlEditor, { modelValue: document }) }) }), { attachTo: window.document.body })
+ const wrapper = mount(SqlEditor, { props: { modelValue: document }, global: { provide: { [themeModeKey as symbol]: dark } }, attachTo: window.document.body })
  const editor = EditorView.findFromDOM(wrapper.get('.cm-editor').element as HTMLElement)!
  editor.dispatch({ selection: { anchor: 10, head: 19 } })
  for (const next of [true, false]) {
@@ -64,6 +64,6 @@ it('keeps SQL, selection and readable syntax/gutters when the application theme 
   expect(contrast(gutter.color, gutter.backgroundColor)).toBeGreaterThanOrEqual(4.5)
   expect(Math.abs(luminance(gutter.backgroundColor) - luminance(background))).toBeLessThan(0.1)
  }
- expect(wrapper.findComponent(SqlEditor).emitted('update:modelValue')).toBeUndefined()
+ expect(wrapper.emitted('update:modelValue')).toBeUndefined()
  wrapper.unmount()
 })

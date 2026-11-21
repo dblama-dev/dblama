@@ -1,89 +1,214 @@
 <template>
-  <section class="admin-view">
-    <header class="section-header">
-      <h2>{{ t('admin.users') }}</h2>
-      <n-button :disabled="locked" @click="load">{{ t('admin.refresh') }}</n-button>
-    </header>
-    <p v-if="error" role="alert">{{ error }}</p>
+  <section class="admin-view db-page tool-workspace">
+    <ToolHeading icon="user" :title="t('admin.users')">
+      <ui-button size="small" :disabled="locked" @click="load">
+        <template #icon><UiIcon name="refresh" /></template>
+        {{ t('admin.refresh') }}
+      </ui-button>
+      <ui-button
+        v-if="!selected && !creating"
+        size="small"
+        data-test="start-create"
+        type="primary"
+        :disabled="locked"
+        @click="creating = true"
+      >
+        <template #icon><UiIcon name="plus" /></template>
+        {{ t('admin.create') }}
+      </ui-button>
+    </ToolHeading>
+    <p v-if="error && !confirmDrop" role="alert">{{ error }}</p>
     <p v-if="message" role="status">{{ message }}</p>
 
     <template v-if="!selected">
-      <div class="section-header">
-        <input v-model="filter" data-test="find-account" type="search" :aria-label="t('admin.findAccount')" :placeholder="t('admin.findAccount')">
-        <n-button v-if="!creating" data-test="start-create" type="primary" :disabled="locked" @click="creating = true">{{ t('admin.create') }}</n-button>
-      </div>
-      <form v-if="creating" data-test="create-form" class="panel" @submit.prevent="create">
+      <form
+        v-if="creating"
+        data-test="create-form"
+        class="panel tool-stack tool-card tool-card__body"
+        @submit.prevent="create"
+      >
         <h3>{{ t('admin.create') }}</h3>
         <fieldset class="toolbar" :disabled="locked">
-          <label>{{ t('admin.user') }}<input v-model="newUser" data-test="create-user" :required="!createAnonymous" :disabled="createAnonymous" autocomplete="off"></label>
-          <label>{{ t('admin.host') }}<input v-model="newHost" data-test="create-host" required autocomplete="off" aria-describedby="account-host-help"></label>
-          <label>{{ t('admin.password') }}<input v-model="newPassword" data-test="create-password" type="password" autocomplete="new-password"></label>
-          <label class="check"><input v-model="createAnonymous" data-test="create-anonymous" type="checkbox">{{ t('admin.anonymous') }}</label>
+          <label>
+            {{ t('admin.user') }}
+            <input
+              v-model="newUser"
+              data-test="create-user"
+              :required="!createAnonymous"
+              :disabled="createAnonymous"
+              autocomplete="off"
+            />
+          </label>
+          <label>
+            {{ t('admin.host') }}
+            <input
+              v-model="newHost"
+              data-test="create-host"
+              required
+              autocomplete="off"
+              aria-describedby="account-host-help"
+            />
+          </label>
+          <label>
+            {{ t('admin.password') }}
+            <input
+              v-model="newPassword"
+              data-test="create-password"
+              type="password"
+              autocomplete="new-password"
+            />
+          </label>
+          <label class="check">
+            <input v-model="createAnonymous" data-test="create-anonymous" type="checkbox" />
+            {{ t('admin.anonymous') }}
+          </label>
         </fieldset>
         <p id="account-host-help" class="host-help">{{ t('admin.hostHelp') }}</p>
         <div class="actions">
-          <n-button attr-type="submit" type="primary" :disabled="locked">{{ t('admin.create') }}</n-button>
-          <n-button :disabled="locked" @click="closeCreate">{{ t('admin.cancel') }}</n-button>
+          <ui-button attr-type="submit" type="primary" :disabled="locked">{{ t('admin.create') }}</ui-button>
+          <ui-button :disabled="locked" @click="closeCreate">{{ t('admin.cancel') }}</ui-button>
         </div>
       </form>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>{{ t('admin.user') }}</th><th>{{ t('admin.host') }}</th><th>{{ t('admin.plugin') }}</th><th></th></tr></thead>
-          <tbody><tr v-for="u in filteredUsers" :key="JSON.stringify([u.user, u.host])">
-            <td>{{ u.user || t('admin.anonymous') }}</td><td>{{ u.host }}</td><td>{{ u.plugin }}</td>
-            <td><n-button data-test="select-user" :disabled="locked" @click="select(u)">{{ t('admin.select') }}</n-button></td>
-          </tr></tbody>
-        </table>
-      </div>
-      <p v-if="!filteredUsers.length && !busy">{{ t(filter ? 'admin.noAccountsMatch' : 'admin.empty') }}</p>
+      <section class="tool-card account-list">
+        <header class="tool-card__head">
+          <label class="account-filter">
+            <UiIcon name="search" :size="16" />
+            <input
+              v-model="filter"
+              data-test="find-account"
+              type="search"
+              :aria-label="t('admin.findAccount')"
+              :placeholder="t('admin.findAccount')"
+            />
+          </label>
+        </header>
+        <div class="tool-scroll admin-records">
+          <table class="tool-grid">
+            <thead>
+              <tr>
+                <th>{{ t('admin.user') }}</th>
+                <th>{{ t('admin.host') }}</th>
+                <th>{{ t('admin.plugin') }}</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="u in filteredUsers" :key="JSON.stringify([u.user, u.host])">
+                <td class="account-name"><span>{{ u.user || t('admin.anonymous') }}</span><span class="mobile-host">@{{ u.host }}</span></td>
+                <td class="account-host">{{ u.host }}</td>
+                <td class="account-plugin">{{ u.plugin }}</td>
+                <td class="account-action">
+                  <ui-button
+                    size="small"
+                    quaternary
+                    data-test="select-user"
+                    :disabled="locked"
+                    @click="select(u)"
+                  >
+                    {{ t('admin.select') }}
+                  </ui-button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-if="!filteredUsers.length && !busy" class="tool-empty">
+          {{ t(filter ? 'admin.noAccountsMatch' : 'admin.empty') }}
+        </p>
+      </section>
     </template>
 
-    <section v-else class="editor">
-      <n-button data-test="accounts-list" :disabled="locked" @click="back">{{ t('admin.backToAccounts') }}</n-button>
-      <div class="identity">
-        <h3>{{ selected.user || t('admin.anonymous') }}@{{ selected.host }}</h3>
-        <span>{{ selected.plugin }}</span>
+    <section v-else class="editor tool-stack">
+      <div class="account-top">
+        <ui-button quaternary size="small" data-test="accounts-list" :disabled="locked" @click="back">
+          <template #icon><UiIcon name="chevron-left" /></template>
+          {{ t('admin.backToAccounts') }}
+        </ui-button>
+        <div class="identity">
+          <h3>{{ selected.user || t('admin.anonymous') }}@{{ selected.host }}</h3>
+          <span>{{ selected.plugin }}</span>
+        </div>
       </div>
       <div class="tabs">
-        <n-button v-for="item in tabs" :key="item" :data-test="'tab-' + item" :type="tab === item ? 'primary' : 'default'"
-          :aria-pressed="tab === item" :disabled="locked" @click="changeTab(item)">{{ t('admin.' + item) }}</n-button>
+        <ui-button
+          v-for="item in tabs"
+          :key="item"
+          :data-test="'tab-' + item"
+          quaternary
+          :class="{ active: tab === item }"
+          :aria-pressed="tab === item"
+          :disabled="locked"
+          @click="changeTab(item)"
+        >
+          {{ t('admin.' + item) }}
+        </ui-button>
       </div>
-      <AccountGrants v-if="tab === 'privileges'" :key="grantRevision" :catalog="catalog" :path="path('/grants')" :new-account="justCreated"
-        :username="selected.user" :database-patterns="databasePatterns"
-        @busy="grantBusy = $event" @dirty="grantDirty = $event"/>
-      <div v-else class="settings">
-        <fieldset :disabled="locked"><legend>{{ t('admin.rename') }}</legend>
+      <AccountGrants
+        v-if="tab === 'privileges'"
+        :key="grantRevision"
+        :catalog="catalog"
+        :path="path('/grants')"
+        :new-account="justCreated"
+        :username="selected.user"
+        :database-patterns="databasePatterns"
+        @busy="grantBusy = $event"
+        @dirty="grantDirty = $event"
+      />
+      <div v-else class="settings tool-stack">
+        <fieldset :disabled="locked">
+          <legend>{{ t('admin.rename') }}</legend>
           <form class="toolbar" @submit.prevent="rename">
-            <label>{{ t('admin.newUser') }}<input v-model="renameUser" :required="!!selected.user"></label>
-            <label>{{ t('admin.newHost') }}<input v-model="renameHost" required></label>
-            <n-button attr-type="submit">{{ t('admin.save') }}</n-button>
-          </form>
-        </fieldset>
-        <fieldset :disabled="locked"><legend>{{ t('admin.changePassword') }}</legend>
-          <form class="toolbar" @submit.prevent="changePassword">
-            <label>{{ t('admin.password') }}<input v-model="password" type="password" autocomplete="new-password"></label>
-            <n-button attr-type="submit">{{ t('admin.save') }}</n-button>
-          </form>
-        </fieldset>
-        <fieldset :disabled="locked"><legend>{{ t('admin.limits') }}</legend>
-          <form class="toolbar" @submit.prevent="saveLimits">
-            <label v-for="key in limitKeys" :key="key">{{ t('admin.' + key) }}
-              <input v-model.number="limits[key]" type="number" min="0" max="4294967295" required>
+            <label>
+              {{ t('admin.newUser') }}
+              <input v-model="renameUser" :required="!!selected.user" />
             </label>
-            <n-button attr-type="submit">{{ t('admin.save') }}</n-button>
+            <label>
+              {{ t('admin.newHost') }}
+              <input v-model="renameHost" required />
+            </label>
+            <ui-button attr-type="submit">{{ t('admin.save') }}</ui-button>
           </form>
         </fieldset>
-        <n-button :disabled="locked" type="error" secondary @click="confirmDrop = true">{{ t('admin.drop') }}</n-button>
-        <div v-if="confirmDrop" role="alertdialog" :aria-label="t('admin.confirmDrop')" class="panel">
-          <p>{{ t('admin.confirmDrop') }} · <strong>{{ selected.user || t('admin.anonymous') }}@{{ selected.host }}</strong></p>
-          <div class="actions"><n-button :disabled="locked" type="error" @click="drop">{{ t('admin.confirm') }}</n-button><n-button :disabled="locked" @click="confirmDrop = false">{{ t('admin.cancel') }}</n-button></div>
-        </div>
+        <fieldset :disabled="locked">
+          <legend>{{ t('admin.changePassword') }}</legend>
+          <form class="toolbar" @submit.prevent="changePassword">
+            <label>
+              {{ t('admin.password') }}
+              <input v-model="password" type="password" autocomplete="new-password" />
+            </label>
+            <ui-button attr-type="submit">{{ t('admin.save') }}</ui-button>
+          </form>
+        </fieldset>
+        <fieldset :disabled="locked">
+          <legend>{{ t('admin.limits') }}</legend>
+          <form class="toolbar limits" @submit.prevent="saveLimits">
+            <label v-for="key in limitKeys" :key="key">
+              {{ t('admin.' + key) }}
+              <input v-model.number="limits[key]" type="number" min="0" max="4294967295" required />
+            </label>
+            <ui-button attr-type="submit">{{ t('admin.save') }}</ui-button>
+          </form>
+        </fieldset>
+        <ui-button :disabled="locked" type="error" secondary @click="confirmDrop = true">
+          {{ t('admin.drop') }}
+        </ui-button>
+        <UiModal v-model:show="confirmDrop" preset="dialog" :title="t('admin.confirmDrop')"
+          :closable="!locked" :close-on-esc="!locked" :mask-closable="!locked">
+          <strong>{{ selected.user || t('admin.anonymous') }}@{{ selected.host }}</strong>
+          <p v-if="error" role="alert">{{ error }}</p>
+          <template #footer>
+            <ui-button data-cancel :disabled="locked" @click="confirmDrop = false">{{ t('admin.cancel') }}</ui-button>
+            <ui-button :disabled="locked" type="error" @click="drop">{{ t('admin.drop') }}</ui-button>
+          </template>
+        </UiModal>
       </div>
     </section>
   </section>
 </template>
 <script setup lang="ts">
-import { NButton } from 'naive-ui'
+import ToolHeading from '../components/ToolHeading.vue'
+import UiIcon from '../components/UiIcon.vue'
+import { UiButton, UiModal } from '../ui'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '../api/client'
@@ -246,23 +371,129 @@ async function drop() {
 }
 onMounted(load)
 </script>
+<style scoped src="./adminRecords.css"></style>
 <style scoped>
-.admin-view, .editor, .panel, .settings { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-h2, h3, p { margin: 0; }
-.section-header, .toolbar, .actions, .tabs, .identity { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-.section-header { justify-content: space-between; }
-.toolbar { align-items: end; }
-label { display: flex; flex-direction: column; gap: 6px; }
-.check { flex-direction: row; align-items: center; }
-.identity h3 { overflow-wrap: anywhere; }
-.identity span, .host-help { font-size: 0.89rem; }
-.toolbar input, input[type=search] { max-width: 100%; padding: 6px 8px; font: inherit; }
-.table-wrap { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; text-align: start; }
-th, td { padding: 8px; border-bottom: 1px solid #8886; text-align: start; }
-th:last-child, td:last-child { text-align: end; }
-fieldset, .panel { border: 1px solid #8886; border-radius: 5px; padding: 14px; min-width: 0; margin: 0; }
-.panel fieldset { border: none; padding: 0; }
-.editor > button, .settings > button { align-self: start; }
-[role=alert] { color: #cb4949; }
+.account-list {
+  overflow: hidden;
+}
+.account-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--db-muted);
+  max-width: 100%;
+}
+.account-filter input {
+  width: min(310px, 65vw);
+}
+.tool-grid td:not(:last-child) {
+  font: 13px var(--db-mono);
+  overflow-wrap: anywhere;
+}
+.tool-grid th:last-child,
+.tool-grid td:last-child {
+  text-align: end;
+}
+.account-top {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.account-top .identity {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+}
+.identity h3 {
+  font: 600 20px/1.3 var(--db-mono);
+  overflow-wrap: anywhere;
+}
+.identity span {
+  font-size: 12px;
+  color: var(--db-muted);
+}
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--db-line);
+  flex-wrap: wrap;
+}
+.tabs .ui-button {
+  margin-bottom: -1px;
+  border-radius: 0;
+}
+.tabs .active {
+  color: var(--db-accent);
+  box-shadow: inset 0 -2px var(--db-accent);
+}
+.settings fieldset {
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--db-line);
+  border-radius: 9px;
+  padding: 14px;
+}
+.settings legend {
+  padding: 0 5px;
+  font-weight: 600;
+}
+.toolbar,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px 16px;
+}
+.toolbar label {
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+}
+.toolbar label.check {
+  flex-direction: row;
+  align-items: center;
+}
+.panel fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.settings > button {
+  align-self: start;
+}
+.host-help {
+  color: var(--db-muted);
+  font-size: 12px;
+}
+[role="alert"] {
+  color: var(--db-danger, #b95959);
+  overflow-wrap: anywhere;
+}
+.mobile-host { display: none; }
+@container records (max-width: 660px) {
+  .account-list tbody tr {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 3px 10px;
+    align-items: center;
+  }
+  .account-list .account-name { font-weight: 600; }
+  .account-name .mobile-host { display: inline; color: var(--db-muted); font-weight: normal; }
+  .account-host { display: none; }
+  .account-list .account-plugin { color: var(--db-muted); font-size: 12px; grid-column: 1; }
+  .account-action { grid-column: 2; grid-row: 1 / 3; }
+}
+@media (max-width: 640px) {
+  .toolbar { display: grid; grid-template-columns: minmax(0, 1fr); align-items: end; gap: 10px; }
+  .toolbar.limits { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .toolbar button { justify-self: start; }
+  .account-filter { width: 100%; }
+  .account-filter input { flex: 1; }
+}
 </style>

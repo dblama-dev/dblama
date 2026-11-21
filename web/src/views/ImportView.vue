@@ -1,130 +1,209 @@
 <template>
-  <section class="import-view">
-    <h2>{{ t('import.title') }}</h2>
-
-    <p>{{ t('transferWorkflows.context', { db, table: table || t('transferWorkflows.allTables') }) }}</p>
-    <n-alert v-if="result" :type="result === 'success' ? 'success' : 'warning'" data-testid="import-result">
+  <section class="import-view db-page tool-workspace">
+    <ToolHeading icon="upload" :title="t('import.title')" />
+    <ui-alert v-if="result" :type="result === 'success' ? 'success' : 'warning'" data-testid="import-result">
       {{ t('transferWorkflows.context', resultContext) }}
-      {{ result === 'success' ? t('import.success') : t(result === 'cancelled' ? 'transferWorkflows.cancelled' : 'transferWorkflows.failed') }}
+      {{
+        result === 'success'
+          ? t('import.success')
+          : t(result === 'cancelled' ? 'transferWorkflows.cancelled' : 'transferWorkflows.failed')
+      }}
       <template v-if="result !== 'success'">
-        {{ t(resultType === 'csv' ? 'transferWorkflows.completedRows' : 'transferWorkflows.completedBytes', { done }) }}
+        {{
+          t(resultType === 'csv' ? 'transferWorkflows.completedRows' : 'transferWorkflows.completedBytes', {
+            done,
+          })
+        }}
         {{ t('transferWorkflows.partial') }} {{ resultError }}
       </template>
-    </n-alert>
-    <div class="import-view__form">
-      <label class="import-view__field">
-        <span>{{ t('import.file') }}</span>
-        <input
-          type="file"
+    </ui-alert>
+    <div class="tool-card import-view__form">
+      <header class="tool-card__head">
+        <h2>{{ t('import.file') }}</h2>
+        <ui-radio-group
           :disabled="importing"
-          data-testid="import-file"
-          @change="onFileChange"
-        />
-      </label>
-
-      <div class="import-view__field">
-        <span>{{ t('import.type') }}</span>
-        <n-radio-group :disabled="importing" :value="type" @update:value="onTypeChange">
-          <n-radio value="sql">{{ t('import.typeSql') }}</n-radio>
-          <n-radio value="csv">{{ t('import.typeCsv') }}</n-radio>
-        </n-radio-group>
-      </div>
-
-      <template v-if="type === 'csv'">
-        <label class="import-view__field">
-          <span>{{ t('import.table') }}</span>
-          <n-select
-            v-model:value="table"
+          :value="type"
+          :aria-label="t('import.type')"
+          @update:value="onTypeChange"
+        >
+          <ui-radio value="sql">{{ t('import.typeSql') }}</ui-radio>
+          <ui-radio value="csv">{{ t('import.typeCsv') }}</ui-radio>
+        </ui-radio-group>
+      </header>
+      <div class="tool-card__body tool-stack">
+        <label class="file-input">
+          <span class="file-picker-action">
+            <UiIcon name="upload" :size="16" />
+            {{ t('transferWorkflows.chooseFile') }}
+          </span>
+          <span class="file-name">{{ file?.name ?? t('transferWorkflows.noFile') }}</span>
+          <input
+            type="file"
+            :aria-label="t('import.file')"
             :disabled="importing"
-            :options="tableOptions"
-            clearable
-            data-testid="import-table"
+            data-testid="import-file"
+            @change="onFileChange"
           />
         </label>
-        <label class="import-view__field">
-          <span>{{ t('transferWorkflows.preset') }}</span>
-          <n-select :value="separator" :disabled="importing" :options="presetOptions" data-testid="import-preset" @update:value="applyPreset" />
-        </label>
-        <label class="import-view__field">
-          <span>{{ t('import.separator') }}</span>
-          <n-input v-model:value="separator" :disabled="importing" data-testid="import-separator" />
-        </label>
-        <label class="import-view__field">
-          <span>{{ t('import.enclosure') }}</span>
-          <n-input v-model:value="enclosure" :disabled="importing" data-testid="import-enclosure" />
-        </label>
-        <n-checkbox v-model:checked="skipHeader" :disabled="importing">
-          {{ t('import.skipHeader') }}
-        </n-checkbox>
-        <n-alert v-if="previewError" type="error" data-testid="csv-preview-error">{{ t('transferWorkflows.previewError') }} {{ previewError }}</n-alert>
-        <p v-if="previewLoading || columnsLoading">{{ t('transferWorkflows.previewLoading') }}</p>
-        <template v-if="previewRows.length && !previewError">
-          <p>{{ t('transferWorkflows.previewHint') }}</p>
-          <n-checkbox v-model:checked="mappingEnabled" :disabled="importing" data-testid="csv-mapping-enabled">{{ t('transferWorkflows.mapping') }}</n-checkbox>
-          <label v-if="mappingEnabled" class="import-view__field">
-            <span>{{ t('transferWorkflows.csvEncoding') }}</span>
-            <n-select v-model:value="csvEncoding" :disabled="importing" :options="encodingOptions" data-testid="csv-value-encoding" />
-          </label>
-          <p v-if="mappingEnabled">{{ t(csvEncoding === 'escaped' ? 'transferWorkflows.mappingHint' : 'transferWorkflows.literalHint') }}</p>
-          <div class="import-view__preview" data-testid="csv-preview">
-            <table>
-              <thead><tr><th v-for="(name, index) in previewRows[0]" :key="index">
-                {{ skipHeader ? name : t('transferWorkflows.sourceColumn', { number: index + 1 }) }}
-                <n-select v-if="mappingEnabled" :value="mapping[index]" :disabled="importing" :options="columnOptions" :data-testid="`csv-map-${index}`" @update:value="(value: string) => mapping[index] = value" />
-              </th></tr></thead>
-              <tbody><tr v-for="(row, index) in dataPreviewRows" :key="index"><td v-for="(value, field) in row" :key="field" :title="value">{{ value.length > 160 ? value.slice(0, 160) + '…' : value }}</td></tr></tbody>
-            </table>
+        <template v-if="type === 'csv'">
+          <div class="tool-fields">
+            <label class="tool-field">
+              {{ t('import.table') }}
+              <ui-select
+                v-model:value="table"
+                :disabled="importing"
+                :options="tableOptions"
+                filterable
+                clearable
+                data-testid="import-table"
+              />
+            </label>
+            <label class="tool-field">
+              {{ t('transferWorkflows.preset') }}
+              <ui-select
+                :value="separator"
+                :disabled="importing"
+                :options="presetOptions"
+                data-testid="import-preset"
+                @update:value="applyPreset"
+              />
+            </label>
           </div>
-          <p v-if="mappingError" role="alert">{{ mappingError }}</p>
+          <div class="csv-delimiters">
+            <label class="tool-field">
+              {{ t('import.separator') }}
+              <ui-input v-model:value="separator" :disabled="importing" data-testid="import-separator" />
+            </label>
+            <label class="tool-field">
+              {{ t('import.enclosure') }}
+              <ui-input v-model:value="enclosure" :disabled="importing" data-testid="import-enclosure" />
+            </label>
+            <ui-checkbox v-model:checked="skipHeader" :disabled="importing">
+              {{ t('import.skipHeader') }}
+            </ui-checkbox>
+          </div>
+          <ui-alert v-if="previewError" type="error" data-testid="csv-preview-error">
+            {{ t('transferWorkflows.previewError') }} {{ previewError }}
+          </ui-alert>
+          <p v-if="previewLoading || columnsLoading" role="status">
+            {{ t('transferWorkflows.previewLoading') }}
+          </p>
+          <template v-if="previewRows.length && !previewError">
+            <div class="mapping-head">
+              <h2>{{ t('transferWorkflows.preview') }}</h2>
+              <ui-checkbox
+                v-model:checked="mappingEnabled"
+                :disabled="importing"
+                data-testid="csv-mapping-enabled"
+              >
+                {{ t('transferWorkflows.mapping') }}
+              </ui-checkbox>
+            </div>
+            <label v-if="mappingEnabled" class="tool-field">
+              {{ t('transferWorkflows.csvEncoding') }}
+              <ui-select
+                v-model:value="csvEncoding"
+                :disabled="importing"
+                :options="encodingOptions"
+                data-testid="csv-value-encoding"
+              />
+            </label>
+            <div class="import-view__preview tool-scroll" data-testid="csv-preview">
+              <table class="tool-grid">
+                <thead>
+                  <tr>
+                    <th v-for="(name, index) in previewRows[0]" :key="index">
+                      {{ skipHeader ? name : t('transferWorkflows.sourceColumn', { number: index + 1 }) }}
+                      <ui-select
+                        v-if="mappingEnabled"
+                        :value="mapping[index]"
+                        :disabled="importing"
+                        :options="columnOptions"
+                        :data-testid="`csv-map-${index}`"
+                        :aria-label="t('transferWorkflows.sourceColumn', { number: index + 1 })"
+                        @update:value="(value: string) => mapping[index] = value"
+                      />
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(row, index) in dataPreviewRows" :key="index">
+                    <td v-for="(value, field) in row" :key="field" :title="value">
+                      {{ value.length > 160 ? value.slice(0, 160) + '…' : value }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p v-if="mappingError" role="alert">{{ mappingError }}</p>
+            <details class="tool-details">
+              <summary>{{ t('transferWorkflows.readingCsv') }}</summary>
+              <div class="tool-note">
+                <p>{{ t('transferWorkflows.previewHint') }}</p>
+                <p v-if="mappingEnabled">
+                  {{
+                    t(
+                      csvEncoding === 'escaped'
+                        ? 'transferWorkflows.mappingHint'
+                        : 'transferWorkflows.literalHint',
+                    )
+                  }}
+                </p>
+              </div>
+            </details>
+          </template>
         </template>
-      </template>
-
-      <!-- The read phase of an SQL import reports no progress (the server
-           emits execution-position lines only), so the bar stays
-           indeterminate until the first NDJSON line arrives. -->
-      <div
-        v-if="importing || progressStarted"
-        class="import-view__field"
-        data-testid="import-progress"
-      >
-        <n-progress
-          type="line"
-          :percentage="percentage"
-          :indeterminate="importing && total === 0"
-          :show-indicator="progressStarted && total > 0"
-        />
+        <div v-if="importing || progressStarted" class="import-progress" data-testid="import-progress">
+          <progress :value="importing && total === 0 ? undefined : percentage" max="100" :aria-label="t('navigationWorkflows.import')"></progress>
+          <span v-if="progressStarted && total > 0">{{ percentage }}%</span>
+        </div>
       </div>
-
-      <n-button v-if="importing" data-testid="import-stop" @click="stop">{{ t('transferWorkflows.stop') }}</n-button>
-      <n-button
-        type="primary"
-        :disabled="submitDisabled"
-        :loading="importing"
-        data-testid="import-submit"
-        @click="submit"
-      >
-        {{ t('import.submit') }}
-      </n-button>
+      <footer class="tool-card__foot">
+        <div class="tool-actions">
+          <ui-button
+            @click="submit"
+            type="primary"
+            :disabled="submitDisabled"
+            :loading="importing"
+            data-testid="import-submit"
+          >
+            <template #icon><UiIcon name="upload" /></template>
+            {{ t('import.submit') }}
+          </ui-button>
+          <ui-button v-if="importing" data-testid="import-stop" @click="stop">
+            {{ t('transferWorkflows.stop') }}
+          </ui-button>
+        </div>
+        <span class="tool-note">
+          {{
+            t('transferWorkflows.context', {
+              db,
+              table: type === 'sql' ? t('transferWorkflows.allTables') : table || '—',
+            })
+          }}
+        </span>
+      </footer>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
+import ToolHeading from '../components/ToolHeading.vue'
+import UiIcon from '../components/UiIcon.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import {
-  NAlert,
-  NButton,
-  NCheckbox,
-  NInput,
-  NProgress,
-  NRadio,
-  NRadioGroup,
-  NSelect,
+  UiAlert,
+  UiButton,
+  UiCheckbox,
+  UiInput,
+  UiRadio,
+  UiRadioGroup,
+  UiSelect,
   useNotification,
   type SelectOption,
-} from 'naive-ui'
+} from '../ui'
 
 import { buildImportFormData, runImport } from '../lib/importFile'
 import { CSV_PREVIEW_BYTES, parseCsvPreview, readCsvPreview } from '../lib/csvPreview'
@@ -239,8 +318,8 @@ watch([file, type, separator, enclosure, () => catalog.schemaAware], async () =>
   previewLoading.value = true
   const selectedFile = file.value
   try {
-    const text = await readCsvPreview(selectedFile)
     if (catalog.schemaAware && !['', ',', ';', '\t'].includes(separator.value)) throw new Error(t('transferWorkflows.postgresSeparator'))
+    const text = await readCsvPreview(selectedFile)
     const parsed = parseCsvPreview(text, separator.value, enclosure.value, selectedFile.size > CSV_PREVIEW_BYTES)
     if (id !== previewID) return
     if (!parsed.rows.length) throw new Error(t('transferWorkflows.noPreviewRows'))
@@ -272,7 +351,7 @@ async function submit(): Promise<void> {
   const operationDB = db.value
   const operationSchema = catalog.schema
   resultType.value = type.value
-  resultContext.value = { db: operationDB, table: table.value || t('transferWorkflows.allTables') }
+  resultContext.value = { db: operationDB, table: type.value === 'csv' && table.value ? table.value : t('transferWorkflows.allTables') }
   importing.value = true
   result.value = null
   resultError.value = ''
@@ -308,27 +387,85 @@ async function submit(): Promise<void> {
 </script>
 
 <style scoped>
-.import-view {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
+.import-progress { display:flex; align-items:center; gap:8px; color:var(--db-muted); }
+.import-progress progress { flex:1; accent-color:var(--db-accent); }
 .import-view__form {
+  max-width: 1040px;
+}
+.file-input {
+  position: relative;
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 12px;
-  max-width: 900px;
+  border: 1px dashed var(--db-line);
+  border-radius: 8px;
+  padding: 15px;
+  color: var(--db-muted);
+  background: var(--db-sidebar);
 }
-
-.import-view__field {
+.file-input:focus-within {
+  outline: 2px solid var(--db-accent);
+  outline-offset: 2px;
+}
+.file-input input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.file-picker-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 11px;
+  border: 1px solid var(--db-line);
+  border-radius: 6px;
+  color: var(--db-ink);
+  background: var(--db-panel);
+}
+.file-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.csv-delimiters,
+.mapping-head {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
-.import-view__preview { max-width: 100%; overflow: auto; }
-.import-view__preview table { border-collapse: collapse; }
-.import-view__preview th, .import-view__preview td { border: 1px solid #8885; padding: 8px; min-width: 180px; max-width: 280px; white-space: pre-wrap; overflow-wrap: anywhere; vertical-align: top; }
-.import-view__preview th { text-align: left; }
+.csv-delimiters .tool-field {
+  max-width: 150px;
+}
+.mapping-head {
+  justify-content: space-between;
+  border-top: 1px solid var(--db-line);
+  padding-top: 18px;
+}
+.import-view__preview {
+  max-height: 360px;
+  border: 1px solid var(--db-line);
+  border-radius: 7px;
+}
+.import-view__preview :is(th, td) {
+  min-width: 155px;
+  max-width: 260px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+.import-view__preview th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.import-view__preview th :deep(.ui-select) {
+  margin-top: 5px;
+}
+.import-view__form .tool-details > summary {
+  padding-inline: 0;
+}
 </style>

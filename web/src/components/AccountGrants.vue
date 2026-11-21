@@ -3,14 +3,14 @@
     <p v-if="error" role="alert">{{ error }}</p>
     <template v-if="grants === null">
       <span v-if="busy" role="status">{{ t('admin.loading') }}</span>
-      <n-button v-else data-test="retry-grants" @click="refresh">{{ t('admin.refresh') }}</n-button>
+      <ui-button v-else data-test="retry-grants" @click="refresh">{{ t('admin.refresh') }}</ui-button>
     </template>
     <template v-else>
       <div class="section-header">
         <h4>{{ t('admin.assignedScopes') }}</h4>
-        <n-button data-test="choose-scope" :disabled="busy" @click="chooseScope">{{ t('admin.chooseScope') }}</n-button>
+        <ui-button data-test="choose-scope" :disabled="busy" @click="chooseScope">{{ t('admin.chooseScope') }}</ui-button>
       </div>
-      <ul class="scope-list">
+      <ul v-if="groups.length" class="scope-list">
         <li v-for="group in groups" :key="scopeKey(group.scope)">
           <button v-if="group.scope.level" type="button" data-test="open-scope" :aria-pressed="sameScope(group.scope, scope) && !choosing"
             :disabled="busy" @click="openScope(group.scope)">
@@ -20,6 +20,7 @@
           <div v-else class="unknown"><strong>{{ t('admin.otherGrants') }}</strong><span>{{ t('admin.readOnly') }}</span></div>
         </li>
       </ul>
+      <p v-else class="scope-caption">{{ t('admin.noPrivileges') }}</p>
       <form v-if="choosing" class="scope-picker" @submit.prevent="openDraftScope">
         <label>{{ t('admin.scope') }}
           <select v-model="draftLevel" data-test="scope-level">
@@ -42,13 +43,13 @@
           <input v-model="draftTable" data-test="scope-table" list="grant-tables" required autocomplete="off" :placeholder="t('admin.exactName')">
           <datalist id="grant-tables"><option v-for="table in tables" :key="table" :value="table"/></datalist>
         </label>
-        <n-button v-if="databasePatterns && username && ['database', 'databasePattern'].includes(draftLevel)"
-          data-test="username-database-pattern" class="username-pattern" @click="useUsernamePattern">{{ t('admin.usernameDatabasePattern', { pattern: usernamePattern }) }}</n-button>
+        <ui-button v-if="databasePatterns && username && ['database', 'databasePattern'].includes(draftLevel)"
+          data-test="username-database-pattern" class="username-pattern" @click="useUsernamePattern">{{ t('admin.usernameDatabasePattern', { pattern: usernamePattern }) }}</ui-button>
         <p v-if="draftLevel === 'databasePattern'" id="grant-pattern-help" class="picker-help">{{ t('admin.databasePatternHelp') }}</p>
-        <n-button attr-type="submit" data-test="open-new-scope" :disabled="!validDraft">
+        <ui-button attr-type="submit" data-test="open-new-scope" :disabled="!validDraft">
           {{ t(draftLevel === 'tablePattern' ? 'admin.previewTables' : 'admin.openScope') }}
-        </n-button>
-        <n-button @click="choosing = false">{{ t('admin.cancel') }}</n-button>
+        </ui-button>
+        <ui-button @click="choosing = false">{{ t('admin.cancel') }}</ui-button>
       </form>
       <template v-else-if="scope.level !== 'tablePattern'">
         <div class="section-header">
@@ -95,8 +96,8 @@
           <span v-if="removed.length || removeOption">{{ t('admin.toRevoke') }} · {{ [...removed, ...(removeOption ? ['GRANT OPTION'] : [])].join(', ') }}</span>
         </div>
         <div class="actions">
-          <n-button type="primary" data-test="save-grants" :disabled="busy || !editable || !dirty" @click="save">{{ t('admin.saveGrants') }}</n-button>
-          <n-button v-if="dirty" :disabled="busy" @click="reset">{{ t('admin.cancel') }}</n-button>
+          <ui-button type="primary" data-test="save-grants" :disabled="busy || !editable || !dirty" @click="save">{{ t('admin.saveGrants') }}</ui-button>
+          <ui-button v-if="dirty" :disabled="busy" @click="reset">{{ t('admin.cancel') }}</ui-button>
           <span v-if="saved" role="status">{{ t('admin.saved') }}</span>
         </div>
       </template>
@@ -111,7 +112,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { NButton, useThemeVars } from 'naive-ui'
+import { UiButton } from '../ui'
 import { useI18n } from 'vue-i18n'
 import { api } from '../api/client'
 import { usernamePrefixPattern, validGrantPattern } from '../lib/grantPattern'
@@ -128,7 +129,6 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ busy: [boolean]; dirty: [boolean] }>()
 const { t } = useI18n()
-const theme = useThemeVars()
 const grants = ref<Grant[] | null>(null)
 const scope = ref<Scope>({ level: 'global' })
 const desired = ref<string[]>([])
@@ -325,40 +325,39 @@ onMounted(async () => {
 
 <style scoped>
 .grant-workspace, .scope-picker label, .pending, .scope-list button, .unknown { display: flex; flex-direction: column; gap: 5px; }
-.grant-workspace { gap: 14px; min-width: 0; }
+.grant-workspace { gap: 15px; min-width: 0; padding: clamp(12px, 2vw, 20px); border: 1px solid var(--db-line); border-radius: 11px; background: var(--db-panel); }
 .section-header, .scope-picker, .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .section-header { justify-content: space-between; }
 h4, p { margin: 0; }
 h4 { font-size: 1rem; overflow-wrap: anywhere; }
 .scope-list { list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); padding: 0; margin: 0; gap: 7px; }
-.scope-list button, .unknown { width: 100%; text-align: start; background: transparent; color: inherit; border: 1px solid v-bind('theme.borderColor'); border-radius: 5px; padding: 8px 12px; font: inherit; overflow-wrap: anywhere; }
+.scope-list button, .unknown { width: 100%; text-align: start; background: transparent; color: inherit; border: 1px solid var(--db-line); border-radius: 8px; padding: 8px 12px; font: inherit; overflow-wrap: anywhere; }
 .scope-list button { cursor: pointer; }
-.scope-list button[aria-pressed=true] { border-color: v-bind('theme.primaryColor'); background: color-mix(in srgb, v-bind('theme.primaryColor') 8%, transparent); }
-.scope-list span { font-size: 0.86rem; }
+.scope-list button[aria-pressed=true] { border-color: var(--db-accent); background: color-mix(in srgb, var(--db-accent) 8%, transparent); }
+.scope-list span { font-size: 12px; color: var(--db-muted); }
 .scope-description { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .readonly code { display: block; overflow-wrap: anywhere; }
-.scope-picker { align-items: end; }
+.scope-picker { align-items: end; border-top: 1px solid var(--db-line); padding-top: 14px; }
 .picker-help { flex-basis: 100%; }
-.username-pattern { max-width: 100%; height: auto; min-height: var(--n-height); white-space: normal; overflow-wrap: anywhere; }
-.username-pattern :deep(.n-button__content) { min-width: 0; display: block; padding: 4px 0; }
-input:not([type=checkbox]), select { box-sizing: border-box; min-width: 0; max-width: 100%; padding: 6px 10px; font: inherit; color: v-bind('theme.textColor1'); background: v-bind('theme.inputColor'); border: 1px solid v-bind('theme.borderColor'); border-radius: 4px; }
-select option { color: v-bind('theme.textColor1'); background: v-bind('theme.popoverColor'); }
-:where(input, select, button):focus-visible { outline: 2px solid v-bind('theme.primaryColor'); outline-offset: 2px; }
-.scope-caption { color: v-bind('theme.textColor2'); overflow-wrap: anywhere; }
+.username-pattern { max-width: 100%; height: auto; min-height: 32px; white-space: normal; overflow-wrap: anywhere; }
+select option { color: var(--db-ink); background: var(--db-panel); }
+:where(input, select, button):focus-visible { outline: 2px solid var(--db-accent); outline-offset: 2px; }
+.scope-caption { color: var(--db-muted); overflow-wrap: anywhere; }
 .privilege-groups { display: grid; gap: 10px; }
-.privilege-group { min-width: 0; overflow: hidden; border: 1px solid v-bind('theme.borderColor'); border-radius: 5px; }
-.group-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; padding: 6px 12px; background: v-bind('theme.tableHeaderColor'); color: v-bind('theme.textColor1'); }
+.privilege-group { min-width: 0; overflow: hidden; border: 1px solid var(--db-line); border-radius: 8px; }
+.group-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; padding: 6px 12px; background: var(--db-sidebar); color: var(--db-ink); }
 .group-heading h5 { margin: 0; font-size: 0.94rem; }
 .group-heading .check { font-size: 0.86rem; }
 .privilege-matrix { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(190px, 100%), 1fr)); gap: 1px 12px; padding: 6px 12px; }
 .privilege-matrix label, .check { display: flex; align-items: center; gap: 7px; padding: 3px 0; cursor: pointer; }
-input[type=checkbox] { appearance: none; display: inline-grid; place-content: center; width: 16px; height: 16px; margin: 0; flex: 0 0 auto; border: 1px solid v-bind('theme.iconColor'); border-radius: 3px; background: v-bind('theme.inputColor'); cursor: inherit; }
-input[type=checkbox]:is(:checked, :indeterminate) { background: v-bind('theme.primaryColor'); border-color: v-bind('theme.primaryColor'); }
-input[type=checkbox]:checked::after { content: ''; width: 4px; height: 8px; border: solid v-bind('theme.baseColor'); border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg); }
-input[type=checkbox]:indeterminate::after { content: ''; width: 8px; border-top: 2px solid v-bind('theme.baseColor'); }
 input:disabled { opacity: 0.6; }
-@media (forced-colors: active) { input[type=checkbox] { appearance: auto; } input[type=checkbox]::after { display: none; } }
 .privilege-matrix code { overflow-wrap: anywhere; }
-.pending { border-inline-start: 3px solid v-bind('theme.primaryColor'); padding-inline-start: 10px; overflow-wrap: anywhere; }
-[role=alert] { color: v-bind('theme.errorColor'); }
+.pending { border-inline-start: 3px solid var(--db-accent); padding-inline-start: 10px; overflow-wrap: anywhere; }
+[role=alert] { color: var(--db-danger); }
+@media (max-width: 640px) {
+  .scope-picker { display: grid; grid-template-columns: auto minmax(0, 1fr); }
+  .scope-picker label, .scope-picker .username-pattern, .scope-picker .picker-help { grid-column: 1 / -1; }
+  .scope-picker button { justify-self: start; }
+  .section-header input[type="search"] { width: 100%; }
+}
 </style>

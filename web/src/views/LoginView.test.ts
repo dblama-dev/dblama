@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import { defineComponent, h, nextTick } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { NInput, NNotificationProvider, NSelect } from 'naive-ui'
+import { UiInput, UiNotificationProvider, UiSelect } from '../ui'
 
 import type { DriverMeta } from '../api/types'
 import i18n from '../i18n'
@@ -36,7 +36,7 @@ function res(status: number, body?: unknown): Response {
 // throws without it.
 function mountView(pinia: Pinia) {
   const host = defineComponent({
-    setup: () => () => h(NNotificationProvider, null, { default: () => h(LoginView) }),
+    setup: () => () => h(UiNotificationProvider, null, { default: () => h(LoginView) }),
   })
   return mount(host, { global: { plugins: [pinia, i18n] } })
 }
@@ -65,8 +65,8 @@ describe('LoginView', () => {
 
     const view = wrapper.findComponent(LoginView)
     // СУБД select + host, port, user, password, database inputs.
-    expect(view.findComponent(NSelect).exists()).toBe(true)
-    const inputs = view.findAllComponents(NInput).map((field) => field.find('input'))
+    expect(view.findComponent(UiSelect).exists()).toBe(true)
+    const inputs = view.findAllComponents(UiInput).map((field) => field.find('input'))
     expect(inputs).toHaveLength(5)
     // Persisted driver/host/user come back; password stays empty.
     expect(inputs[0].element.value).toBe('db.local')
@@ -80,13 +80,13 @@ describe('LoginView', () => {
     await flushPromises()
 
     const view = wrapper.findComponent(LoginView)
-    const portInput = view.findAllComponents(NInput)[1].find('input')
+    const portInput = view.findAllComponents(UiInput)[1].find('input')
 
-    await view.findComponent(NSelect).vm.$emit('update:value', 'postgres')
+    await view.findComponent(UiSelect).vm.$emit('update:value', 'postgres')
     await nextTick()
     expect(portInput.attributes('placeholder')).toBe('5432')
 
-    await view.findComponent(NSelect).vm.$emit('update:value', 'mysql')
+    await view.findComponent(UiSelect).vm.$emit('update:value', 'mysql')
     await nextTick()
     expect(portInput.attributes('placeholder')).toBe('3306')
   })
@@ -99,13 +99,13 @@ describe('LoginView', () => {
     await flushPromises()
 
     const view = wrapper.findComponent(LoginView)
-    const inputs = view.findAllComponents(NInput).map((field) => field.find('input'))
+    const inputs = view.findAllComponents(UiInput).map((field) => field.find('input'))
     await inputs[0].setValue('127.0.0.1') // host
     await inputs[1].setValue('13306') // port
     await inputs[2].setValue('root') // user
     await inputs[3].setValue('secret') // password
     await inputs[4].setValue('mydb') // database
-    await view.findComponent(NSelect).vm.$emit('update:value', 'mysql')
+    await view.findComponent(UiSelect).vm.$emit('update:value', 'mysql')
     await nextTick()
 
     await view.find('form').trigger('submit')

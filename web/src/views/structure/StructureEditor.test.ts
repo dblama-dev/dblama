@@ -1,11 +1,11 @@
 import { flushPromises, mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, h, reactive } from 'vue'
 import {
-  NCheckbox,
-  NInput,
-  NNotificationProvider,
-  NSelect,
-} from 'naive-ui'
+  UiCheckbox,
+  UiInput,
+  UiNotificationProvider,
+  UiSelect,
+} from '../../ui'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -79,12 +79,12 @@ function mountEditor(table = 'users', schema?: string): ReturnType<typeof mount>
       defineComponent({
         setup() {
           return () =>
-            h(NNotificationProvider, null, {
+            h(UiNotificationProvider, null, {
               default: () => h(StructureEditor, { db: 'mydb', table }),
             })
         },
       }),
-      { global: { plugins: [pinia, i18n], stubs: { teleport: true } } },
+      { attachTo: document.body, global: { plugins: [pinia, i18n], stubs: { teleport: true } } },
     )
 }
 
@@ -115,11 +115,11 @@ function nameInput(row: DOMWrapper<Element> | VueWrapper) {
 }
 
 function setString(row: DOMWrapper<Element> | VueWrapper, cls: string, value: string): void {
-  field(row, cls).findComponent(NInput).vm.$emit('update:value', value)
+  field(row, cls).findComponent(UiInput).vm.$emit('update:value', value)
 }
 
 function setGenerated(row: DOMWrapper<Element> | VueWrapper, value: string): void {
-  field(row, 'struct-field--generated').findComponent(NSelect).vm.$emit('update:value', value)
+  field(row, 'struct-field--generated').findComponent(UiSelect).vm.$emit('update:value', value)
 }
 
 async function clickSave(wrapper: ReturnType<typeof mount>): Promise<void> {
@@ -138,14 +138,35 @@ afterEach(() => {
 })
 
 describe('StructureEditor', () => {
+  it('offers table engines, index prefixes and MySQL index types only on compatible drivers', async () => {
+    mockBase()
+    const wrapper = await mountLoaded()
+    expect(wrapper.find('.struct-field--engine').exists()).toBe(true)
+    expect(wrapper.find('.index-editor__subpart').exists()).toBe(true)
+    const indexTypes = () => wrapper.get('.struct-field--indextype').findAll('option').map(option => option.text())
+    expect(indexTypes()).toContain('FULLTEXT')
+    useCatalogStore().schemaAware = true
+    await flushPromises()
+    expect(wrapper.find('.struct-field--engine').exists()).toBe(false)
+    expect(wrapper.find('.struct-options .struct-field--collation').exists()).toBe(false)
+    expect(wrapper.find('.struct-options .struct-field--autoinc').exists()).toBe(false)
+    expect(wrapper.find('.struct-options .struct-field--comment').exists()).toBe(true)
+    expect(wrapper.find('.index-editor__subpart').exists()).toBe(false)
+    expect(wrapper.find('.struct-field--unsigned').exists()).toBe(false)
+    expect(wrapper.find('.struct-field--onupdate').exists()).toBe(false)
+    expect(wrapper.find('.struct-field--autoinc').text()).toBe('Автонумерация')
+    expect(indexTypes()).toEqual(['PRIMARY', 'UNIQUE', 'INDEX'])
+    wrapper.unmount()
+  })
+
   it('renders one row per column of the loaded definition', async () => {
     mockBase()
     const wrapper = await mountLoaded()
 
     const names = rows(wrapper).map((r) => nameInput(r).element.value)
     expect(names).toEqual(['id', 'title', 'size'])
-    expect(field(rowByName(wrapper, 'id'), 'struct-field--autoinc').findComponent(NCheckbox).props('checked')).toBe(true)
-    expect(field(rowByName(wrapper, 'title'), 'struct-field--default').findComponent(NInput).props('value')).toBe('untitled')
+    expect(field(rowByName(wrapper, 'id'), 'struct-field--autoinc').findComponent(UiCheckbox).props('checked')).toBe(true)
+    expect(field(rowByName(wrapper, 'title'), 'struct-field--default').findComponent(UiInput).props('value')).toBe('untitled')
     wrapper.unmount()
   })
 
@@ -195,7 +216,7 @@ describe('StructureEditor', () => {
     const added = rows(wrapper)[3]
     setString(added, 'struct-field--name', 'extra')
     setGenerated(added, '') // touch the type select below via its own field
-    field(added, 'struct-field--type').findComponent(NSelect).vm.$emit('update:value', 'text')
+    field(added, 'struct-field--type').findComponent(UiSelect).vm.$emit('update:value', 'text')
     // Raw $emit does not flush the render queue: wait for the save button's
     // disabled state to clear before clicking it.
     await flushPromises()
@@ -233,7 +254,7 @@ describe('StructureEditor', () => {
     await wrapper.get('[data-add-first]').trigger('click')
     const leading = rows(wrapper)[0]
     setString(leading, 'struct-field--name', 'leading')
-    field(leading, 'struct-field--type').findComponent(NSelect).vm.$emit('update:value', 'int')
+    field(leading, 'struct-field--type').findComponent(UiSelect).vm.$emit('update:value', 'int')
     const anchor = rowByName(wrapper, 'FiRsT')
     const insert = anchor.element.parentElement!.querySelector<HTMLButtonElement>('[data-add-after]')!
     expect(insert).toBeTruthy()
@@ -242,7 +263,7 @@ describe('StructureEditor', () => {
     const inserted = rows(wrapper)[3]
     expect(inserted.attributes('open')).toBeDefined()
     setString(inserted, 'struct-field--name', 'inserted')
-    field(inserted, 'struct-field--type').findComponent(NSelect).vm.$emit('update:value', 'text')
+    field(inserted, 'struct-field--type').findComponent(UiSelect).vm.$emit('update:value', 'text')
     await flushPromises()
     await clickSave(wrapper)
     expect(putBodies()[0].columns.map(c => [c.name, c.position, c.afterColumn])).toEqual([
@@ -259,10 +280,10 @@ describe('StructureEditor', () => {
     setString(wrapper, 'struct-field--table-name', 'events')
     await wrapper.get('[data-testid="struct-add"]').trigger('click')
     setString(rows(wrapper)[0], 'struct-field--name', 'value')
-    field(rows(wrapper)[0], 'struct-field--type').findComponent(NSelect).vm.$emit('update:value', 'text')
+    field(rows(wrapper)[0], 'struct-field--type').findComponent(UiSelect).vm.$emit('update:value', 'text')
     await wrapper.get('[data-add-first]').trigger('click')
     setString(rows(wrapper)[0], 'struct-field--name', 'id')
-    field(rows(wrapper)[0], 'struct-field--type').findComponent(NSelect).vm.$emit('update:value', 'int')
+    field(rows(wrapper)[0], 'struct-field--type').findComponent(UiSelect).vm.$emit('update:value', 'int')
     await flushPromises()
     await clickSave(wrapper)
     const body = mockedApi.mock.calls.find(([method]) => method === 'PUT')![2] as TableDef
@@ -273,8 +294,8 @@ describe('StructureEditor', () => {
   it('turns off a loaded auto_increment column with a real click', async () => {
     mockBase()
     const wrapper = await mountLoaded()
-    const toggle = field(rowByName(wrapper, 'id'), 'struct-field--autoinc').find('.n-radio, .n-checkbox')
-    await toggle.trigger('click')
+    const toggle = field(rowByName(wrapper, 'id'), 'struct-field--autoinc').get('input[type=checkbox]')
+    ;(toggle.element as HTMLInputElement).click()
     await clickSave(wrapper)
     expect(putBodies()[0].columns.find(c => c.name === 'id')?.autoIncrement).toBeUndefined()
     wrapper.unmount()
@@ -290,7 +311,7 @@ describe('StructureEditor', () => {
     })
     const wrapper = mountEditor('users', 'public')
     await flushPromises()
-    await field(rowByName(wrapper, 'id'), 'struct-field--autoinc').find('.n-checkbox').trigger('click')
+    ;(field(rowByName(wrapper, 'id'), 'struct-field--autoinc').get('input[type=checkbox]').element as HTMLInputElement).click()
     await clickSave(wrapper)
     const body = mockedApi.mock.calls.find(([method]) => method === 'PUT')![2] as TableDef
     expect(body.columns[0].autoIncrement).toBeUndefined()
@@ -302,12 +323,12 @@ describe('StructureEditor', () => {
     mockBase()
     const wrapper = await mountLoaded()
 
-    const titleCheckbox = field(rowByName(wrapper, 'title'), 'struct-field--autoinc').findComponent(NCheckbox)
+    const titleCheckbox = field(rowByName(wrapper, 'title'), 'struct-field--autoinc').findComponent(UiCheckbox)
     titleCheckbox.vm.$emit('update:checked', true)
     await flushPromises()
 
-    expect(field(rowByName(wrapper, 'title'), 'struct-field--autoinc').findComponent(NCheckbox).props('checked')).toBe(true)
-    expect(field(rowByName(wrapper, 'id'), 'struct-field--autoinc').findComponent(NCheckbox).props('checked')).toBe(false)
+    expect(field(rowByName(wrapper, 'title'), 'struct-field--autoinc').findComponent(UiCheckbox).props('checked')).toBe(true)
+    expect(field(rowByName(wrapper, 'id'), 'struct-field--autoinc').findComponent(UiCheckbox).props('checked')).toBe(false)
 
     await clickSave(wrapper)
     const columns = putBodies()[0].columns
@@ -324,7 +345,7 @@ describe('StructureEditor', () => {
     await flushPromises()
     const added = rows(wrapper)[3]
     setString(added, 'struct-field--name', 'dbl')
-    field(added, 'struct-field--type').findComponent(NSelect).vm.$emit('update:value', 'int')
+    field(added, 'struct-field--type').findComponent(UiSelect).vm.$emit('update:value', 'int')
     setGenerated(added, 'VIRTUAL')
     // The generated select swaps the default field for the expression
     // field via v-if; flush so the new field is in the DOM.
@@ -332,7 +353,7 @@ describe('StructureEditor', () => {
     setString(added, 'struct-field--genexpr', 'id * 2')
     await flushPromises()
 
-    expect(field(added, 'struct-field--nullable').findComponent(NCheckbox).props('disabled')).toBe(true)
+    expect(field(added, 'struct-field--nullable').findComponent(UiCheckbox).props('disabled')).toBe(true)
 
     await clickSave(wrapper)
     const dbl = putBodies()[0].columns.find((c) => c.name === 'dbl')
@@ -357,22 +378,22 @@ describe('StructureEditor', () => {
     const wrapper = mountEditor('users', postgres ? 'public' : undefined)
     await flushPromises()
     const computed = rowByName(wrapper, 'computed')
-    expect(field(computed, 'struct-field--generated').findComponent(NSelect).props('disabled')).toBe(postgres)
-    expect(field(computed, 'struct-field--type').findComponent(NSelect).props('disabled')).toBe(postgres)
-    expect(field(computed, 'struct-field--length').findComponent(NInput).props('readonly')).toBe(postgres)
-    expect(field(computed, 'struct-field--genexpr').findComponent(NInput).props('readonly')).toBe(postgres)
-    expect(field(computed, 'struct-field--nullable').findComponent(NCheckbox).props('disabled')).toBe(!postgres)
-    expect(field(computed, 'struct-field--name').findComponent(NInput).props('disabled')).toBe(false)
+    expect(field(computed, 'struct-field--generated').findComponent(UiSelect).props('disabled')).toBe(postgres)
+    expect(field(computed, 'struct-field--type').findComponent(UiSelect).props('disabled')).toBe(postgres)
+    expect(field(computed, 'struct-field--length').findComponent(UiInput).props('readonly')).toBe(postgres)
+    expect(field(computed, 'struct-field--genexpr').findComponent(UiInput).props('readonly')).toBe(postgres)
+    expect(field(computed, 'struct-field--nullable').findComponent(UiCheckbox).props('disabled')).toBe(!postgres)
+    expect(field(computed, 'struct-field--name').findComponent(UiInput).props('disabled')).toBe(false)
     expect(field(computed, 'struct-field--generated').text().includes(i18n.global.t('structure.savedGenerationHint'))).toBe(postgres)
     const ordinary = rowByName(wrapper, 'title')
-    expect(field(ordinary, 'struct-field--generated').findComponent(NSelect).props('disabled')).toBe(postgres)
-    expect(field(ordinary, 'struct-field--type').findComponent(NSelect).props('disabled')).toBe(false)
+    expect(field(ordinary, 'struct-field--generated').findComponent(UiSelect).props('disabled')).toBe(postgres)
+    expect(field(ordinary, 'struct-field--type').findComponent(UiSelect).props('disabled')).toBe(false)
     await wrapper.get('[data-testid="struct-add"]').trigger('click')
     const added = rows(wrapper).at(-1)!
-    expect(field(added, 'struct-field--generated').findComponent(NSelect).props('disabled')).toBe(false)
+    expect(field(added, 'struct-field--generated').findComponent(UiSelect).props('disabled')).toBe(false)
     setGenerated(added, 'STORED')
     await flushPromises()
-    expect(field(added, 'struct-field--genexpr').findComponent(NInput).props('readonly')).toBe(false)
+    expect(field(added, 'struct-field--genexpr').findComponent(UiInput).props('readonly')).toBe(false)
     wrapper.unmount()
   })
 
@@ -399,7 +420,7 @@ describe('StructureEditor', () => {
     mockBase()
     const wrapper = await mountLoaded()
     async function setMode(name: string, mode: string) {
-      await rowByName(wrapper, name).get('select.default-mode').setValue(mode)
+      await rowByName(wrapper, name).get('.default-mode select').setValue(mode)
     }
     await setMode('id', 'none')
     await setMode('title', 'literal')
@@ -425,7 +446,7 @@ describe('StructureEditor', () => {
     mockBase()
     const wrapper = await mountLoaded()
     const row = rowByName(wrapper, 'title')
-    field(row, 'struct-field--type').findComponent(NSelect).vm.$emit('update:value', type)
+    field(row, 'struct-field--type').findComponent(UiSelect).vm.$emit('update:value', type)
     await flushPromises()
     expect(wrapper.get('[data-testid="struct-save"]').attributes('disabled')).toBeDefined()
     for (const value of ['remove me', "won't trim", '']) {
@@ -447,7 +468,7 @@ describe('StructureEditor', () => {
       wrapper.find('.struct-options'),
       'struct-field--engine',
     )
-      .findComponent(NInput)
+      .findComponent(UiInput)
       .vm.$emit('update:value', 'Aria')
 
     await clickSave(wrapper)
@@ -550,12 +571,12 @@ describe('StructureEditor', () => {
     // until a table name and at least one column exist.
     expect(wrapper.find('[data-testid="struct-save"]').attributes('disabled')).toBeDefined()
 
-    wrapper.find('.struct-field--table-name').findComponent(NInput).vm.$emit('update:value', 'newtbl')
+    wrapper.find('.struct-field--table-name').findComponent(UiInput).vm.$emit('update:value', 'newtbl')
     await wrapper.find('[data-testid="struct-add"]').trigger('click')
     await flushPromises()
     const added = rows(wrapper)[0]
     setString(added, 'struct-field--name', 'id')
-    field(added, 'struct-field--type').findComponent(NSelect).vm.$emit('update:value', 'int')
+    field(added, 'struct-field--type').findComponent(UiSelect).vm.$emit('update:value', 'int')
     await flushPromises()
 
     expect(wrapper.find('[data-testid="struct-save"]').attributes('disabled')).toBeUndefined()
@@ -580,15 +601,15 @@ describe('StructureEditor', () => {
     await wrapper.find('[data-testid="struct-add"]').trigger('click')
     const row = rows(wrapper)[0]
     setString(row, 'struct-field--name', 'id')
-    field(row, 'struct-field--type').findComponent(NSelect).vm.$emit('update:value', 'int')
+    field(row, 'struct-field--type').findComponent(UiSelect).vm.$emit('update:value', 'int')
     await flushPromises()
     const addIndex = wrapper.findAll('button').find(button => button.text() === i18n.global.t('structure.addIndex'))
     expect(addIndex, 'new tables must expose index editing').toBeDefined()
     await addIndex!.trigger('click')
     expect(wrapper.find('[data-testid="struct-save"]').attributes('disabled')).toBeDefined()
     const index = wrapper.find('[data-testid="index-row"]')
-    index.find('.struct-field--indextype').findComponent(NSelect).vm.$emit('update:value', 'PRIMARY')
-    index.find('.struct-field--indexcolumns').findComponent(NSelect).vm.$emit('update:value', ['id'])
+    index.find('.struct-field--indextype').findComponent(UiSelect).vm.$emit('update:value', 'PRIMARY')
+    index.find('.struct-field--indexcolumns').findComponent(UiSelect).vm.$emit('update:value', ['id'])
     await flushPromises()
     await clickSave(wrapper)
     expect(mockedApi).toHaveBeenCalledWith('PUT', '/api/databases/mydb/tables/_new', expect.objectContaining({
@@ -609,12 +630,12 @@ describe('StructureEditor', () => {
       defineComponent({
         setup() {
           return () =>
-            h(NNotificationProvider, null, {
+            h(UiNotificationProvider, null, {
               default: () => h(StructureEditor, { db: state.db, table: state.table }),
             })
         },
       }),
-      { global: { plugins: [pinia, i18n], stubs: { teleport: true } } },
+      { attachTo: document.body, global: { plugins: [pinia, i18n], stubs: { teleport: true } } },
     )
     await flushPromises()
     expect(rows(wrapper)).toHaveLength(3)
@@ -653,10 +674,10 @@ it('uses schema for definitions and writes and hides PostgreSQL column reorderin
 it('keeps pending columns and FK edits when indexes are saved',async()=>{
  mockBase();const wrapper=await mountLoaded()
  const row=rows(wrapper)[1]!
- row.findAllComponents(NInput)[0]!.vm.$emit('update:value','pending_title');await flushPromises()
+ row.findAllComponents(UiInput)[0]!.vm.$emit('update:value','pending_title');await flushPromises()
  const {default:IndexEditor}=await import('./IndexEditor.vue')
  wrapper.findComponent(IndexEditor).vm.$emit('saved');await flushPromises()
- expect(rows(wrapper)[1]!.findAllComponents(NInput)[0]!.props('value')).toBe('pending_title')
+ expect(rows(wrapper)[1]!.findAllComponents(UiInput)[0]!.props('value')).toBe('pending_title')
  wrapper.unmount()
 })
 it('starts existing column editors collapsed with readable overview',async()=>{
@@ -673,7 +694,7 @@ it('does not warn after load, and allows cancelling loss of any dirty section',a
  let guard!: (to:{fullPath:string},from:{fullPath:string})=>boolean
  const pinia=createPinia();setActivePinia(pinia)
  const remove=vi.fn()
- const wrapper=mount(defineComponent({setup:()=>()=>h(NNotificationProvider,null,{default:()=>h(StructureEditor,{db:'mydb',table:'users'})})}),{global:{plugins:[pinia,i18n],provide:{[routerKey as symbol]:{beforeEach:(fn:typeof guard)=>{guard=fn;return remove}}}}})
+ const wrapper=mount(defineComponent({setup:()=>()=>h(UiNotificationProvider,null,{default:()=>h(StructureEditor,{db:'mydb',table:'users'})})}),{global:{plugins:[pinia,i18n],provide:{[routerKey as symbol]:{beforeEach:(fn:typeof guard)=>{guard=fn;return remove}}}}})
  await flushPromises()
  const confirm=vi.spyOn(window,'confirm').mockReturnValue(false)
  expect(guard({fullPath:'/other'},{fullPath:'/structure'})).toBe(true)
@@ -727,11 +748,11 @@ it('keeps an index edit dirty when it was made during an in-flight save',async()
  const {routerKey}=await import('vue-router')
  let guard!: (to:{fullPath:string},from:{fullPath:string})=>boolean
  const pinia=createPinia();setActivePinia(pinia)
- const wrapper=mount(defineComponent({setup:()=>()=>h(NNotificationProvider,null,{default:()=>h(StructureEditor,{db:'mydb',table:'users'})})}),{global:{plugins:[pinia,i18n],provide:{[routerKey as symbol]:{beforeEach:(fn:typeof guard)=>{guard=fn;return ()=>{}}}}}})
+ const wrapper=mount(defineComponent({setup:()=>()=>h(UiNotificationProvider,null,{default:()=>h(StructureEditor,{db:'mydb',table:'users'})})}),{global:{plugins:[pinia,i18n],provide:{[routerKey as symbol]:{beforeEach:(fn:typeof guard)=>{guard=fn;return ()=>{}}}}}})
  await flushPromises()
  const {default:IndexEditor}=await import('./IndexEditor.vue')
  const editor=wrapper.findComponent(IndexEditor)
- const indexName=editor.findComponent(NInput)
+ const indexName=editor.findComponent(UiInput)
  indexName.vm.$emit('update:value','submitted_A');await flushPromises()
  await editor.get('[data-testid=index-save]').trigger('click')
  indexName.vm.$emit('update:value','unsaved_B');await flushPromises()

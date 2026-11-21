@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import { defineComponent, h, nextTick } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { NAlert, NButton, NCheckbox, NNotificationProvider, NSelect } from 'naive-ui'
+import { UiAlert, UiButton, UiCheckbox, UiNotificationProvider, UiSelect } from '../ui'
 
 import type { TableInfo } from '../api/types'
 import i18n from '../i18n'
@@ -63,7 +63,7 @@ function mockFetch(exportResponse: Response): ReturnType<typeof vi.fn> {
 // it with; useNotification throws without it.
 function mountView(pinia: Pinia) {
   const host = defineComponent({
-    setup: () => () => h(NNotificationProvider, null, { default: () => h(ExportView) }),
+    setup: () => () => h(UiNotificationProvider, null, { default: () => h(ExportView) }),
   })
   return mount(host, { global: { plugins: [pinia, i18n] } })
 }
@@ -117,9 +117,9 @@ describe('ExportView', () => {
     await flushPromises()
 
     const view = wrapper.findComponent(ExportView)
-    expect(view.findComponent(NSelect).exists()).toBe(true)
+    expect(view.findComponent(UiSelect).exists()).toBe(true)
     // Include views, DROP/IF NOT EXISTS, gzip and all three objects.
-    const checkboxes = view.findAllComponents(NCheckbox)
+    const checkboxes = view.findAllComponents(UiCheckbox)
     expect(checkboxes).toHaveLength(7)
     expect(view.text()).toContain('DROP IF EXISTS')
     expect(view.text()).toContain('IF NOT EXISTS')
@@ -134,14 +134,14 @@ describe('ExportView', () => {
     const wrapper = mountView(pinia)
     await flushPromises()
     const view = wrapper.findComponent(ExportView)
-    view.findAllComponents(NCheckbox)[4]!.vm.$emit('update:checked', true)
+    view.findAllComponents(UiCheckbox)[4]!.vm.$emit('update:checked', true)
     await flushPromises()
-    expect(view.findAllComponents(NCheckbox)[4]!.props('checked')).toBe(true)
+    expect(view.findAllComponents(UiCheckbox)[4]!.props('checked')).toBe(true)
     const catalog = useCatalogStore()
     catalog.schemaAware = true
     catalog.schema = 'other'
     await flushPromises()
-    expect(view.findAllComponents(NCheckbox)[4]!.props('checked')).toBe(false)
+    expect(view.findAllComponents(UiCheckbox)[4]!.props('checked')).toBe(false)
     expect(fetchMock).toHaveBeenCalledWith('/api/databases/mydb/tables?schema=other', expect.anything())
     wrapper.unmount()
   })
@@ -151,10 +151,10 @@ describe('ExportView', () => {
     await flushPromises()
 
     const view = wrapper.findComponent(ExportView)
-    view.findComponent(NSelect).vm.$emit('update:value', 'csv')
+    view.findComponent(UiSelect).vm.$emit('update:value', 'csv')
     await nextTick()
     // gzip plus the two table checkboxes; the sql-only ones are gone.
-    expect(view.findAllComponents(NCheckbox)).toHaveLength(3)
+    expect(view.findAllComponents(UiCheckbox)).toHaveLength(3)
   })
 
   it('disables submit when more than one table is selected for a delimited format', async () => {
@@ -162,18 +162,18 @@ describe('ExportView', () => {
     await flushPromises()
 
     const view = wrapper.findComponent(ExportView)
-    view.findComponent(NSelect).vm.$emit('update:value', 'csv')
+    view.findComponent(UiSelect).vm.$emit('update:value', 'csv')
     await nextTick()
     // After the csv switch the order is gzip, users, orders.
     // Exactly one table is fine.
-    view.findAllComponents(NCheckbox)[1].vm.$emit('update:checked', true)
+    view.findAllComponents(UiCheckbox)[1].vm.$emit('update:checked', true)
     await nextTick()
-    expect(view.findComponent(NButton).attributes('disabled')).toBeUndefined()
+    expect(view.findComponent(UiButton).attributes('disabled')).toBeUndefined()
 
     // Two tables exceed the one-table limit of delimited dumps.
-    view.findAllComponents(NCheckbox)[2].vm.$emit('update:checked', true)
+    view.findAllComponents(UiCheckbox)[2].vm.$emit('update:checked', true)
     await nextTick()
-    expect(view.findComponent(NButton).attributes('disabled')).toBeDefined()
+    expect(view.findComponent(UiButton).attributes('disabled')).toBeDefined()
     expect(view.text()).toContain('ровно одну таблицу')
   })
 
@@ -182,9 +182,9 @@ describe('ExportView', () => {
     await flushPromises()
 
     const view = wrapper.findComponent(ExportView)
-    view.findComponent(NSelect).vm.$emit('update:value', 'csv')
+    view.findComponent(UiSelect).vm.$emit('update:value', 'csv')
     await nextTick()
-    view.findAllComponents(NCheckbox)[1].vm.$emit('update:checked', true) // users
+    view.findAllComponents(UiCheckbox)[1].vm.$emit('update:checked', true) // users
     await nextTick()
     await view.find('[data-testid="export-submit"]').trigger('click')
     await flushPromises()
@@ -209,8 +209,8 @@ describe('ExportView', () => {
     await flushPromises()
 
     const view = wrapper.findComponent(ExportView)
-    view.findAllComponents(NCheckbox)[1].vm.$emit('update:checked', true) // dropIfExists
-    view.findAllComponents(NCheckbox)[3].vm.$emit('update:checked', true) // gzip
+    view.findAllComponents(UiCheckbox)[1].vm.$emit('update:checked', true) // dropIfExists
+    view.findAllComponents(UiCheckbox)[3].vm.$emit('update:checked', true) // gzip
     await nextTick()
     await view.find('[data-testid="export-submit"]').trigger('click')
     await flushPromises()
@@ -226,8 +226,8 @@ describe('ExportView', () => {
     await flushPromises()
 
     const view = wrapper.findComponent(ExportView)
-    expect(view.findComponent(NAlert).text()).toContain('текущей базы подключения')
-    expect(view.findComponent(NButton).attributes('disabled')).toBeDefined()
+    expect(view.findComponent(UiAlert).text()).toContain('текущей базы подключения')
+    expect(view.findComponent(UiButton).attributes('disabled')).toBeDefined()
   })
 
   it('preselects a route table and permits another MySQL database', async () => {

@@ -1,71 +1,82 @@
 <template>
-  <section class="export-view">
-    <h2>{{ t('export.title') }}</h2>
-
-    <n-alert v-if="dbMismatch" type="warning" data-testid="export-db-mismatch">
+  <section class="export-view db-page tool-workspace">
+    <ToolHeading icon="download" :title="t('export.title')" />
+    <ui-alert v-if="dbMismatch" type="warning" data-testid="export-db-mismatch">
       {{ t('export.dbMismatch') }}
-    </n-alert>
-
-    <p>{{ t('transferWorkflows.context', { db, table: selected.join(', ') || t('transferWorkflows.allTables') }) }}</p>
-    <div class="export-view__form">
-      <label class="export-view__field">
-        <span>{{ t('export.format') }}</span>
-        <n-select
-          v-model:value="format"
-          :options="formatOptions"
-          data-testid="export-format"
-        />
-      </label>
-
-      <label v-if="isSql" class="export-view__field">
-        <span>{{ t('transferWorkflows.mode') }}</span>
-        <n-select v-model:value="mode" :options="modeOptions" data-testid="export-mode" />
-      </label>
-      <p v-if="isSql && mode === 'data' && catalog.schemaAware">{{ t('transferWorkflows.dataDependencies') }}</p>
-      <n-alert v-if="!isSql" type="info">{{ t('transferWorkflows.csvExportEncoding') }}</n-alert>
-      <div v-if="isSql && mode !== 'data'" class="export-view__field">
-        <n-checkbox v-model:checked="includeViews">{{ t('export.includeViews') }}</n-checkbox>
-        <n-checkbox v-model:checked="dropIfExists">{{ t('export.dropIfExists') }}</n-checkbox>
-        <n-checkbox v-model:checked="ifNotExists">{{ t('export.ifNotExists') }}</n-checkbox>
+    </ui-alert>
+    <div class="tool-card export-view__form">
+      <div class="tool-card__body tool-stack">
+        <div class="tool-fields">
+          <label class="tool-field">
+            {{ t('export.format') }}
+            <ui-select v-model:value="format" :options="formatOptions" data-testid="export-format" />
+          </label>
+          <label v-if="isSql" class="tool-field">
+            {{ t('transferWorkflows.mode') }}
+            <ui-select v-model:value="mode" :options="modeOptions" data-testid="export-mode" />
+          </label>
+        </div>
+        <p v-if="isSql && mode === 'data' && catalog.schemaAware" class="tool-note">
+          {{ t('transferWorkflows.dataDependencies') }}
+        </p>
+        <p v-if="!isSql" class="tool-note">{{ t('transferWorkflows.csvExportEncoding') }}</p>
+        <div class="export-view__flags">
+          <template v-if="isSql && mode !== 'data'">
+            <ui-checkbox v-model:checked="includeViews">{{ t('export.includeViews') }}</ui-checkbox>
+            <ui-checkbox v-model:checked="dropIfExists">{{ t('export.dropIfExists') }}</ui-checkbox>
+            <ui-checkbox v-model:checked="ifNotExists">{{ t('export.ifNotExists') }}</ui-checkbox>
+          </template>
+          <ui-checkbox v-model:checked="gzip">{{ t('export.gzip') }}</ui-checkbox>
+        </div>
+        <section class="export-view__tables tool-stack">
+          <div>
+            <h2>{{ t('export.tables') }}</h2>
+            <p v-if="isSql" class="tool-note">{{ t('export.tablesHint') }}</p>
+            <p v-else-if="selected.length !== 1" class="tool-note">{{ t('export.oneTableHint') }}</p>
+          </div>
+          <div class="table-options">
+            <ui-checkbox
+              v-for="table in tableOptions"
+              :key="table.name"
+              :checked="selected.includes(table.name)"
+              @update:checked="(checked: boolean) => toggleTable(table.name, checked)"
+            >
+              {{ table.name }}
+            </ui-checkbox>
+          </div>
+        </section>
       </div>
-      <div class="export-view__field">
-        <n-checkbox v-model:checked="gzip">{{ t('export.gzip') }}</n-checkbox>
-      </div>
-
-      <div class="export-view__field">
-        <span>{{ t('export.tables') }}</span>
-        <span v-if="isSql" class="export-view__hint">{{ t('export.tablesHint') }}</span>
-        <span v-else-if="selected.length !== 1" class="export-view__hint export-view__hint--warn">
-          {{ t('export.oneTableHint') }}
-        </span>
-        <n-checkbox
-          v-for="table in tableOptions"
-          :key="table.name"
-          :checked="selected.includes(table.name)"
-          @update:checked="(checked: boolean) => toggleTable(table.name, checked)"
+      <footer class="tool-card__foot">
+        <ui-button
+          type="primary"
+          :disabled="submitDisabled"
+          :loading="exporting"
+          data-testid="export-submit"
+          @click="submit"
         >
-          {{ table.name }}
-        </n-checkbox>
-      </div>
-
-      <n-button
-        type="primary"
-        :disabled="submitDisabled"
-        :loading="exporting"
-        data-testid="export-submit"
-        @click="submit"
-      >
-        {{ t('export.submit') }}
-      </n-button>
+          <template #icon><UiIcon name="download" /></template>
+          {{ t('export.submit') }}
+        </ui-button>
+        <span class="tool-note transfer-scope">
+          {{
+            t('transferWorkflows.context', {
+              db,
+              table: selected.join(', ') || t('transferWorkflows.allTables'),
+            })
+          }}
+        </span>
+      </footer>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
+import ToolHeading from '../components/ToolHeading.vue'
+import UiIcon from '../components/UiIcon.vue'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
-import { NAlert, NButton, NCheckbox, NSelect, useNotification, type SelectOption } from 'naive-ui'
+import { UiAlert, UiButton, UiCheckbox, UiSelect, useNotification, type SelectOption } from '../ui'
 
 import type { ExportRequest } from '../api/types'
 import { downloadExport } from '../lib/download'
@@ -158,33 +169,35 @@ async function submit(): Promise<void> {
 </script>
 
 <style scoped>
-.export-view {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
 .export-view__form {
+  max-width: 1040px;
+}
+.export-view__flags {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
-  max-width: 480px;
+  gap: 8px 18px;
+  flex-wrap: wrap;
 }
-
-.export-view__field {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
+.export-view__tables {
+  padding-top: 18px;
+  border-top: 1px solid var(--db-line);
 }
-
-.export-view__hint {
-  font-size: 12px;
-  opacity: 0.7;
+.table-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(185px, 100%), 1fr));
+  gap: 8px;
+  max-height: 310px;
+  overflow: auto;
 }
-
-.export-view__hint--warn {
-  color: #d97706;
-  opacity: 1;
+.table-options :deep(.ui-checkbox__label) {
+  font-family: var(--db-mono);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.transfer-scope {
+  overflow-wrap: anywhere;
+}
+@media (pointer: coarse) {
+  .table-options { gap: 2px 8px; }
+  .export-view__form :deep(.ui-checkbox) { min-height: 38px; }
 }
 </style>

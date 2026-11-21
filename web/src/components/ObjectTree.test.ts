@@ -1,7 +1,7 @@
 import { enableAutoUnmount, flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { reactive } from 'vue'
-import { NInput, NSelect, NTree } from 'naive-ui'
+import { UiInput, UiSelect, UiTree } from '../ui'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api/client'
@@ -107,7 +107,7 @@ describe('ObjectTree', () => {
   it('filters tables by a case-insensitive substring', async () => {
     const wrapper = await mountTree()
 
-    const input = wrapper.findComponent(NInput)
+    const input = wrapper.findComponent(UiInput)
     expect(input).toBeTruthy()
     input.vm.$emit('update:value', 'USERS')
     await flushPromises()
@@ -126,7 +126,7 @@ describe('ObjectTree', () => {
       throw new Error(`unexpected url: ${url}`)
     })
     const wrapper = await mountTree()
-    expect(wrapper.findComponent(NSelect).props('value')).toBe('otherdb')
+    expect(wrapper.findComponent(UiSelect).props('value')).toBe('otherdb')
     expect(wrapper.text()).toContain('other_records')
     expect(wrapper.text()).not.toContain('users')
   })
@@ -147,7 +147,7 @@ describe('ObjectTree', () => {
     expect(wrapper.text()).toContain('renamed_records')
     finishList(databasesPayload)
     await flushPromises()
-    expect(wrapper.findComponent(NSelect).props('value')).toBe('renamed')
+    expect(wrapper.findComponent(UiSelect).props('value')).toBe('renamed')
     expect(wrapper.text()).toContain('renamed_records')
     expect(wrapper.text()).not.toContain('users')
   })
@@ -155,7 +155,7 @@ describe('ObjectTree', () => {
   it('pushes /db/{db}/table/{name} when a table node is clicked', async () => {
     const wrapper = await mountTree()
 
-    const tree = wrapper.findComponent(NTree)
+    const tree = wrapper.findComponent(UiTree)
     expect(tree).toBeTruthy()
     tree.vm.$emit('update:selected-keys', ['table:users'])
     await flushPromises()
@@ -173,9 +173,9 @@ describe('ObjectTree', () => {
     mockedApi.mockImplementation(async (_method, path) => path === '/api/schemas' ? { schemas: ['Odd Schema'] } : path === '/api/databases' ? databasesPayload : { tables })
     const wrapper = mount(AppSidebar, { global: { plugins: [i18n], stubs: { RouterLink: RouterLinkStub } } })
     await flushPromises()
-    expect(wrapper.findComponent(NSelect).props('filterable')).toBe(true)
+    expect(wrapper.findComponent(UiSelect).props('filterable')).toBe(true)
     const destinations = wrapper.findAllComponents(RouterLinkStub).map(link => link.props('to'))
-    const groups = wrapper.findComponent(NTree).props('data')
+    const groups = wrapper.findComponent(UiTree).props('data')
     expect(groups?.map(group => group.key)).toEqual(['group:tables', 'group:views'])
     for (const action of ['console', 'search', 'import', 'export']) {
       expect(destinations.filter(to => to === `/db/otherdb/${action}?schema=Odd%20Schema`)).toHaveLength(1)
@@ -205,7 +205,7 @@ describe('ObjectTree', () => {
     // break or truncate the path if pushed raw.
     const wrapper = await mountTree()
 
-    const tree = wrapper.findComponent(NTree)
+    const tree = wrapper.findComponent(UiTree)
     tree.vm.$emit('update:selected-keys', ['table:data 100%'])
     await flushPromises()
 
@@ -216,7 +216,7 @@ describe('ObjectTree', () => {
     const wrapper = await mountTree()
     const catalog = useCatalogStore()
 
-    const select = wrapper.findComponent(NSelect)
+    const select = wrapper.findComponent(UiSelect)
     expect(select).toBeTruthy()
     select.vm.$emit('update:value', 'otherdb')
     await flushPromises()
@@ -240,11 +240,11 @@ describe('ObjectTree', () => {
     const wrapper = await mountTree()
     expect(mockedApi).toHaveBeenCalledWith('GET', '/api/databases/mydb/tables?schema=public')
     expect(wrapper.find('[data-testid="schema-select"]').exists()).toBe(true)
-    wrapper.findAllComponents(NSelect).find(select => select.attributes('data-testid') === 'schema-select')!.vm.$emit('update:value', 'Odd Schema')
+    wrapper.findAllComponents(UiSelect).find(select => select.attributes('data-testid') === 'schema-select')!.vm.$emit('update:value', 'Odd Schema')
     await flushPromises()
     expect(mockedApi).toHaveBeenCalledWith('GET', '/api/databases/mydb/tables?schema=Odd%20Schema')
     expect(mockedApi).toHaveBeenCalledWith('GET', '/api/sequences?schema=Odd%20Schema')
-    wrapper.findComponent(NTree).vm.$emit('update:selected-keys', ['table:users'])
+    wrapper.findComponent(UiTree).vm.$emit('update:selected-keys', ['table:users'])
     await flushPromises()
     expect(pushSpy).toHaveBeenCalledWith('/db/mydb/table/users?schema=Odd%20Schema')
     expect(wrapper.text()).toContain('order_seq')
@@ -260,16 +260,16 @@ describe('ObjectTree', () => {
 it('derives the selected table from navigation and browser history',async()=>{
  route.params={db:'mydb',t:'orders'}
  const wrapper=await mountTree()
- expect(wrapper.findComponent(NTree).props('selectedKeys')).toEqual(['table:orders'])
+ expect(wrapper.findComponent(UiTree).props('selectedKeys')).toEqual(['table:orders'])
  route.params.t='users';await flushPromises()
- expect(wrapper.findComponent(NTree).props('selectedKeys')).toEqual(['table:users'])
+ expect(wrapper.findComponent(UiTree).props('selectedKeys')).toEqual(['table:users'])
  wrapper.unmount()
 })
 it('keeps database selection and catalog unchanged when navigation is cancelled',async()=>{
  const wrapper=await mountTree();mockedApi.mockClear()
  pushSpy.mockResolvedValueOnce({type:4})
- wrapper.findComponent(NSelect).vm.$emit('update:value','otherdb');await flushPromises()
- expect(wrapper.findComponent(NSelect).props('value')).toBe('mydb')
+ wrapper.findComponent(UiSelect).vm.$emit('update:value','otherdb');await flushPromises()
+ expect(wrapper.findComponent(UiSelect).props('value')).toBe('mydb')
  expect(mockedApi).not.toHaveBeenCalledWith('GET','/api/databases/otherdb/tables')
  wrapper.unmount()
 })
@@ -278,7 +278,7 @@ it('keeps schema unchanged when navigation is cancelled',async()=>{
  mockedApi.mockImplementation(async (_method,url)=>url==='/api/databases'?databasesPayload:url==='/api/schemas'?{schemas:['public','other']}:{tables})
  const wrapper=await mountTree();mockedApi.mockClear()
  pushSpy.mockResolvedValueOnce({type:4})
- wrapper.findAllComponents(NSelect).find(select=>select.attributes('data-testid')==='schema-select')!.vm.$emit('update:value','other');await flushPromises()
+ wrapper.findAllComponents(UiSelect).find(select=>select.attributes('data-testid')==='schema-select')!.vm.$emit('update:value','other');await flushPromises()
  expect(useCatalogStore().schema).toBe('public')
  expect(mockedApi).not.toHaveBeenCalledWith('GET','/api/databases/mydb/tables?schema=other')
  wrapper.unmount()

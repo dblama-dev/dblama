@@ -1,7 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, h, reactive } from 'vue'
-import { NNotificationProvider, NTabs } from 'naive-ui'
+import { UiNotificationProvider } from '../ui'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
 import { useCatalogStore } from '../stores/catalog'
@@ -20,11 +20,12 @@ it('scopes rows, keys and writes to the schema and reloads when it changes', asy
   const pinia = createPinia(); setActivePinia(pinia)
   const catalog = useCatalogStore(); catalog.schemaAware = true; catalog.schema = 'Odd Schema'
   vi.mocked(api).mockImplementation(async (_method, path) => {
+    if (/\/tables(?:\?|$)/.test(path)) return { tables: [] }
     if (path.includes('/pk')) return { columns: ['id'] }
     if (path.includes('/rows')) return { columns: [], rows: [], totalRows: 0 }
     return { columns: [], indexes: [], foreignKeys: [], options: {} }
   })
-  const wrapper = mount(defineComponent({ setup: () => () => h(NNotificationProvider, null, { default: () => h(TableView) }) }), { global: { plugins: [pinia, i18n], stubs: { DataGrid: true, RowModal: true } } })
+  const wrapper = mount(defineComponent({ setup: () => () => h(UiNotificationProvider, null, { default: () => h(TableView) }) }), { global: { plugins: [pinia, i18n], stubs: { DataGrid: true, RowModal: true } } })
   await flushPromises()
   expect(api).toHaveBeenCalledWith('GET', '/api/databases/app/tables/items/pk?schema=Odd%20Schema')
   expect(api).toHaveBeenCalledWith('GET', expect.stringMatching(/\/rows\?.*schema=Odd%20Schema/))
@@ -41,18 +42,37 @@ it('scopes rows, keys and writes to the schema and reloads when it changes', asy
 function openTable() {
  const pinia = createPinia(); setActivePinia(pinia)
  vi.mocked(api).mockImplementation(async (_method, path) => {
+  if (/\/tables(?:\?|$)/.test(path)) return { tables: [] }
   if (path.includes('/create-sql')) return { sql: 'CREATE TABLE visible (id int)' }
   if (path.includes('/pk')) return { columns: ['id'] }
   if (path.includes('/rows')) return { columns: [], rows: [], totalRows: 0 }
   return { columns: [], indexes: [], foreignKeys: [], options: {} }
  })
- return mount(defineComponent({ setup: () => () => h(NNotificationProvider, null, { default: () => h(TableView) }) }), { global: { plugins: [pinia, i18n], stubs: { DataGrid: true, RowModal: true, StructureEditor: true } } })
+ return mount(defineComponent({ setup: () => () => h(UiNotificationProvider, null, { default: () => h(TableView) }) }), { global: { plugins: [pinia, i18n], stubs: { DataGrid: true, RowModal: true, StructureEditor: true } } })
 }
+it('shows catalog details on a direct table link without mounting the sidebar', async () => {
+ const pinia = createPinia()
+ const catalog = useCatalogStore(pinia)
+ catalog.schemaAware = true
+ catalog.schema = 'Odd Schema'
+ vi.mocked(api).mockImplementation(async (_method, path) => {
+  if (path === '/api/databases/app/tables?schema=Odd%20Schema') {
+   return { tables: [{ name: 'items', comment: 'Inventory ledger', isView: false }] }
+  }
+  return { columns: [], rows: [], totalRows: 0 }
+ })
+ const wrapper = mount(defineComponent({ setup: () => () => h(UiNotificationProvider, null, { default: () => h(TableView) }) }), {
+  global: { plugins: [pinia, i18n], stubs: { DataGrid: true, RowModal: true } },
+ })
+ await flushPromises()
+ expect(wrapper.get('header').text()).toContain('Inventory ledger')
+ wrapper.unmount()
+})
 it('opens SQL from the URL and retains schema when changing sections', async () => {
  route.query = { view: 'sql', schema: 'Odd Schema' }
  const wrapper = openTable(); await flushPromises()
  expect(wrapper.get('pre code').text()).toContain('CREATE TABLE visible')
- wrapper.findComponent(NTabs).vm.$emit('update:value', 'structure'); await flushPromises()
+ await wrapper.get('[data-section=structure]').trigger('click'); await flushPromises()
  expect(push).toHaveBeenCalledWith({ query: { view: 'structure', schema: 'Odd Schema' } })
  wrapper.unmount()
 })
@@ -119,9 +139,9 @@ it('restores linked columns in table order and exports exactly those columns wit
  catalog.schemaAware = true
  catalog.schema = 'part one'
  const columns = [{ name: 'id', type: 'int', nullable: false }, { name: 'label, %', type: 'text', nullable: true }]
- vi.mocked(api).mockImplementation(async (_method, path) => path.includes('/pk') ? { columns: ['id'] } : { columns, rows: [[6, 'row']], totalRows: 1 })
+ vi.mocked(api).mockImplementation(async (_method, path) => /\/tables(?:\?|$)/.test(path) ? { tables: [] } : path.includes('/pk') ? { columns: ['id'] } : { columns, rows: [[6, 'row']], totalRows: 1 })
  const exportFile = vi.spyOn(download, 'downloadExport').mockResolvedValue()
- const wrapper = mount(defineComponent({ setup: () => () => h(NNotificationProvider, null, { default: () => h(TableView) }) }), { global: { plugins: [pinia, i18n], stubs: { DataGrid: true, RowModal: true } } })
+ const wrapper = mount(defineComponent({ setup: () => () => h(UiNotificationProvider, null, { default: () => h(TableView) }) }), { global: { plugins: [pinia, i18n], stubs: { DataGrid: true, RowModal: true } } })
  try {
   await flushPromises()
   const grid = wrapper.findComponent(DataGrid)
@@ -157,7 +177,7 @@ it('waits for full defaults before opening insert',async()=>{
  const wrapper=openTable();await flushPromises()
  let finish!: (value:unknown)=>void
  vi.mocked(api).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}))
- wrapper.findComponent(DataGrid).vm.$emit('add-row');await flushPromises()
+ await wrapper.get('[data-testid=table-add-row]').trigger('click');await flushPromises()
  expect(wrapper.findComponent(RowModal).props('show')).toBe(false)
  finish({columns:[{name:'status',type:'text',nullable:false,default:{value:'active'}}],foreignKeys:[]});await flushPromises()
  expect(wrapper.findComponent(RowModal).props('show')).toBe(true)
@@ -189,11 +209,12 @@ it('keeps delayed primary keys when route filters change during initial loading'
  const pinia=createPinia();setActivePinia(pinia)
  let finishKeys!:(value:unknown)=>void
  vi.mocked(api).mockImplementation(async (_method,path)=>{
+  if (/\/tables(?:\?|$)/.test(path)) return { tables: [] }
   if(path.includes('/pk'))return new Promise(resolve=>{finishKeys=resolve})
   if(path.includes('/rows'))return {columns:[],rows:[],totalRows:0}
   return {columns:[],foreignKeys:[]}
  })
- const wrapper=mount(defineComponent({setup:()=>()=>h(NNotificationProvider,null,{default:()=>h(TableView)})}),{global:{plugins:[pinia,i18n],stubs:{DataGrid:true,RowModal:true}}})
+ const wrapper=mount(defineComponent({setup:()=>()=>h(UiNotificationProvider,null,{default:()=>h(TableView)})}),{global:{plugins:[pinia,i18n],stubs:{DataGrid:true,RowModal:true}}})
  await flushPromises()
  route.query={filters:JSON.stringify([{column:'name',op:'=',value:'changed'}])};await flushPromises()
  finishKeys({columns:['id']});await flushPromises()
@@ -213,17 +234,17 @@ it('does not open insert if leaving a dirty structure section was cancelled',asy
  route.query={view:'structure'}
  const wrapper=openTable();await flushPromises();vi.mocked(api).mockClear()
  push.mockResolvedValueOnce({type:4})
- const add=wrapper.findAll('button').find(button=>button.text()==='Вставить')!
+ const add=wrapper.get('[data-testid=table-add-row]')
  await add.trigger('click');await flushPromises()
  expect(wrapper.findComponent(RowModal).props('show')).toBe(false)
  expect(api).not.toHaveBeenCalled();wrapper.unmount()
 })
-it('opens insert from the data grid without a duplicate toolbar action or navigation', async () => {
+it('opens insert from the single table header action without changing navigation', async () => {
   route.query = { view: 'data' }
   const wrapper = openTable()
   await flushPromises()
-  expect(wrapper.get('.table-view__actions').text()).not.toContain('Вставить')
-  wrapper.getComponent(DataGrid).vm.$emit('add-row')
+  expect(wrapper.get('h1').text()).toBe('items')
+  await wrapper.get('[data-testid=table-add-row]').trigger('click')
   await flushPromises()
   expect(wrapper.getComponent(RowModal).props('show')).toBe(true)
   expect(push).not.toHaveBeenCalled()

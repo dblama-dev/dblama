@@ -1,4 +1,4 @@
-import { dbPath, expect, test } from './fixtures'
+import { dbPath, expect, runSQL, test } from './fixtures'
 
 test('sidebar database search, scoped tools, resizing and mobile navigation', async ({ page, db, engine }) => {
   const scope = engine === 'postgres' ? '?schema=public' : ''
@@ -7,9 +7,9 @@ test('sidebar database search, scoped tools, resizing and mobile navigation', as
   const picker = sidebar.getByTestId('database-select')
   await picker.click()
   await picker.locator('input').fill('no-matching-database-123')
-  await expect(page.locator('.n-base-select-option:visible')).toHaveCount(0)
+  await expect(page.locator('.ui-select__option:visible')).toHaveCount(0)
   await picker.locator('input').fill(db)
-  await page.locator('.n-base-select-option:visible').getByText(db, { exact: true }).click()
+  await page.locator('.ui-select__option:visible').getByText(db, { exact: true }).click()
   const tools = sidebar.getByRole('navigation', { name: 'Database tools' })
   const sql = tools.getByRole('link', { name: 'SQL query', exact: true })
   await expect(sql).toHaveAttribute('href', dbPath(db, 'console') + scope)
@@ -32,6 +32,7 @@ test('sidebar database search, scoped tools, resizing and mobile navigation', as
   await expect(handle).toHaveAttribute('aria-valuenow', '380')
 
   await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.locator('.breadcrumbs [aria-current="page"]:visible')).toHaveText(db)
   await page.getByRole('button', { name: 'Expand sidebar' }).click()
   await expect(sidebar).toBeVisible()
   const box = await sidebar.boundingBox()
@@ -47,4 +48,28 @@ test('sidebar database search, scoped tools, resizing and mobile navigation', as
   await expect(sidebar.getByText('Другие инструменты', { exact: true })).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(sidebar).toHaveCount(0)
+})
+
+
+test('quick search opens a scoped table with the sidebar collapsed', async ({ page, db, prefix, engine }) => {
+  const table = prefix + '_lookup'
+  const scope = engine === 'postgres' ? '?schema=public' : ''
+  await runSQL(page, `CREATE TABLE ${table} (id INTEGER PRIMARY KEY)`)
+  try {
+    await page.getByRole('button', { name: 'Collapse sidebar' }).click()
+    // A reload empties the Pinia catalog. Search must work independently of the tree.
+    await page.reload()
+    await expect(page.locator('.app-sidebar')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Quick search' }).waitFor()
+    await page.keyboard.press('Control+k')
+    const dialog = page.locator('.jump-card')
+    const input = dialog.getByRole('searchbox', { name: 'Quick search' })
+    await input.fill(table)
+    await expect(dialog.getByRole('button', { name: table + ' Tables' })).toBeVisible()
+    await input.press('Enter')
+    await expect(page).toHaveURL(dbPath(db, 'table/' + table) + scope)
+    await expect(page.locator('.breadcrumbs [aria-current="page"]')).toHaveText(table)
+  } finally {
+    await runSQL(page, `DROP TABLE ${table}`)
+  }
 })

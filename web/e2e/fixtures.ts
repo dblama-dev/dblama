@@ -12,19 +12,24 @@ export function tablePath(db: string, table: string, view = 'data'): string {
   return `${dbPath(db, `table/${encodeURIComponent(table)}`)}?view=${view}`
 }
 export async function selectOption(page: Page, control: Locator, text: string): Promise<void> {
+  const select = control.locator('select')
+  if (await select.count()) {
+    await select.selectOption({ label: text })
+    return
+  }
   await control.click()
   const search = control.locator('input')
   if (await search.count()) await search.fill(text)
-  await page.locator('.n-base-select-option:visible').filter({ has: page.getByText(text, { exact: true }) }).click()
+  await page.locator('.ui-select__option:visible').filter({ has: page.getByText(text, { exact: true }) }).click()
   await page.keyboard.press('Escape')
-  await expect(page.locator('.n-base-select-menu:visible')).toHaveCount(0)
+  await expect(page.locator('.ui-select__list:visible')).toHaveCount(0)
 }
 export async function login(page: Page, password = process.env.E2E_DB_PASSWORD ?? 'e2e-password', dbName = database): Promise<void> {
   await page.goto('/login')
   const form = page.locator('.login-view')
-  await selectOption(page, form.locator('.n-select'), { mysql: 'MySQL', mariadb: 'MariaDB', postgres: 'PostgreSQL' }[engine])
-  const inputs = form.locator('input.n-input__input-el')
-  // NSelect's search input is not an NInput; these are the five text connection fields.
+  await selectOption(page, form.locator('.ui-select'), { mysql: 'MySQL', mariadb: 'MariaDB', postgres: 'PostgreSQL' }[engine])
+  const inputs = form.locator('input.ui-input__control')
+  // UiSelect's search input is not an UiInput; these are the five text connection fields.
   await inputs.nth(0).fill(process.env.E2E_DB_HOST ?? '127.0.0.1')
   await inputs.nth(1).fill(process.env.E2E_DB_PORT!)
   await inputs.nth(2).fill(process.env.E2E_DB_USER ?? (engine === 'postgres' ? 'postgres' : 'root'))
@@ -58,7 +63,11 @@ export const test = base.extend<{ db: string; engine: Engine; prefix: string }>(
     await expect(page).toHaveURL(/\/server$/)
     const errors: string[] = []
     page.on('pageerror', error => errors.push(error.message))
-    await use(page)
-    expect(errors, 'uncaught browser errors').toEqual([])
+    try {
+      await use(page)
+      expect(errors, 'uncaught browser errors').toEqual([])
+    } finally {
+      await page.request.delete('/api/session', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+    }
   },
 })

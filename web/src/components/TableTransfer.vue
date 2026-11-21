@@ -1,21 +1,21 @@
 <template>
   <section v-if="enabled && (tables.length || completedTarget)" class="table-transfer">
-    <n-space>
-      <n-button v-if="tables.length" :disabled="busy" @click="open('copy')">{{ t('databaseOps.copyTables') }}</n-button>
-      <n-button v-if="tables.length" :disabled="busy" @click="open('move')">{{ t('databaseOps.moveTables') }}</n-button>
-      <n-button v-if="completedTarget" @click="openTarget">{{ t('databaseOps.openTarget') }}</n-button>
-    </n-space>
+    <div class="db-toolbar">
+      <ui-button v-if="tables.length" size="small" :disabled="busy" :aria-expanded="action === 'copy'" @click="open('copy')">{{ t('databaseOps.copyTables') }}</ui-button>
+      <ui-button v-if="tables.length" size="small" :disabled="busy" :aria-expanded="action === 'move'" @click="open('move')">{{ t('databaseOps.moveTables') }}</ui-button>
+      <ui-button size="small" v-if="completedTarget" @click="openTarget">{{ t('databaseOps.openTarget') }}</ui-button>
+    </div>
     <form v-if="action && tables.length" class="transfer-form" @submit.prevent="submit">
-      <span>{{ t('databaseOps.selected', { count: tables.length }) }}</span>
-      <n-alert type="info">{{ t('databaseOps.transferWarning') }}</n-alert>
-      <n-alert v-if="action === 'move'" type="warning">{{ t('databaseOps.moveWarning') }}</n-alert>
+      <strong>{{ t(action === 'copy' ? 'databaseOps.copyTables' : 'databaseOps.moveTables') }}</strong>
+      <ui-alert type="info">{{ t('databaseOps.transferWarning') }}</ui-alert>
+      <ui-alert v-if="action === 'move'" type="warning">{{ t('databaseOps.moveWarning') }}</ui-alert>
       <label :for="targetID">{{ t('databaseOps.target') }}</label>
-      <n-select :input-props="{ id: targetID }" v-model:value="target" :options="targets" :loading="loading" :disabled="busy" filterable />
-      <n-alert v-if="error" type="error" role="alert">{{ error }}</n-alert>
-      <n-space>
-        <n-button attr-type="submit" type="primary" :disabled="!target || !tables.length || loading || busy" :loading="busy">{{ t(`databaseOps.${action}`) }}</n-button>
-        <n-button :disabled="busy" @click="action = null">{{ t('databaseOps.cancel') }}</n-button>
-      </n-space>
+      <ui-select :input-props="{ id: targetID }" v-model:value="target" :options="targets" :loading="loading" :disabled="busy" filterable />
+      <ui-alert v-if="error" type="error" role="alert">{{ error }}</ui-alert>
+      <div class="db-toolbar">
+        <ui-button attr-type="submit" type="primary" :disabled="!target || !tables.length || loading || busy" :loading="busy">{{ t(`databaseOps.${action}`) }}</ui-button>
+        <ui-button :disabled="busy" @click="action = null">{{ t('databaseOps.cancel') }}</ui-button>
+      </div>
     </form>
   </section>
 </template>
@@ -23,7 +23,7 @@
 import { computed, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { NAlert, NButton, NSelect, NSpace } from 'naive-ui'
+import { UiAlert, UiButton, UiSelect } from '../ui'
 import { api } from '../api/client'
 import { useSessionStore } from '../stores/session'
 import { transferTables } from '../lib/databaseOps'
@@ -73,5 +73,5 @@ function openTarget(): void { void router.push({ name: 'db', params: { db: compl
 </script>
 <style scoped>
 .table-transfer, .transfer-form { display: flex; flex-direction: column; gap: 12px; }
-.transfer-form { max-width: 640px; padding: 16px; border: 1px solid var(--n-border-color, #8885); border-radius: 6px; }
+.transfer-form { max-width: 640px; padding: 16px; border: 1px solid var(--db-line, #8885); border-radius: 6px; }
 </style>

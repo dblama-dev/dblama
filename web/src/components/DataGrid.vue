@@ -1,38 +1,46 @@
 <template>
   <div class="datagrid">
-    <n-alert v-if="!hasPk" type="warning" :show-icon="false" class="datagrid__no-pk">
+    <ui-alert v-if="!hasPk" type="warning" class="datagrid__no-pk">
       {{ t('grid.noPk') }}
-    </n-alert>
+    </ui-alert>
 
     <div class="datagrid__toolbar">
-      <n-button size="small" type="primary" @click="emit('add-row')">
-        {{ t('grid.addRow') }}
-      </n-button>
-      <n-popconfirm v-if="checkedKeys.length > 0" @positive-click="onDeleteSelected">
+      <ui-button size="small" class="datagrid__filter-toggle" :type="filters.length ? 'primary' : 'default'" :secondary="!!filters.length"
+        :aria-expanded="filtersOpen" :aria-controls="filterID" @click="filtersOpen = !filtersOpen">
+        <template #icon><UiIcon name="filter" /></template>
+        {{ t('grid.filters') }}<span v-if="filters.length">&nbsp;({{ filters.length }})</span>
+      </ui-button>
+      <ui-button ref="columnTrigger" size="small" data-testid="grid-columns"
+        :aria-expanded="choosingColumns" :aria-controls="columnChooserID"
+        :disabled="!columns.length" @click="toggleColumnChooser">
+        <template #icon><UiIcon name="columns" /></template>
+        {{ t('structure.columns') }}
+        <span v-if="visibleMetadata.length !== columns.length" class="datagrid__column-count">{{ visibleMetadata.length }} / {{ columns.length }}</span>
+      </ui-button>
+      <ui-button size="small" class="datagrid__export" data-testid="grid-export"
+        :title="t('rowWorkflows.exportVisible')" :disabled="loading || !visibleMetadata.length" @click="emit('export-selection')">
+        <template #icon><UiIcon name="download" /></template>{{ t('rowWorkflows.csv') }}
+      </ui-button>
+      <ui-button size="small" :title="t('grid.refresh')" :aria-label="t('grid.refresh')" @click="emit('refresh')">
+        <template #icon><UiIcon name="refresh" /></template>
+      </ui-button>
+    </div>
+
+    <div v-if="checkedKeys.length" class="datagrid__selection">
+      <ui-popconfirm @positive-click="onDeleteSelected">
         <template #trigger>
-          <n-button size="small" type="error">
+          <ui-button size="small" type="error">
             {{ t('grid.deleteSelected') }} ({{ checkedKeys.length }})
-          </n-button>
+          </ui-button>
         </template>
         {{ t('grid.confirmDelete') }} {{ tableName }} ({{ checkedKeys.length }})
-      </n-popconfirm>
-      <n-popconfirm v-if="checkedKeys.length > 0" @positive-click="copySelected">
-        <template #trigger><n-button size="small">{{ t('grid.copySelected') }} ({{ checkedKeys.length }})</n-button></template>
+      </ui-popconfirm>
+      <ui-popconfirm @positive-click="copySelected">
+        <template #trigger><ui-button size="small">{{ t('grid.copySelected') }} ({{ checkedKeys.length }})</ui-button></template>
         {{ t('grid.copyConfirm') }}
-      </n-popconfirm>
-      <n-button v-if="checkedKeys.length" size="small" :disabled="!canBulkEdit" @click="editSelected">{{ t('navigationWorkflows.editSelected') }} ({{ checkedKeys.length }})</n-button>
+      </ui-popconfirm>
+      <ui-button size="small" :disabled="!canBulkEdit" @click="editSelected">{{ t('navigationWorkflows.editSelected') }} ({{ checkedKeys.length }})</ui-button>
       <small v-if="checkedKeys.length && !canBulkEdit" data-bulk-edit-unavailable>{{ t('navigationWorkflows.bulkNeedsPk') }}</small>
-      <n-button size="small" quaternary @click="emit('refresh')">
-        {{ t('grid.refresh') }}
-      </n-button>
-      <n-button
-        ref="columnTrigger" size="small" data-testid="grid-columns"
-        :aria-expanded="choosingColumns" :aria-controls="columnChooserID"
-        :disabled="!columns.length" @click="toggleColumnChooser"
-      >
-        {{ t('structure.columns') }} <span v-if="visibleMetadata.length !== columns.length" class="datagrid__column-count">{{ visibleMetadata.length }} / {{ columns.length }}</span>
-      </n-button>
-      <n-button size="small" data-testid="grid-export" :disabled="loading || !visibleMetadata.length" @click="emit('export-selection')">{{ t('rowWorkflows.exportVisible') }}</n-button>
     </div>
 
     <form
@@ -44,7 +52,7 @@
         <strong>{{ t('rowWorkflows.visibleColumns') }}</strong>
         <span>{{ t('rowWorkflows.chosenCount', { chosen: columnDraft.length, total: columns.length }) }}</span>
       </div>
-      <n-input v-if="columns.length > 8" v-model:value="columnSearch" size="small" clearable :input-props="{ 'aria-label': t('rowWorkflows.findColumn') }" :placeholder="t('rowWorkflows.findColumn')" />
+      <ui-input v-if="columns.length > 8" v-model:value="columnSearch" size="small" clearable :input-props="{ 'aria-label': t('rowWorkflows.findColumn') }" :placeholder="t('rowWorkflows.findColumn')" />
       <div class="datagrid__chooser-list">
         <label v-for="column in matchingColumns" :key="column.name">
           <input v-model="columnDraft" type="checkbox" :value="column.name">
@@ -54,38 +62,34 @@
       </div>
       <div class="datagrid__chooser-footer">
         <div class="datagrid__chooser-shortcuts">
-          <n-button size="small" quaternary data-testid="show-all-columns" :disabled="columnDraft.length === columns.length" @click="columnDraft = columns.map(col => col.name)">{{ t('rowWorkflows.showAllColumns') }}</n-button>
-          <n-button size="small" quaternary data-testid="clear-columns" :disabled="!columnDraft.length" @click="columnDraft = []">{{ t('rowWorkflows.clearColumns') }}</n-button>
+          <ui-button size="small" quaternary data-testid="show-all-columns" :disabled="columnDraft.length === columns.length" @click="columnDraft = columns.map(col => col.name)">{{ t('rowWorkflows.showAllColumns') }}</ui-button>
+          <ui-button size="small" quaternary data-testid="clear-columns" :disabled="!columnDraft.length" @click="columnDraft = []">{{ t('rowWorkflows.clearColumns') }}</ui-button>
         </div>
-        <n-button size="small" @click="closeColumnChooser">{{ t('row.cancel') }}</n-button>
-        <n-button attr-type="submit" size="small" type="primary" data-testid="apply-columns" :disabled="!columnDraft.length">{{ t('grid.apply') }}</n-button>
+        <ui-button size="small" @click="closeColumnChooser">{{ t('row.cancel') }}</ui-button>
+        <ui-button attr-type="submit" size="small" type="primary" data-testid="apply-columns" :disabled="!columnDraft.length">{{ t('grid.apply') }}</ui-button>
       </div>
     </form>
-    <n-alert v-if="columns.length && !visibleMetadata.length" type="warning" :show-icon="false">{{ t('rowWorkflows.columnsMissing') }}</n-alert>
+    <ui-alert v-if="columns.length && !visibleMetadata.length" type="warning">{{ t('rowWorkflows.columnsMissing') }}</ui-alert>
 
-    <button class="datagrid__filter-toggle" type="button" :aria-expanded="mobileFiltersOpen" :aria-controls="filterID" @click="mobileFiltersOpen = !mobileFiltersOpen">
-      {{ t('grid.filters') }}<span v-if="filters.length"> ({{ filters.length }})</span>
-    </button>
-    <div :id="filterID" class="datagrid__filters" :class="{ 'datagrid__filters--open': mobileFiltersOpen }">
-      <span class="datagrid__filters-label">{{ t('grid.filters') }}</span>
+    <div :id="filterID" class="datagrid__filters" :hidden="!filtersOpen">
       <div v-for="(draft, i) in drafts" :key="i" class="datagrid__filter">
-        <n-select
+        <ui-select
           :aria-label="t('navigationWorkflows.filterColumn')"
           v-model:value="draft.column"
           size="small"
           clearable
-          :placeholder="t('grid.filters')"
+          :placeholder="t('navigationWorkflows.filterColumn')"
           :options="columnOptions"
           class="datagrid__filter-column"
         />
-        <n-select
+        <ui-select
           :aria-label="t('navigationWorkflows.filterOperator')"
           v-model:value="draft.op"
           size="small"
           :options="operatorOptions"
           class="datagrid__filter-op"
         />
-        <n-input
+        <ui-input
           :aria-label="t('navigationWorkflows.filterValue')"
           @keydown.enter="applyFilters"
           v-model:value="draft.value"
@@ -93,69 +97,75 @@
           :disabled="isNullOperator(draft.op)"
           class="datagrid__filter-value"
         />
-        <n-button :aria-label="t('navigationWorkflows.removeFilter')" size="tiny" quaternary @click="removeDraft(i)">×</n-button>
+        <ui-button :aria-label="t('navigationWorkflows.removeFilter')" size="tiny" quaternary @click="removeDraft(i)">×</ui-button>
       </div>
-      <n-button :aria-label="t('navigationWorkflows.addFilter')" size="small" dashed @click="addDraft">+</n-button>
-      <n-button size="small" @click="applyFilters">{{ t('grid.apply') }}</n-button>
-      <n-button size="small" quaternary @click="resetFilters">{{ t('grid.reset') }}</n-button>
+      <div class="datagrid__filter-controls">
+        <ui-button :aria-label="t('navigationWorkflows.addFilter')" size="small" quaternary @click="addDraft">
+          <template #icon><UiIcon name="plus" :size="14" /></template>{{ t('navigationWorkflows.addFilter') }}
+        </ui-button>
+      <ui-button size="small" type="primary" @click="applyFilters">{{ t('grid.apply') }}</ui-button>
+      <ui-button size="small" quaternary @click="resetFilters">{{ t('grid.reset') }}</ui-button>
+      </div>
     </div>
 
-    <details v-if="statement" class="datagrid__statement">
-      <summary>{{ t('grid.browseSQL') }}</summary>
-      <pre tabindex="0">{{ statement.sql }}</pre>
-      <span>{{ t('grid.parameters') }}</span> <output>{{ JSON.stringify(statement.parameters) }}</output>
-    </details>
-    <div class="datagrid__pagination"><span>{{ t('grid.total') }}: {{ totalRows }}</span><n-pagination v-bind="pagination" @update:page="onPage" @update:page-size="onPageSize" /></div>
-    <n-data-table v-if="!columns.length || visibleMetadata.length"
-      remote
+    <div class="datagrid__surface">
+    <ui-data-table v-if="!columns.length || visibleMetadata.length"
       size="small"
       :columns="gridColumns"
       :data="tableData"
       :loading="loading"
       :row-key="rowKey"
-      :pagination="pagination"
       :scroll-x="scrollWidth"
       max-height="max(240px, calc(100vh - 360px))"
       :checked-row-keys="checkedKeys"
       class="datagrid__table"
       @update:checked-row-keys="onCheckedRowKeys"
-      @update:page="onPage"
-      @update:page-size="onPageSize"
       @update:sorter="onSorter"
     />
-    <div class="datagrid__total">{{ t('grid.total') }}: {{ totalRows }}</div>
-    <n-modal v-model:show="inspectorShow" preset="card" :title="`${t('grid.preview')}: ${inspectedColumn}`" style="width: min(800px, 96vw)">
-      <n-select v-if="inspectedRow" data-testid="grid-inspect-column" :value="inspectedColumn" :aria-label="t('structure.columns')" :options="columnOptions" @update:value="selectInspectedColumn" />
+      <footer class="datagrid__pagination">
+        <span>{{ t('grid.total') }}: {{ totalRows.toLocaleString(locale) }}</span>
+        <ui-pagination v-bind="pagination" :page-slot="pageSlots" @update:page="onPage" @update:page-size="onPageSize" />
+      </footer>
+    </div>
+    <details v-if="statement" class="datagrid__statement">
+      <summary><UiIcon name="code" :size="14" /> {{ t('grid.browseSQL') }}</summary>
+      <pre tabindex="0">{{ statement.sql }}</pre>
+      <span>{{ t('grid.parameters') }}</span> <output>{{ JSON.stringify(statement.parameters) }}</output>
+    </details>
+
+    <ui-modal v-model:show="inspectorShow" :title="`${t('grid.preview')}: ${inspectedColumn}`" style="width: min(800px, 96vw)">
+      <ui-select v-if="inspectedRow" data-testid="grid-inspect-column" :value="inspectedColumn" :aria-label="t('structure.columns')" :options="columnOptions" @update:value="selectInspectedColumn" />
       <pre class="datagrid__full-value" data-testid="grid-inspected-value" tabindex="0" style="white-space: pre-wrap; overflow: auto; max-height: 70vh; overflow-wrap: anywhere">{{ inspectedValue }}</pre>
       <small v-if="inspectedRow?.[inspectedColumn] === ''">{{ t('rowWorkflows.emptyString') }}</small>
       <div v-if="inspectedFilter" class="datagrid__inspector-action">
-        <n-button size="small" data-testid="filter-inspected-value" :disabled="filtersEdited || alreadyFiltered || loading" @click="filterByInspectedValue">
+        <ui-button size="small" data-testid="filter-inspected-value" :disabled="filtersEdited || alreadyFiltered || loading" @click="filterByInspectedValue">
           {{ t(alreadyFiltered ? 'rowWorkflows.alreadyFiltered' : 'rowWorkflows.filterByValue') }}
-        </n-button>
+        </ui-button>
         <small v-if="filtersEdited">{{ t('rowWorkflows.unappliedFilters') }}</small>
       </div>
-    </n-modal>
+    </ui-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, useId, watch } from 'vue'
+import { computed, nextTick, onMounted, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { h } from 'vue'
-import type { DataTableColumns, DataTableSortState, SelectOption } from 'naive-ui'
+import type { DataTableColumns, DataTableSortState, SelectOption } from '../ui'
 import {
-  NAlert,
-  NButton,
-  NDataTable,
-  NInput,
-  NModal,
-  NPopconfirm,
-  NPagination,
-  NSelect,
-} from 'naive-ui'
+  UiAlert,
+  UiButton,
+  UiDataTable,
+  UiInput,
+  UiModal,
+  UiPopconfirm,
+  UiPagination,
+  UiSelect,
+} from '../ui'
 
 import { useMetadataStore } from '../stores/metadata'
 import BlobValue from './BlobValue.vue'
+import UiIcon from './UiIcon.vue'
 import GridRowActions from './GridRowActions.vue'
 import type { ColumnMeta, Page } from '../api/types'
 import { filterForCell, isNullOperator, ROW_FILTER_OPERATORS, type RowsFilter, type RowsSort } from '../lib/tableQuery'
@@ -198,7 +208,6 @@ const emit = defineEmits<{
   'update:visible-columns': [names: string[]]
   'apply-filters': [filters: RowsFilter[]]
   refresh: []
-  'add-row': []
   'edit-row': [row: GridRow]
   'edit-rows': [keys: Record<string,unknown>[]]
   'copy-row': [row: GridRow]
@@ -208,7 +217,7 @@ const emit = defineEmits<{
   'delete-rows': [pks: Record<string, unknown>[]]
 }>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const metadata = useMetadataStore()
 void metadata.load()
 
@@ -221,7 +230,7 @@ const visibleMetadata = computed(() => {
 })
 const choosingColumns = ref(false)
 const columnChooserID = useId()
-const columnTrigger = ref<InstanceType<typeof NButton> | null>(null)
+const columnTrigger = ref<InstanceType<typeof UiButton> | null>(null)
 const columnChooser = ref<HTMLFormElement | null>(null)
 const columnDraft = ref<string[]>([])
 const columnSearch = ref('')
@@ -351,28 +360,58 @@ function renderCell(row: GridRow, column: string): ReturnType<typeof h> | string
   ])
 }
 
-const rowActionsWidth = 148
+const compactViewport = window.matchMedia?.('(max-width: 719px), (pointer: coarse)')
+const compactRows = ref(compactViewport?.matches ?? false)
+const pageSlots = computed(() => compactRows.value ? 3 : 7)
+const rowActionsWidth = computed(() => compactRows.value ? 50 : 144)
+function updateViewport(): void { compactRows.value = compactViewport?.matches ?? false }
+onMounted(() => compactViewport?.addEventListener('change', updateViewport))
+onBeforeUnmount(() => compactViewport?.removeEventListener('change', updateViewport))
+
+function columnWidth(meta: ColumnMeta): number {
+  if (!compactRows.value) return Math.max(140, Math.min(300, meta.name.length * 9 + 70))
+  const titleWidth = meta.name.length * 7.5 + (props.pkColumns.includes(meta.name) ? 58 : 38)
+  let valueWidth = 52
+  for (const row of tableData.value.slice(0, 25)) {
+    const value = row[meta.name]
+    const length = typeof value === 'object' && value !== null ? 24 : String(value ?? '').length
+    valueWidth = Math.max(valueWidth, length * 7.5 + 18)
+  }
+  return Math.ceil(Math.min(230, Math.max(valueWidth, titleWidth)))
+}
+
+function cellClicked(event: MouseEvent, row: GridRow): void {
+  if (!(event.target instanceof Element) || event.target.closest('button,input,a,select,textarea')) return
+  if (!window.getSelection()?.isCollapsed && window.getSelection()?.toString()) return
+  emit('edit-row', row)
+}
 const gridColumns = computed<DataTableColumns<GridRow>>(() => {
   const cols: DataTableColumns<GridRow> = []
-  cols.push({ type: 'selection' })
+  cols.push({ type: 'selection', width: compactRows.value ? 34 : 48 })
   for (const meta of visibleMetadata.value) {
     cols.push({
-      width: Math.max(140,Math.min(300,meta.name.length*9+70)),
-      title: meta.name,
+      width: columnWidth(meta),
+      title: props.pkColumns.includes(meta.name)
+        ? () => h('span', { class: 'datagrid__column-key' }, [h(UiIcon, { name: 'key', size: 12 }), meta.name])
+        : meta.name,
       key: meta.name,
       sorter: 'default',
       sortOrder:
         props.sort?.column === meta.name ? (props.sort.desc ? 'descend' : 'ascend') : false,
-      cellProps: (row) => ({ 'aria-label': cellPreview(cellText(row[meta.name])) }),
+      cellProps: (row) => ({
+        'aria-label': cellPreview(cellText(row[meta.name])),
+        onClick: (event: MouseEvent) => cellClicked(event, row),
+      }),
       render: (row) => renderCell(row, meta.name),
     })
   }
   cols.push({
-    title: t('grid.actions'),
+    title: compactRows.value ? '' : t('grid.actions'),
     key: '__actions',
-    width: rowActionsWidth,
+    width: rowActionsWidth.value,
     fixed: 'right',
     render: row => h(GridRowActions, {
+      compact: compactRows.value,
       tableName: props.tableName ?? '',
       target: row.__pk,
       canPreview: visibleMetadata.value.length > 0,
@@ -391,8 +430,7 @@ const gridColumns = computed<DataTableColumns<GridRow>>(() => {
 
 const checkedKeys = ref<string[]>([])
 const filterID = useId()
-const mobileFiltersOpen = ref(false)
-
+const filtersOpen = ref(false)
 function onCheckedRowKeys(keys: (string | number)[]): void {
   checkedKeys.value = keys.map(String)
 }
@@ -436,7 +474,7 @@ const canBulkEdit = computed(() => hasPk.value && checkedKeys.value.length > 0 &
   const row = tableData.value.find(row => row.__key === key)
   return row && props.pkColumns.every(name => row.__pk?.[name] !== null && row.__pk?.[name] !== undefined)
 }))
-const scrollWidth = computed(() => 48 + rowActionsWidth + visibleMetadata.value.reduce((sum,meta)=>sum+Math.max(140,Math.min(300,meta.name.length*9+70)),0))
+const scrollWidth = computed(() => gridColumns.value.reduce((sum, column) => sum + (column.width ?? 0), 0))
 
 // --- Pagination and sorting --------------------------------------------
 
@@ -457,7 +495,7 @@ function onPageSize(size: number): void {
 }
 
 function onSorter(event: DataTableSortState | DataTableSortState[] | null): void {
-  // This grid supports one server-side sort. Naive emits null when cleared.
+  // This grid supports one server-side sort. An empty sort restores the default order.
   const current = Array.isArray(event) ? event[0] : event
   if (!current?.order) {
     emit('update:sort', null)
@@ -535,85 +573,59 @@ function resetFilters(): void {
 </script>
 
 <style scoped>
-.datagrid__statement { margin: 6px 0; font-size: 13px; }
-.datagrid__statement summary { width: fit-content; cursor: pointer; }
-.datagrid__statement pre { padding: 8px 10px; margin: 6px 0; border-left: 2px solid currentColor; background: #8881; white-space: pre-wrap; overflow-wrap: anywhere; }
-.datagrid__statement output { font-family: monospace; overflow-wrap: anywhere; }
-.datagrid__pagination {display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;}
-.datagrid__toolbar {position:sticky;top:0;z-index:2;background:var(--n-color,#fff);padding:6px 0;}
-.datagrid__table {max-width:100%;overflow:auto;}
-.datagrid__inspector-action { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-.datagrid__column-count { margin-inline-start: 6px; font-variant-numeric: tabular-nums; }
-.datagrid__chooser { display: grid; gap: 10px; padding: 12px; border: 1px solid #8886; border-radius: 4px; }
-.datagrid__chooser-heading, .datagrid__chooser-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.datagrid__chooser-heading { justify-content: space-between; }
-.datagrid__chooser-heading span { font-variant-numeric: tabular-nums; }
-.datagrid__chooser-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 160px), 1fr)); gap: 4px 12px; max-height: 210px; overflow: auto; }
-.datagrid__chooser-list label { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; cursor: pointer; overflow-wrap: anywhere; }
-.datagrid__chooser-shortcuts { display: flex; flex-wrap: wrap; gap: 4px; margin-inline-end: auto; }
-:deep(.datagrid__inspect) {font:inherit;color:inherit;background:transparent;border:0;padding:0;cursor:pointer;text-decoration:underline;}
-.datagrid {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.datagrid { display:flex; min-width:0; flex-direction:column; gap:12px; container-type:inline-size; }
+.datagrid__toolbar, .datagrid__selection, .datagrid__filter-controls, .datagrid__inspector-action, .datagrid__chooser-footer, .datagrid__chooser-heading { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.datagrid__toolbar { gap:6px; }
+.datagrid__export { margin-inline-start:auto; }
+.datagrid__selection, .datagrid__chooser, .datagrid__filters { padding:14px; border-radius:9px; background:var(--db-sidebar); border:1px solid var(--db-line); }
+.datagrid__selection { background:var(--db-tint); }
+.datagrid__chooser, .datagrid__filters { display:grid; gap:12px; }
+.datagrid__filters[hidden] { display:none; }
+.datagrid__column-count { padding-inline-start:5px; font-variant-numeric:tabular-nums; }
+.datagrid__chooser-heading { justify-content:space-between; }
+.datagrid__chooser-heading span { color:var(--db-muted); font-size:12px; }
+.datagrid__chooser-list { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,160px),1fr)); gap:5px 12px; max-height:210px; overflow:auto; }
+.datagrid__chooser-list label { display:flex; align-items:center; gap:7px; cursor:pointer; overflow-wrap:anywhere; font:13px var(--db-mono); }
+.datagrid__chooser-shortcuts { display:flex; flex-wrap:wrap; gap:4px; margin-inline-end:auto; }
+.datagrid__filter { display:grid; grid-template-columns:minmax(100px,1fr) minmax(90px,.55fr) minmax(120px,1.4fr) auto; align-items:center; gap:8px; }
+.datagrid__filter .ui-select, .datagrid__filter .ui-input { min-width:0; }
+.datagrid__filter-controls > :first-child { margin-inline-end:auto; }
+.datagrid__surface { min-width:0; border:1px solid var(--db-line); border-radius:10px; overflow:hidden; background:var(--db-panel); }
+.datagrid__table { max-width:100%; }
+.datagrid__table :deep(td[aria-label]) { cursor:pointer; }
+@media (hover:hover) and (pointer:fine) {
+  .datagrid__table :deep(tr:not(:hover):not(:focus-within) .row-actions .secondary-action) { opacity:0; }
 }
-
-.datagrid__toolbar,
-.datagrid__filters {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+.datagrid__table :deep(.ui-data-table-wrapper) { border:0; border-radius:0; }
+.datagrid__table :deep(th:not(:last-child)) { font-family:var(--db-mono); font-size:12px; }
+.datagrid__table :deep(.datagrid__column-key) { display:inline-flex; align-items:center; gap:5px; }
+.datagrid__table :deep(.datagrid__column-key svg) { color:var(--db-muted); flex-shrink:0; }
+.datagrid__table :deep(.datagrid__null) { color:var(--db-muted); font:italic 12px var(--db-mono); }
+.datagrid__table :deep(.datagrid__inspect) { padding:2px 4px; border:0; border-radius:4px; background:var(--db-tint); color:var(--db-accent); font:inherit; font-size:11px; cursor:pointer; }
+.datagrid__pagination { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; min-height:45px; padding:8px 14px; border-top:1px solid var(--db-line); font-size:12px; color:var(--db-muted); }
+.datagrid__statement { margin:0; font-size:12px; color:var(--db-muted); }
+.datagrid__statement summary { width:fit-content; cursor:pointer; }
+.datagrid__statement summary svg { vertical-align:middle; margin:0 4px 2px; }
+.datagrid__statement pre,.datagrid__full-value { padding:12px 14px; margin:8px 0; border-radius:7px; border:1px solid var(--db-line); background:var(--db-sidebar); color:var(--db-ink); font-family:var(--db-mono); white-space:pre-wrap; overflow-wrap:anywhere; }
+.datagrid__statement output { font-family:var(--db-mono); overflow-wrap:anywhere; }
+.datagrid__inspector-action { margin-top:10px; }
+@container (max-width:540px) {
+  .datagrid__toolbar { row-gap:8px; }
+  .datagrid__export { margin-inline-start:0; }
+  .datagrid__chooser, .datagrid__filters { padding:10px; }
+  .datagrid__filter { grid-template-columns:minmax(0,1fr) minmax(70px,100px) auto; gap:6px; }
+  .datagrid__filter-value { grid-column:1 / 3; grid-row:2; }
+  .datagrid__filter > button { grid-column:3; grid-row:1; }
+  .datagrid__pagination { padding:8px; gap:6px; }
 }
-
-.datagrid__filters-label {
-  opacity: 0.7;
+@container (max-width:440px) {
+  .datagrid__chooser-list { row-gap:2px; }
+  .datagrid__chooser-list label { min-height:30px; }
+  .datagrid__chooser-footer { justify-content:flex-end; }
+  .datagrid__chooser-shortcuts { flex-basis:100%; }
 }
-
-.datagrid__filter {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.datagrid__filter-column {
-  min-width: 140px;
-}
-
-.datagrid__filter-op {
-  min-width: 120px;
-}
-
-.datagrid__filter-value {
-  min-width: 160px;
-}
-
-.datagrid__null {
-  opacity: 0.6;
-}
-
-.datagrid__hex {
-  display: inline-block;
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  vertical-align: bottom;
-}
-
-.datagrid { container-type: inline-size; }
-.datagrid__filter-toggle { display: none; }
-@container (max-width: 600px) {
-  .datagrid__filter-toggle { display: block; width: fit-content; padding: 4px 8px; font: inherit; color: inherit; background: transparent; border: 1px solid #8886; border-radius: 4px; cursor: pointer; }
-  .datagrid__filter-toggle::before {
-    content: ''; display: inline-block; margin-inline-end: 6px; vertical-align: 0.08em;
-    border-block: 4px solid transparent; border-inline-start: 6px solid currentColor;
-  }
-  .datagrid__filter-toggle[aria-expanded=true]::before { transform: rotate(90deg); }
-  .datagrid__filters:not(.datagrid__filters--open), .datagrid__filters-label { display: none; }
-  .datagrid__filter { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr) minmax(70px, 105px) auto; gap: 4px; }
-  .datagrid__filter .n-select, .datagrid__filter .n-input { width: 100%; min-width: 0; }
-  .datagrid__filter-value { grid-column: 1 / 3; grid-row: 2; }
-  .datagrid__filter > button { grid-column: 3; grid-row: 1; }
+@media (max-width:719px), (pointer:coarse) {
+  .datagrid__table :deep(td.fixed-end) { padding:1px 3px; text-align:center; }
+  .datagrid__table :deep(.row-actions .row-action) { width:42px; height:42px; }
 }
 </style>

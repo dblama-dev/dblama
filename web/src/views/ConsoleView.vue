@@ -1,47 +1,132 @@
 <template>
-  <section class="console">
-    <h2>{{ t('sqlWorkflows.context', { db }) }}</h2>
-    <div class="console__toolbar">
-      <n-button size="small" type="primary" :loading="c.executing.value" @click="runAll">{{ t('console.executeAll') }}</n-button>
-      <n-button size="small" :disabled="c.executing.value" @click="runSelection">{{ t('console.executeSelection') }}</n-button>
-      <n-button size="small" :disabled="c.executing.value" @click="runExplain">{{ t('console.explain') }}</n-button>
-      <n-button v-if="c.executing.value" size="small" type="error" @click="cancelRun">{{ t('console.cancel') }}</n-button>
-      <n-button size="small" :disabled="c.executing.value" @click="formatEditor">{{ t('console.format') }}</n-button>
-      <n-select class="console__history" size="small" clearable :value="null" :options="historyOptions" :placeholder="t('console.history')" @update:value="onHistoryPick" />
+  <section class="console tool-workspace db-page">
+    <ToolHeading icon="terminal" :title="t('sqlWorkflows.title')" />
+    <ui-alert v-if="!c.draftSaved.value" type="warning">{{ t('sqlWorkflows.storageError') }}</ui-alert>
+    <section class="tool-card query-card">
+      <header class="tool-card__head">
+        <h2>{{ t('sqlWorkflows.query') }}</h2>
+        <div class="tool-actions console__editor-tools">
+          <ui-button size="small" quaternary :disabled="c.executing.value" @click="formatEditor">
+            {{ t('console.format') }}
+          </ui-button>
+          <ui-select
+            class="console__history"
+            size="small"
+            clearable
+            :value="null"
+            :options="historyOptions"
+            :placeholder="t('console.history')"
+            :aria-label="t('console.history')"
+            @update:value="onHistoryPick"
+          />
+        </div>
+      </header>
+      <SqlEditor
+        ref="editor"
+        v-model="c.sql.value"
+        :dialect="flavor"
+        :schema="completionSchema"
+        :default-table="completionTable ?? undefined"
+        label="SQL"
+        @execute="c.execute($event)"
+        @history="cycleHistory"
+      />
+      <footer class="tool-card__foot">
+        <div class="tool-actions">
+          <ui-button size="small" type="primary" :loading="c.executing.value" @click="runAll">
+            <template #icon><UiIcon name="play" /></template>
+            {{ t('console.executeAll') }}
+          </ui-button>
+          <ui-button size="small" :disabled="c.executing.value" @click="runSelection">
+            {{ t('console.executeSelection') }}
+          </ui-button>
+          <ui-button size="small" :disabled="c.executing.value" @click="runExplain">
+            {{ t('console.explain') }}
+          </ui-button>
+          <ui-button v-if="c.executing.value" size="small" type="error" @click="cancelRun">
+            {{ t('console.cancel') }}
+          </ui-button>
+        </div>
+        <span class="tool-note"><span class="console__shortcut">{{ t('sqlWorkflows.shortcut') }}{{ ' ' }}</span>{{ t('sqlWorkflows.draftHint') }}</span>
+      </footer>
+    </section>
+    <div class="console__aux">
+      <details class="tool-card tool-details console__bookmarks">
+        <summary>{{ t('sqlWorkflows.bookmarks') }}</summary>
+        <div class="tool-stack tool-card__body">
+          <div class="tool-actions">
+            <ui-select
+              class="console__table-picker"
+              size="small"
+              filterable
+              clearable
+              :value="bookmarkName || null"
+              :options="bookmarkOptions"
+              :placeholder="t('sqlWorkflows.bookmarks')"
+              :aria-label="t('sqlWorkflows.bookmarks')"
+              @update:value="pickBookmark"
+            />
+            <ui-input
+              v-model:value="bookmarkName"
+              class="console__bookmark-name"
+              :input-props="{ 'aria-label': t('sqlWorkflows.name') }"
+              :placeholder="t('sqlWorkflows.name')"
+              :maxlength="100"
+              size="small"
+            />
+            <ui-button size="small" @click="storeBookmark">{{ t('sqlWorkflows.save') }}</ui-button>
+            <ui-popconfirm
+              v-if="bookmarks.some((b) => b.name === bookmarkName)"
+              @positive-click="deleteBookmark"
+            >
+              <template #trigger>
+                <ui-button size="small" type="error" secondary>{{ t('sqlWorkflows.remove') }}</ui-button>
+              </template>
+              {{ t('sqlWorkflows.remove') }} · {{ bookmarkName }}?
+            </ui-popconfirm>
+          </div>
+          <p class="tool-note">{{ t('sqlWorkflows.limit') }} {{ t('sqlWorkflows.replaced') }}</p>
+          <p v-if="bookmarkNotice" role="status">{{ bookmarkNotice }}</p>
+        </div>
+      </details>
+      <details class="tool-card tool-details">
+        <summary>{{ t('sqlWorkflows.completion') }}</summary>
+        <div class="tool-card__body">
+          <ui-select
+            class="console__table-picker"
+            size="small"
+            filterable
+            clearable
+            :value="completionTable"
+            :options="tableOptions"
+            :loading="completionLoading"
+            :aria-label="t('sqlWorkflows.completion')"
+            @update:value="loadColumns"
+          />
+        </div>
+      </details>
     </div>
-    <p class="console__hint">{{ t('sqlWorkflows.hint') }}</p>
-    <n-alert v-if="!c.draftSaved.value" type="warning">{{ t('sqlWorkflows.storageError') }}</n-alert>
-    <SqlEditor ref="editor" v-model="c.sql.value" :dialect="flavor" :schema="completionSchema" :default-table="completionTable ?? undefined" :label="'SQL'" @execute="c.execute($event)" @history="cycleHistory" />
-    <div class="console__toolbar">
-      <label>{{ t('sqlWorkflows.completion') }}</label>
-      <n-select class="console__table-picker" size="small" filterable clearable :value="completionTable" :options="tableOptions" :loading="completionLoading" @update:value="loadColumns" />
-    </div>
-    <details class="console__bookmarks">
-      <summary>{{ t('sqlWorkflows.bookmarks') }}</summary>
-      <p class="console__hint">{{ t('sqlWorkflows.limit') }} {{ t('sqlWorkflows.replaced') }}</p>
-      <div class="console__toolbar">
-        <n-select class="console__table-picker" size="small" filterable clearable :value="bookmarkName || null" :options="bookmarkOptions" :placeholder="t('sqlWorkflows.bookmarks')" @update:value="pickBookmark" />
-        <n-input v-model:value="bookmarkName" class="console__bookmark-name" :input-props="{'aria-label':t('sqlWorkflows.name')}" :placeholder="t('sqlWorkflows.name')" :maxlength="100" size="small" />
-        <n-button size="small" @click="storeBookmark">{{ t('sqlWorkflows.save') }}</n-button>
-        <n-popconfirm v-if="bookmarks.some(b => b.name === bookmarkName)" @positive-click="deleteBookmark">
-          <template #trigger><n-button size="small" type="error" secondary>{{ t('sqlWorkflows.remove') }}</n-button></template>
-          {{ t('sqlWorkflows.remove') }}: {{ bookmarkName }}?
-        </n-popconfirm>
-      </div>
-      <p role="status">{{ bookmarkNotice }}</p>
-    </details>
-    <n-alert v-if="c.error.value" type="error" class="console__error">{{ c.error.value }}</n-alert>
-    <template v-if="c.results.value !== null">
-      <p v-if="c.results.value.length === 0" class="console__empty">{{ t('console.results') }}: 0</p>
-      <ResultGrid v-for="(res, i) in c.results.value" :key="i" :result="res" :index="i + 1" />
-    </template>
+    <ui-alert v-if="c.error.value" type="error" class="console__error">{{ c.error.value }}</ui-alert>
+    <section v-if="!c.error.value" class="console__results tool-stack">
+      <h2>{{ t('console.results') }}</h2>
+      <ResultGrid v-for="(res, i) in c.results.value ?? []" :key="i" :result="res" :index="i + 1" />
+      <p v-if="c.executing.value" class="tool-card tool-empty" role="status">
+        {{ t('sqlWorkflows.executing') }}
+      </p>
+      <p v-else-if="!c.results.value?.length" class="tool-card tool-empty">
+        {{ t(c.results.value === null ? 'sqlWorkflows.waiting' : 'sqlWorkflows.noResults') }}
+      </p>
+    </section>
   </section>
 </template>
+
 <script setup lang="ts">
+import ToolHeading from '../components/ToolHeading.vue'
+import UiIcon from '../components/UiIcon.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
-import { NAlert, NButton, NInput, NPopconfirm, NSelect } from 'naive-ui'
+import { UiAlert, UiButton, UiInput, UiPopconfirm, UiSelect } from '../ui'
 import SqlEditor from '../components/SqlEditor.vue'
 import ResultGrid from '../components/ResultGrid.vue'
 import { api } from '../api/client'
@@ -105,14 +190,48 @@ const historyOptions=computed(()=>c.history.value.map((entry,i)=>({label:entry,v
 function onHistoryPick(value:string|null){if(value===null)return;const entry=c.history.value[Number(value)];if(entry!==undefined){c.resetHistoryCycle();c.sql.value=entry}}
 </script>
 <style scoped>
-.console {display:flex;flex-direction:column;gap:12px;min-width:0}
-h2 {margin:0;font-size:18px}
-.console__toolbar {display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.console__history {min-width:200px;max-width:360px;margin-left:auto}
-.console__table-picker {width:240px;max-width:100%}
-.console__bookmark-name {width:220px;max-width:100%}
-.console__hint {margin:0;font-size:12px;opacity:.7}
-.console__bookmarks {border:1px solid #8884;border-radius:5px;padding:10px}
-.console__bookmarks summary {cursor:pointer;margin-bottom:8px}
-.console__empty {opacity:.7}
+.query-card .console__editor-tools {
+  display: grid;
+  grid-template-columns: max-content minmax(100px, 190px);
+  max-width: 100%;
+}
+.console__history { min-width: 0; }
+.console__table-picker,
+.console__bookmark-name {
+  width: min(250px, 100%);
+}
+.console__aux {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: start;
+  gap: 12px;
+}
+.query-card :deep(.sql-editor) {
+  border: 0;
+  border-radius: 0;
+}
+.query-card .tool-card__foot {
+  justify-content: start;
+}
+.console__results {
+  gap: 10px;
+}
+@media (max-width: 600px) {
+  .query-card .console__editor-tools { grid-template-columns: max-content minmax(95px, 1fr); }
+  .query-card .tool-card__head { gap: 6px 12px; }
+  .query-card .tool-card__foot .tool-actions { gap: 5px; }
+  .query-card .tool-card__foot .ui-button { padding-inline: 6px; }
+}
+@media (max-width: 370px) {
+  .query-card .tool-card__foot .tool-actions { display: grid; grid-template-columns: 1fr auto; width: 100%; }
+  .query-card .tool-card__foot .ui-button--primary { grid-column: 1 / -1; }
+}
+@media (pointer: coarse) {
+  .console__shortcut { display: none; }
+}
+@media (max-width: 780px) {
+  .console__aux {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 </style>

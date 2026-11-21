@@ -8,7 +8,7 @@ test('session survives reload; logout protects pages; wrong password allows reco
   await page.goto('/server')
   await expect(page).toHaveURL(/\/login$/)
   await login(page, 'deliberately-wrong-password')
-  await expect(page.locator('.n-notification')).toContainText('Connection failed')
+  await expect(page.locator('.ui-notification')).toContainText('Connection failed')
   await expect(page).toHaveURL(/\/login$/)
   await login(page)
   await expect(page).toHaveURL(/\/server$/)

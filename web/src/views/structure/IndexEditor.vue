@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useNotification } from 'naive-ui'
-import { NButton, NInput, NInputNumber, NSelect } from 'naive-ui'
+import { useNotification } from '../../ui'
+import { UiButton, UiInput, UiInputNumber, UiSelect } from '../../ui'
 
+import UiIcon from '../../components/UiIcon.vue'
 import { useCatalogStore } from '../../stores/catalog'
 import { api, ApiError } from '../../api/client'
 import type { Index, IndexColumn } from '../../api/types'
@@ -60,7 +61,7 @@ watch(
 )
 
 const typeOptions = computed(() =>
-  INDEX_TYPES.map((type) => ({
+  INDEX_TYPES.filter(type => !catalog.schemaAware || (type !== 'FULLTEXT' && type !== 'SPATIAL')).map((type) => ({
     label: type,
     value: type,
     // At most one PRIMARY per table.
@@ -144,7 +145,7 @@ async function save(): Promise<void> {
     >
       <label class="struct-field struct-field--indexname">
         <span class="struct-field__label">{{ t('structure.name') }}</span>
-        <NInput
+        <UiInput
           v-model:value="index.name"
           :disabled="index.type === 'PRIMARY'"
           :placeholder="t('structure.name')"
@@ -152,47 +153,38 @@ async function save(): Promise<void> {
       </label>
       <label class="struct-field struct-field--indextype">
         <span class="struct-field__label">{{ t('structure.indexType') }}</span>
-        <NSelect v-model:value="index.type" :options="typeOptions" />
+        <UiSelect v-model:value="index.type" :options="typeOptions" />
       </label>
       <label class="struct-field struct-field--indexcolumns">
         <span class="struct-field__label">{{ t('structure.indexColumns') }}</span>
-        <NSelect
+        <UiSelect
           :value="index.columns.map((c) => c.name)"
           :options="columnOptions"
           multiple
           @update:value="onColumnsChanged(index, $event)"
         />
       </label>
-      <div
-        v-for="col in index.columns"
-        :key="col.name"
-        class="index-editor__subpart"
-      >
-        <span class="index-editor__subpart-name">{{ col.name }}</span>
-        <NInputNumber
-          v-model:value="col.subPart"
-          :min="0"
-          size="small"
-        >
-          <template #suffix>{{ t('structure.subPartHint') }}</template>
-        </NInputNumber>
-      </div>
-      <NButton
-        size="small"
-        quaternary
-        @click="removeIndex(index)"
-      >
-        {{ t('structure.removeIndex') }}
-      </NButton>
+      <UiButton class="index-editor__remove" size="small" quaternary
+        :aria-label="`${t('structure.removeIndex')} ${index.name || t('structure.indexes')}`" @click="removeIndex(index)">
+        <UiIcon name="x" :size="15" />{{ t('structure.removeIndex') }}
+      </UiButton>
+      <fieldset v-if="!catalog.schemaAware && index.columns.length" class="index-editor__prefixes">
+        <legend>{{ t('structure.indexPrefix') }}</legend>
+        <label v-for="col in index.columns" :key="col.name" class="index-editor__subpart">
+          <span>{{ col.name }}</span>
+          <UiInputNumber v-model:value="col.subPart" :min="0" :precision="0" size="small" />
+        </label>
+        <small>{{ t('structure.subPartHint') }}</small>
+      </fieldset>
     </div>
     <div class="index-editor__actions">
-      <NButton
+      <UiButton
         size="small"
         @click="addIndex"
       >
         {{ t('structure.addIndex') }}
-      </NButton>
-      <NButton
+      </UiButton>
+      <UiButton
         v-if="!draft"
         size="small"
         type="primary"
@@ -202,50 +194,46 @@ async function save(): Promise<void> {
         @click="save"
       >
         {{ t('structure.saveIndexes') }}
-      </NButton>
+      </UiButton>
     </div>
   </section>
 </template>
 
 <style scoped>
-.index-editor {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
+.index-editor { display: grid; gap: 12px; container-type: inline-size; }
 .index-editor__row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(7.5rem, .65fr) minmax(0, 1.25fr) auto;
+  align-items: end;
   gap: 12px;
-  padding: 8px;
-  border: 1px solid rgba(128, 128, 128, 0.25);
-  border-radius: 4px;
+  padding: 14px;
+  background: var(--db-sidebar);
+  border: 1px solid var(--db-line);
+  border-radius: 8px;
 }
-
-.index-editor__row .struct-field {
-  min-width: 160px;
-}
-
-.index-editor__row .struct-field--indexcolumns {
-  flex: 1;
-  min-width: 240px;
-}
-
-.index-editor__subpart {
+.struct-field { display: grid; gap: 4px; min-width: 0; }
+.struct-field__label, .index-editor__prefixes legend, .index-editor__subpart span { color: var(--db-muted); font-size: 12px; }
+.index-editor__remove { justify-self: end; }
+.index-editor__prefixes {
+  grid-column: 1 / -1;
   display: flex;
-  align-items: center;
-  gap: 4px;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  min-width: 0;
+  margin: 0;
+  padding: 2px 0 0;
+  border: 0;
 }
-
-.index-editor__subpart-name {
-  font-size: 12px;
-  opacity: 0.7;
-}
-
-.index-editor__actions {
-  display: flex;
-  gap: 8px;
+.index-editor__prefixes legend { margin-bottom: 4px; padding: 0; font-weight: 550; }
+.index-editor__subpart { display: grid; width: 8rem; gap: 3px; }
+.index-editor__subpart span { overflow-wrap: anywhere; }
+.index-editor__prefixes small { align-self: end; padding: 6px 0; color: var(--db-muted); font-size: 12px; }
+.index-editor__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+@container (max-width: 44rem) {
+  .index-editor__row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .struct-field--indexcolumns { grid-column: 1 / -1; }
+  .index-editor__remove { grid-column: 1 / -1; justify-self: start; }
+  .index-editor__prefixes { grid-row: 3; }
 }
 </style>

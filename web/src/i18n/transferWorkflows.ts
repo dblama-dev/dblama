@@ -1,5 +1,6 @@
 export const transferWorkflowMessages = {
   en: { transferWorkflows: {
+    chooseFile: 'Choose file', noFile: 'No file selected', preview: 'Preview', readingCsv: 'CSV preview and value rules',
     context: 'Database: {db} · Tables: {table}', allTables: 'all tables',
     mode: 'SQL dump contents', mode_all: 'Structure and data', mode_structure: 'Structure only', mode_data: 'Data only',
     postgresSeparator: 'PostgreSQL CSV supports comma, semicolon or tab separators.',
@@ -17,6 +18,7 @@ export const transferWorkflowMessages = {
     partial: 'Earlier changes remain applied. Cancellation stops future work; a statement already running may still finish. Review the database before retrying.',
   } },
   ru: { transferWorkflows: {
+    chooseFile: 'Выбрать файл', noFile: 'Файл не выбран', preview: 'Предпросмотр', readingCsv: 'Правила чтения CSV',
     context: 'База: {db} · Таблицы: {table}', allTables: 'все таблицы',
     mode: 'Содержимое SQL-дампа', mode_all: 'Структура и данные', mode_structure: 'Только структура', mode_data: 'Только данные',
     postgresSeparator: 'PostgreSQL поддерживает запятую, точку с запятой и табуляцию в качестве разделителя CSV.',

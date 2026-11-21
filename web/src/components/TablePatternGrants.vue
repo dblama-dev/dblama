@@ -5,15 +5,15 @@
         <input v-model="pattern" data-test="table-pattern" autocomplete="off" spellcheck="false"
           aria-describedby="table-mask-help" :aria-invalid="!!pattern && !matcher" :disabled="locked">
       </label>
-      <n-button v-if="username" data-test="table-prefix" :disabled="locked"
-        @click="pattern = usernamePrefixPattern(username)">{{ t('prefix') }}</n-button>
+      <ui-button v-if="username" data-test="table-prefix" :disabled="locked"
+        @click="pattern = usernamePrefixPattern(username)">{{ t('prefix') }}</ui-button>
     </div>
     <p id="table-mask-help" class="hint">{{ t('syntax') }}</p>
     <p v-if="pattern && !matcher" role="alert">{{ t('invalid') }}</p>
     <p v-if="loading" role="status">{{ t('loading') }}</p>
     <div v-else-if="loadError" class="pattern-row">
       <p role="alert">{{ loadError }}</p>
-      <n-button data-test="retry-table-list" @click="loadTables">{{ t('retryList') }}</n-button>
+      <ui-button data-test="retry-table-list" @click="loadTables">{{ t('retryList') }}</ui-button>
     </div>
     <div v-else class="preview">
       <strong role="status">{{ t('targets', { database, count: matches.length }) }}</strong>
@@ -40,19 +40,19 @@
         <ul><li v-for="failure in batch.failures" :key="failure.table"><code>{{ failure.table }}</code> · {{ failure.message }}</li></ul>
       </div>
       <div class="actions">
-        <n-button v-if="batch.failures.length" data-test="retry-table-grants" type="primary" :disabled="disabled" @click="grant">{{ t('retry') }}</n-button>
-        <n-button :disabled="disabled" @click="startAgain">{{ t('again') }}</n-button>
+        <ui-button v-if="batch.failures.length" data-test="retry-table-grants" type="primary" :disabled="disabled" @click="grant">{{ t('retry') }}</ui-button>
+        <ui-button :disabled="disabled" @click="startAgain">{{ t('again') }}</ui-button>
       </div>
     </div>
     <div v-else class="actions">
-      <n-button type="primary" data-test="apply-table-grants" :disabled="!canGrant" @click="grant">{{ t('apply') }}</n-button>
+      <ui-button type="primary" data-test="apply-table-grants" :disabled="!canGrant" @click="grant">{{ t('apply') }}</ui-button>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NButton, useThemeVars } from 'naive-ui'
+import { UiButton } from '../ui'
 import { useI18n } from 'vue-i18n'
 import { api } from '../api/client'
 import type { TableInfo } from '../api/types'
@@ -68,7 +68,6 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ busy: [boolean]; dirty: [boolean]; changed: [] }>()
 const { t } = useI18n({ useScope: 'local', messages })
-const theme = useThemeVars()
 const pattern = ref('')
 const selected = ref<string[]>([])
 const names = ref<string[]>([])
@@ -154,17 +153,17 @@ function startAgain() {
 .table-pattern-grants { gap: 12px; }
 .pattern-row, .actions { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
 .pattern-row label { display: grid; gap: 4px; min-width: 0; }
-.pattern-row input { min-width: 0; font: inherit; padding: 6px 10px; color: v-bind('theme.textColor1'); background: v-bind('theme.inputColor'); border: 1px solid v-bind('theme.borderColor'); border-radius: 4px; }
+.pattern-row input { min-width: 0; font: inherit; padding: 6px 10px; color: var(--db-ink); background: var(--db-panel); border: 1px solid var(--db-line); border-radius: 4px; }
 p, ul { margin: 0; }
-.hint { color: v-bind('theme.textColor2'); }
-.preview, fieldset { min-width: 0; padding: 8px 12px; border: 1px solid v-bind('theme.borderColor'); border-radius: 5px; }
+.hint { color: var(--db-muted); }
+.preview, fieldset { min-width: 0; padding: 8px 12px; border: 1px solid var(--db-line); border-radius: 5px; }
 fieldset { margin: 0; }
 legend { font-weight: 600; padding-inline: 4px; }
 ul { padding-inline-start: 1.5em; max-height: 12em; overflow: auto; }
 li, strong, code { overflow-wrap: anywhere; }
 .privilege-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr)); gap: 5px 12px; }
 .privilege-list label { display: flex; align-items: center; gap: 6px; }
-.privilege-list input { accent-color: v-bind('theme.primaryColor'); width: 16px; height: 16px; flex-shrink: 0; margin: 0; }
-:where(input, ul):focus-visible { outline: 2px solid v-bind('theme.primaryColor'); outline-offset: 2px; }
-[role=alert] { color: v-bind('theme.errorColor'); }
+.privilege-list input { accent-color: var(--db-accent); width: 16px; height: 16px; flex-shrink: 0; margin: 0; }
+:where(input, ul):focus-visible { outline: 2px solid var(--db-accent); outline-offset: 2px; }
+[role=alert] { color: var(--db-danger); }
 </style>

@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { NButton, NPopconfirm } from 'naive-ui'
+import { UiButton, UiPopconfirm } from '../ui'
 import { beforeEach, expect, it, vi } from 'vitest'
 import i18n from '../i18n'
 import { api } from '../api/client'
@@ -17,13 +17,13 @@ function open(db = 'a/b', table = 'x %', schema: string | null = 'Odd Schema') {
 it('loads authoritative object kind without a sidebar, then confirms scoped truncate and drop', async () => {
  vi.mocked(api).mockResolvedValue({ tables: [info('x %')] })
  const wrapper = open()
- expect(wrapper.findAllComponents(NButton).every(button => button.props('disabled'))).toBe(true)
- wrapper.findAllComponents(NPopconfirm)[0]!.vm.$emit('positive-click'); await flushPromises()
+ expect(wrapper.findAllComponents(UiButton).every(button => button.props('disabled'))).toBe(true)
+ wrapper.findAllComponents(UiPopconfirm)[0]!.vm.$emit('positive-click'); await flushPromises()
  expect(api).toHaveBeenCalledWith('GET', '/api/databases/a%2Fb/tables?schema=Odd%20Schema')
  expect(vi.mocked(api).mock.calls.every(([method]) => method === 'GET')).toBe(true)
- wrapper.findAllComponents(NPopconfirm)[0]!.vm.$emit('positive-click'); await flushPromises()
+ wrapper.findAllComponents(UiPopconfirm)[0]!.vm.$emit('positive-click'); await flushPromises()
  expect(api).toHaveBeenCalledWith('POST', '/api/databases/a%2Fb/tables/x%20%25/truncate?schema=Odd%20Schema')
- wrapper.findAllComponents(NPopconfirm)[1]!.vm.$emit('positive-click'); await flushPromises()
+ wrapper.findAllComponents(UiPopconfirm)[1]!.vm.$emit('positive-click'); await flushPromises()
  expect(api).toHaveBeenCalledWith('DELETE', '/api/databases/a%2Fb/tables/x%20%25?schema=Odd%20Schema')
  expect(wrapper.emitted('dropped')).toHaveLength(1)
  wrapper.unmount()
@@ -31,9 +31,9 @@ it('loads authoritative object kind without a sidebar, then confirms scoped trun
 it('resolves a direct-loaded view independently of an empty catalog', async () => {
  vi.mocked(api).mockResolvedValue({ tables: [info('report', true)] })
  const wrapper = open('app', 'report', null); await flushPromises()
- wrapper.findAllComponents(NPopconfirm)[0]!.vm.$emit('positive-click'); await flushPromises()
+ wrapper.findAllComponents(UiPopconfirm)[0]!.vm.$emit('positive-click'); await flushPromises()
  expect(vi.mocked(api).mock.calls.every(([method]) => method === 'GET')).toBe(true)
- wrapper.findAllComponents(NPopconfirm)[1]!.vm.$emit('positive-click'); await flushPromises()
+ wrapper.findAllComponents(UiPopconfirm)[1]!.vm.$emit('positive-click'); await flushPromises()
  expect(api).toHaveBeenCalledWith('DELETE', '/api/databases/app/tables/report?isView=true')
  wrapper.unmount()
 })
@@ -41,8 +41,8 @@ it.each(['missing', 'failed'])('keeps destructive actions disabled when object k
  if (state === 'failed') vi.mocked(api).mockRejectedValue(new Error('catalog unavailable'))
  else vi.mocked(api).mockResolvedValue({ tables: [] })
  const wrapper = open(); await flushPromises()
- expect(wrapper.findAllComponents(NButton).every(button => button.props('disabled'))).toBe(true)
- for (const confirm of wrapper.findAllComponents(NPopconfirm)) confirm.vm.$emit('positive-click')
+ expect(wrapper.findAllComponents(UiButton).every(button => button.props('disabled'))).toBe(true)
+ for (const confirm of wrapper.findAllComponents(UiPopconfirm)) confirm.vm.$emit('positive-click')
  await flushPromises()
  expect(vi.mocked(api).mock.calls.every(([method]) => method === 'GET')).toBe(true)
  if (state === 'failed') expect(wrapper.text()).toContain('catalog unavailable')
@@ -59,8 +59,8 @@ it('ignores old schema kind responses and late mutation completion after changin
  const wrapper = open()
  useCatalogStore().schema = 'new'; await flushPromises()
  finishOld({ tables: [info('x %')] }); await flushPromises()
- expect(wrapper.findAllComponents(NButton)[0]!.props('disabled')).toBe(true)
- wrapper.findAllComponents(NPopconfirm)[1]!.vm.$emit('positive-click'); await flushPromises()
+ expect(wrapper.findAllComponents(UiButton)[0]!.props('disabled')).toBe(true)
+ wrapper.findAllComponents(UiPopconfirm)[1]!.vm.$emit('positive-click'); await flushPromises()
  expect(api).toHaveBeenCalledWith('DELETE', '/api/databases/a%2Fb/tables/x%20%25?isView=true&schema=new')
  await wrapper.setProps({ db: 'next', table: 'next' }); await flushPromises()
  const before = vi.mocked(api).mock.calls.length

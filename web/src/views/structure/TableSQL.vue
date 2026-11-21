@@ -1,9 +1,10 @@
 <template>
-  <section>
-    <n-button size="small" data-testid="sql-refresh" :loading="loading" @click="load">
-      {{ t('table.sqlRefresh') }}
-    </n-button>
-    <n-alert v-if="error" type="error">{{ error }}</n-alert>
+  <section class="ddl">
+    <header><code>DDL</code>
+    <ui-button size="small" data-testid="sql-refresh" :loading="loading" @click="load">
+      <template #icon><UiIcon name="refresh" /></template>{{ t('table.sqlRefresh') }}
+    </ui-button></header>
+    <ui-alert v-if="error" type="error">{{ error }}</ui-alert>
     <p v-if="loading">{{ t('table.sqlLoading') }}</p>
     <pre v-else-if="statement !== null"><code>{{ statement }}</code></pre>
   </section>
@@ -12,7 +13,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NAlert, NButton } from 'naive-ui'
+import { UiAlert, UiButton } from '../../ui'
+import UiIcon from '../../components/UiIcon.vue'
 import { api } from '../../api/client'
 import { useCatalogStore } from '../../stores/catalog'
 
@@ -43,5 +45,10 @@ onBeforeUnmount(() => { sequence++ })
 </script>
 
 <style scoped>
-pre { overflow: auto; padding: 16px; background: rgba(128, 128, 128, 0.08); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ddl { min-width:0; overflow:hidden; border:1px solid var(--db-line); border-radius:10px; background:var(--db-panel); }
+.ddl header { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:10px 14px; border-bottom:1px solid var(--db-line); }
+.ddl header code { font-family:var(--db-mono); font-weight:600; }
+.ddl pre { margin:0; padding:18px; min-height:120px; background:var(--db-sidebar); color:var(--db-ink); white-space:pre-wrap; overflow-wrap:anywhere; }
+.ddl pre code { font:13px/1.7 var(--db-mono); }
+.ddl p { padding:14px; color:var(--db-muted); }
 </style>

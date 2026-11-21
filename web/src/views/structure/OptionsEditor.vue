@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NAutoComplete, NInput, NInputNumber } from 'naive-ui'
+import { UiAutoComplete, UiInput, UiInputNumber } from '../../ui'
 
+import { useCatalogStore } from '../../stores/catalog'
 import { useMetadataStore } from '../../stores/metadata'
 import type { TableOptions } from '../../api/types'
 
@@ -14,10 +15,11 @@ const props = defineProps<{ options: TableOptions }>()
 const emit = defineEmits<{ 'update:options': [value: TableOptions] }>()
 
 const { t } = useI18n()
+const catalog = useCatalogStore()
 const metadata = useMetadataStore()
 void metadata.load()
 
-// Local writable mirror so naive-ui inputs can bind directly; every change
+// Local writable mirror so the inputs can bind directly; every change
 // is re-emitted to the parent.
 const model = computed(() => props.options)
 
@@ -28,16 +30,16 @@ function update(patch: Partial<TableOptions>): void {
 
 <template>
   <div class="struct-options">
-    <label class="struct-field struct-field--engine">
+    <label v-if="!catalog.schemaAware" class="struct-field struct-field--engine">
       <span class="struct-field__label">{{ t('structure.engine') }}</span>
-      <NInput
+      <UiInput
         :value="model.engine ?? ''"
         @update:value="update({ engine: $event })"
       />
     </label>
-    <label class="struct-field struct-field--collation">
+    <label v-if="!catalog.schemaAware" class="struct-field struct-field--collation">
       <span class="struct-field__label">{{ t('structure.collation') }}</span>
-      <NAutoComplete
+      <UiAutoComplete
         :options="metadata.data?.collations.map(c => c.name) ?? []"
         :value="model.collation ?? ''"
         @update:value="update({ collation: $event })"
@@ -45,14 +47,14 @@ function update(patch: Partial<TableOptions>): void {
     </label>
     <label class="struct-field struct-field--comment">
       <span class="struct-field__label">{{ t('structure.comment') }}</span>
-      <NInput
+      <UiInput
         :value="model.comment ?? ''"
         @update:value="update({ comment: $event })"
       />
     </label>
-    <label class="struct-field struct-field--autoinc">
+    <label v-if="!catalog.schemaAware" class="struct-field struct-field--autoinc">
       <span class="struct-field__label">{{ t('structure.tableAutoIncrement') }}</span>
-      <NInputNumber
+      <UiInputNumber
         :value="model.autoIncrement ?? null"
         :min="0"
         @update:value="update({ autoIncrement: $event ?? undefined })"
@@ -63,13 +65,13 @@ function update(patch: Partial<TableOptions>): void {
 
 <style scoped>
 .struct-options {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  max-width: 52rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
   gap: 12px;
 }
 
 .struct-options .struct-field {
-  min-width: 200px;
-  flex: 1;
+  min-width:0; display:grid; gap:4px; color:var(--db-muted); font-size:12px;
 }
 </style>

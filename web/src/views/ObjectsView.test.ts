@@ -24,7 +24,7 @@ vi.mock('vue-router', async importOriginal => ({ ...(await importOriginal<typeof
 function response(body: unknown, status = 200) { return { ok: status < 400, status, json: async () => body } as Response }
 beforeEach(() => { setActivePinia(createPinia()); state.kind = 'views'; const s = useSessionStore(); s.sessionInfo = { database: 'my db', driver: { name: 'PostgreSQL', flavor: 'postgres', version: '17', user: 'root', host: 'localhost' }, caps: { views: true, triggers: true, routines: true, procedures: true, events: false, partitions: true, schemas: true, users: false, monitor: false, moveCopy: false, comments: true, upsert: true, descendingIndexes: true, sequences: true } }; const c = useCatalogStore(); c.schemaAware = true; c.schema = 'Odd Schema' })
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
-function view() { return mount(ObjectsView, { global: { plugins: [createI18n({ legacy: false, locale: 'en', messages: {en:{...en,...objectMessages.en,...sqlWorkflowMessages.en}} })] } }) }
+function view() { return mount(ObjectsView, { global: { stubs: { teleport: true }, plugins: [createI18n({ legacy: false, locale: 'en', messages: {en:{...en,...objectMessages.en,...sqlWorkflowMessages.en}} })] } }) }
 it('opens server source and saves through the schema-qualified object endpoint', async () => {
  const fetch = vi.fn(async (_url: string, options: RequestInit) => options.method === 'GET' ? response({ objects: [{ name: 'active', kind: 'VIEW', source: 'CREATE VIEW active AS SELECT 1' }] }) : response({}, 204)); vi.stubGlobal('fetch', fetch)
  const w = view(); await flushPromises(); await w.get('[data-object="active"]').trigger('click')
@@ -39,8 +39,26 @@ it('calls a selected procedure with JSON parameters and renders returned rows', 
 })
 it('requires confirmation before dropping a partition', async () => {
  state.kind = 'partitions'; useCatalogStore().tables = [{ name: 'items', rows: 1, sizeBytes: 1, engine: '', comment: '', isView: false }]
+ useCatalogStore().tablesPath = '/api/databases/my%20db/tables?schema=Odd%20Schema'
  const fetch = vi.fn(async () => response({ partitions: [{ name: 'p0', method: 'RANGE', expression: 'id', description: '10', rows: 1 }] })); vi.stubGlobal('fetch', fetch)
  const w = view(); await flushPromises(); await w.get('[data-partition-drop="p0"]').trigger('click'); expect(w.find('[role="alertdialog"]').exists()).toBe(true); expect(fetch.mock.calls).toHaveLength(1)
+})
+
+it('loads the scoped table picker and partitions without a mounted navigation tree', async () => {
+ state.kind = 'partitions'
+ const table = {name:'orders',rows:1,sizeBytes:1,engine:'',comment:'',isView:false}
+ const path = '/api/databases/my%20db/tables'
+ const fetch = vi.fn(async (url: string) => response(url === path + '?schema=Odd%20Schema'
+  ? {tables:[{...table,name:'report',isView:true},table]}
+  : {partitions:[{name:'p0',method:'RANGE',expression:'id',description:'10',rows:1}]}))
+ vi.stubGlobal('fetch',fetch)
+ const w = view()
+ await flushPromises()
+ expect(w.findAll('select option').map(option => option.attributes('value'))).toEqual(['','orders'])
+ expect((w.get('select').element as HTMLSelectElement).value).toBe('orders')
+ expect(fetch).toHaveBeenCalledWith(path + '/orders/partitions?schema=Odd%20Schema',expect.objectContaining({method:'GET'}))
+ expect(w.find('[data-partition-drop="p0"]').exists()).toBe(true)
+ w.unmount()
 })
 
 it('deletes the object shown at confirmation even if selection changes', async () => {
@@ -80,6 +98,7 @@ it('keeps an edited object when switching objects is cancelled', async () => {
 function partitionSetup() {
  state.kind = 'partitions'
  useCatalogStore().tables = ['items','archive'].map(name => ({name,rows:1,sizeBytes:1,engine:'',comment:'',isView:false}))
+ useCatalogStore().tablesPath = '/api/databases/my%20db/tables?schema=Odd%20Schema'
  const fetch = vi.fn(async () => response({partitions: [{name:'p0',method:'RANGE',expression:'id',description:'10',rows:1}]}))
  vi.stubGlobal('fetch',fetch)
  return fetch
