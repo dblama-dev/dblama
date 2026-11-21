@@ -2,6 +2,8 @@
 
 dblama is a self-hosted web interface for MySQL, MariaDB and PostgreSQL. A single Go executable serves the Vue interface. Sign in with your database credentials to browse tables, edit rows and schemas, run SQL, and import or export data.
 
+![The books table in dblama showing eight books with their authors, genres, prices, and stock levels](docs/screenshots/table-browser.png)
+
 ## Quick start
 
 Choose either option below and run the commands from the repository root. Once dblama is running, open [localhost:8080](http://localhost:8080) and sign in with your database credentials.
@@ -22,7 +24,7 @@ Requires Go 1.26.8 or newer, Node.js 24, npm and Make.
 ```sh
 npm --prefix frontend ci
 make build
-LISTEN=127.0.0.1:8080 ./dblama
+./dblama
 ```
 
 ## Environment variables
