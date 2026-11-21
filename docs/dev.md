@@ -17,6 +17,15 @@ LISTEN=127.0.0.1:8080 ./dblama
 
 `make build` compiles the Vue application into `frontend/dist/` before Go embeds it in the executable. Open [localhost:8080](http://localhost:8080) to use the built application.
 
+## Build and run a local Docker image
+
+```sh
+docker build -t dblama .
+docker run --rm -p 127.0.0.1:8080:8080 dblama
+```
+
+Open [localhost:8080](http://localhost:8080) and sign in using a database hostname reachable from the container.
+
 ## Test a change
 
 | Command | What it checks |

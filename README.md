@@ -6,25 +6,35 @@ dblama is a self-hosted web interface for MySQL, MariaDB and PostgreSQL. A singl
 
 ## Quick start
 
-Choose either option below and run the commands from the repository root. Once dblama is running, open [localhost:8080](http://localhost:8080) and sign in with your database credentials.
+Once dblama is running, open [localhost:8080](http://localhost:8080) and sign in with your database credentials.
 
 ### Docker
 
+Run the release image from GitHub Container Registry with Docker.
+
 ```sh
-docker build -t dblama .
-docker run --rm -p 127.0.0.1:8080:8080 dblama
+docker run --rm -p 127.0.0.1:8080:8080 ghcr.io/dblama-dev/dblama:latest
 ```
+
+To pin a version, replace `latest` with the release number without the leading `v`.
 
 Use a database hostname reachable from the container. If your database runs in another container, attach dblama to the same Docker network and use the database container's name.
 
-### Local build
+### Standalone binary
 
-Requires Go 1.26.8 or newer, Node.js 24, npm and Make.
+Download the archive for your platform from the [latest release](https://github.com/dblama-dev/dblama/releases/latest), extract it, and run dblama from that folder.
+
+**Linux / macOS**
 
 ```sh
-npm --prefix frontend ci
-make build
-./dblama
+LISTEN=127.0.0.1:8080 ./dblama
+```
+
+**Windows (PowerShell)**
+
+```powershell
+$env:LISTEN = "127.0.0.1:8080"
+.\dblama.exe
 ```
 
 ## Environment variables
