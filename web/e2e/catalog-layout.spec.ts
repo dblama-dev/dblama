@@ -29,7 +29,8 @@ test('mobile catalog keeps table names readable and database actions in scope', 
     await page.goto(dbPath(db))
     await page.locator('.db-view').getByRole('link', { name: 'Relationships', exact: true }).click()
     await expect(page).toHaveURL(dbPath(db, 'relationships') + (engine === 'postgres' ? '?schema=public' : ''))
-    await page.getByRole('button', { name: 'Theme', exact: true }).click()
+    await page.getByRole('button', { name: 'Settings', exact: true }).click()
+    await page.getByRole('dialog').getByRole('radio', { name: 'Dark' }).check()
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
     await expect(page.locator('html')).toHaveCSS('opacity', '1')
   } finally {

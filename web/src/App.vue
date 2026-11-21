@@ -5,11 +5,10 @@
 import { provide, watchEffect } from 'vue'
 import { UiNotificationProvider } from './ui/layers'
 import i18n from './i18n'
-import { setupTheme, themeModeKey, themeToggleKey } from './theme'
+import { setupTheme, themeModeKey } from './theme'
 
-const { dark, toggle } = setupTheme()
+const dark = setupTheme()
 provide(themeModeKey, dark)
-provide(themeToggleKey, toggle)
 watchEffect(() => {
   document.documentElement.dataset.theme = dark.value ? 'dark' : 'light'
   document.documentElement.lang = i18n.global.locale.value

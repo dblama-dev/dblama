@@ -47,6 +47,7 @@
     <g v-else-if="name === 'logout'"><path d="M10 4H4v16h6m4-12 4 4-4 4m-5-4h10"/></g>
     <g v-else-if="name === 'eye'"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Zm13 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></g>
     <g v-else-if="name === 'settings'"><path d="M4 7h8m4 0h4M4 17h3m4 0h9M16 7a2 2 0 1 1-4 0 2 2 0 0 1 4 0Zm-5 10a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z"/></g>
+    <g v-else-if="name === 'gear'"><path d="m9.5 3-.6 2.3-1.5.9-2.3-.6-2.4 4.2 1.7 1.7v1.6l-1.7 1.7L5.1 19l2.3-.6 1.5.9.6 2.2h5l.6-2.2 1.5-.9 2.3.6 2.4-4.2-1.7-1.7v-1.6l1.7-1.7-2.4-4.2-2.3.6-1.5-.9-.6-2.3z"/><circle cx="12" cy="12.25" r="3"/></g>
     <g v-else-if="name === 'activity'"><path d="M2 12h5l3-8 4 16 3-8h5"/></g>
     <g v-else-if="name === 'upload'"><path d="M12 16V3m-5 5 5-5 5 5M4 16v4h16v-4"/></g>
     <g v-else-if="name === 'bell'"><path d="M4.5 17 6 14v-4a6 6 0 1 1 12 0v4l1.5 3h-15ZM10 20a2 2 0 0 0 4 0"/></g>

@@ -1,7 +1,10 @@
 <template>
-  <main class="login-view">
-    <header class="login-brand"><span class="db-brand-mark"><UiIcon name="stack" :size="23" /></span>DB Manager</header>
-    <div class="login-stage">
+  <div class="login-view">
+    <header class="login-header">
+      <span class="login-brand"><span class="db-brand-mark"><UiIcon name="stack" :size="23" /></span>DB Manager</span>
+      <AppSettings />
+    </header>
+    <main class="login-stage">
       <section class="login-card db-panel">
         <header class="login-card__head">
           <span class="db-heading-icon"><UiIcon name="server" :size="22" /></span>
@@ -33,8 +36,8 @@
           </ui-button>
         </form>
       </section>
-    </div>
-  </main>
+    </main>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -44,6 +47,7 @@ import { useI18n } from 'vue-i18n'
 import { UiButton, UiInput, UiSelect, useNotification } from '../ui'
 
 import UiIcon from '../components/UiIcon.vue'
+import AppSettings from '../components/AppSettings.vue'
 import { ApiError } from '../api/client'
 import { useSessionStore } from '../stores/session'
 
@@ -126,7 +130,8 @@ async function submit(): Promise<void> {
 
 <style scoped>
 .login-view { display: flex; flex-direction: column; min-height: 100dvh; color: var(--db-ink); background-color: var(--db-sidebar); background-image: radial-gradient(color-mix(in srgb,var(--db-line) 78%,transparent) .85px,transparent .85px); background-size: 17px 17px; }
-.login-brand { display: flex; align-items: center; gap: 11px; padding: 15px clamp(16px,3vw,42px); background: var(--db-panel); border-bottom: 1px solid var(--db-line); font-size: 20px; font-weight: 650; letter-spacing: -.045em; }
+.login-header { display: flex; align-items: center; justify-content: space-between; padding: 15px clamp(16px,3vw,42px); background: var(--db-panel); border-bottom: 1px solid var(--db-line); }
+.login-brand { display: flex; align-items: center; gap: 11px; font-size: 20px; font-weight: 650; letter-spacing: -.045em; }
 .login-stage { flex: 1; display: grid; place-items: center; padding: 28px 16px; }
 .login-card { width: min(100%,448px); overflow: hidden; box-shadow: 0 8px 32px #253a6b0a; }
 .login-card__head { padding: 19px 25px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--db-line); background: linear-gradient(105deg,var(--db-panel),var(--db-tint)); }

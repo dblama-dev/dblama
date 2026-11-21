@@ -13,12 +13,7 @@
     <div class="app-topbar__actions">
       <WorkspaceSearch />
       <span v-if="driver" class="session-status" :title="driver.user + ' @ ' + driver.host"><i aria-hidden="true"></i>{{ t('shell.connected') }}</span>
-      <button type="button" class="icon-button" :title="t('topbar.theme')" :aria-label="t('topbar.theme')" @click="toggleTheme">
-        <UiIcon name="moon" :size="16" />
-      </button>
-      <div class="languages" role="group" :aria-label="t('shell.language')">
-        <button v-for="lang in languages" :key="lang" type="button" :aria-pressed="locale === lang" @click="locale = lang">{{ lang.toUpperCase() }}</button>
-      </div>
+      <AppSettings />
       <button type="button" class="sign-out" :aria-label="t('topbar.logout')" :title="t('topbar.logout')" @click="logout">
         <UiIcon name="logout" :size="15" /><span>{{ t('topbar.logout') }}</span>
       </button>
@@ -27,25 +22,23 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject } from 'vue'
+import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
 import { useCatalogStore } from '../stores/catalog'
 import { useSessionStore } from '../stores/session'
-import { themeToggleKey } from '../theme'
+import AppSettings from './AppSettings.vue'
 import UiIcon from './UiIcon.vue'
 import { objectIcons } from '../lib/workspaceNavigation'
 import WorkspaceSearch from './WorkspaceSearch.vue'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const router = useRouter()
 const route = useRoute()
 const store = useSessionStore()
 const catalog = useCatalogStore()
-const toggleTheme = inject(themeToggleKey, () => {})
 const driver = computed(() => store.sessionInfo?.driver)
-const languages = ['ru', 'en'] as const
 interface Crumb { label: string; to?: string; identifier?: boolean }
 const routeLabels: Record<string, string> = {
   server: 'server.title', 'server-users': 'admin.users', 'server-processes': 'admin.monitor',
@@ -94,7 +87,7 @@ async function logout(): Promise<void> {
 
 <style scoped>
 .app-topbar { min-width: 0; width: 100%; height: 59px; display: flex; align-items: center; justify-content: space-between; gap: 15px; color: var(--db-ink); }
-.breadcrumbs, .app-topbar__actions, .breadcrumbs__home, .sign-out, .session-status, .languages, .icon-button { display: flex; align-items: center; }
+.breadcrumbs, .app-topbar__actions, .breadcrumbs__home, .sign-out, .session-status { display: flex; align-items: center; }
 .breadcrumbs { flex: 1; min-width: 0; gap: 9px; flex-wrap: wrap; line-height: 1.35; }
 .breadcrumbs > span, .breadcrumbs > a { color: var(--db-muted); font-size: 12px; overflow: hidden; max-width: 28ch; text-overflow: ellipsis; white-space: nowrap; text-decoration: none; }
 .breadcrumbs__home { gap: 7px; }
@@ -103,16 +96,11 @@ async function logout(): Promise<void> {
 .breadcrumbs > .breadcrumb-current { color: var(--db-ink); }
 .breadcrumbs a:hover { color: var(--db-accent); }
 .app-topbar__actions { gap: 8px; flex-shrink: 0; }
-.app-topbar button:not(.jump-trigger) { cursor: pointer; color: var(--db-muted); border: 0; background: transparent; font: inherit; }
-.icon-button, .sign-out { justify-content: center; height: 30px; padding: 0 7px; border-radius: 6px; }
-.sign-out { gap: 6px; }
+.sign-out { cursor: pointer; color: var(--db-muted); border: 0; background: transparent; font: inherit; justify-content: center; height: 30px; padding: 0 7px; border-radius: 6px; gap: 6px; }
 .sign-out span { font-size: 12px; }
-.app-topbar button:hover { color: var(--db-accent); background: var(--db-tint); }
+.sign-out:hover { color: var(--db-accent); background: var(--db-tint); }
 .session-status { gap: 6px; margin-right: 6px; color: var(--db-muted); font-size: 11px; }
 .session-status i { display: block; width: 6px; height: 6px; border-radius: 50%; background: #31a87c; }
-.languages { padding: 2px; border-radius: 6px; border: 1px solid var(--db-line); }
-.languages button { border-radius: 4px; font-size: 11px; line-height: 20px; padding: 0 5px; }
-.languages button[aria-pressed="true"] { background: var(--db-tint); color: var(--db-accent); font-weight: 600; }
 @media (max-width: 1030px) { .session-status { display:none; } .breadcrumbs > span, .breadcrumbs > a { max-width: 15ch; } }
 @media (max-width: 719px) {
   .app-topbar { min-height: 48px; height: auto; gap: 5px; }

@@ -55,6 +55,9 @@ export default {
     },
   },
   topbar: {
+    settings: 'Настройки',
+    light: 'Светлая',
+    dark: 'Тёмная',
     theme: 'Тема',
     logout: 'Выйти',
   },
