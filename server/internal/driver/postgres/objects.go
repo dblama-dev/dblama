@@ -17,7 +17,7 @@ var _ driver.TriggerManager = (*PostgresDriver)(nil)
 var _ driver.RoutineManager = (*PostgresDriver)(nil)
 
 func (d *PostgresDriver) objectTarget(ctx context.Context, db, name string) (string, error) {
-	if db != d.loginDB || db == "" || name == "" || strings.ContainsRune(name, 0) {
+	if db != d.database || db == "" || name == "" || strings.ContainsRune(name, 0) {
 		return "", fmt.Errorf("%w: database must match connection and object name is required", driver.ErrObjectValidation)
 	}
 	return sqlgen.QuoteIdentPg(d.schemaFor(ctx)) + "." + sqlgen.QuoteIdentPg(name), nil

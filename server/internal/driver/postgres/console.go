@@ -29,37 +29,33 @@ import (
 // the spec's §13.5 ban targets the SHARED pool, and this connection is
 // one-shot and closed under defer.
 
-// consoleQuery is one registered running console query.
-type consoleQuery struct {
-	pid int64
-}
-
-// consoleRegistry maps queryID → running console query.
+// consoleRegistry tracks the dedicated PostgreSQL connection for each running query.
 type consoleRegistry struct {
 	mu       sync.Mutex
-	registry map[string]consoleQuery
+	registry map[string]*pgconn.PgConn
 }
 
-func (r *consoleRegistry) add(id string, q consoleQuery) {
+func (r *consoleRegistry) add(id string, conn *pgconn.PgConn) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.registry == nil {
-		r.registry = make(map[string]consoleQuery)
+		r.registry = make(map[string]*pgconn.PgConn)
 	}
-	r.registry[id] = q
+	r.registry[id] = conn
 }
 
-func (r *consoleRegistry) remove(id string) {
+func (r *consoleRegistry) remove(id string, conn *pgconn.PgConn) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	delete(r.registry, id)
+	if r.registry[id] == conn {
+		delete(r.registry, id)
+	}
 }
 
-func (r *consoleRegistry) lookup(id string) (consoleQuery, bool) {
+func (r *consoleRegistry) lookup(id string) *pgconn.PgConn {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	q, ok := r.registry[id]
-	return q, ok
+	return r.registry[id]
 }
 
 // ExecSQL implements driver.Driver: one Result per statement, MaxRows
@@ -72,8 +68,8 @@ func (d *PostgresDriver) ExecSQL(ctx context.Context, db, query, queryID string,
 	if db == "" {
 		return nil, fmt.Errorf("exec sql: %w", sqlgen.ErrEmptyIdentifier)
 	}
-	if db != d.loginDB {
-		return nil, fmt.Errorf("exec sql: database %s is not the login database %s", db, d.loginDB)
+	if db != d.database {
+		return nil, fmt.Errorf("exec sql: database %q does not match the connection database %q", db, d.database)
 	}
 	maxRows := opts.MaxRows
 	if maxRows <= 0 {
@@ -94,15 +90,6 @@ func (d *PostgresDriver) ExecSQL(ctx context.Context, db, query, queryID string,
 	}
 	defer discardConnection(conn)
 
-	if queryID != "" {
-		var pid int64
-		if err := conn.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&pid); err != nil {
-			return nil, fmt.Errorf("exec sql: pg_backend_pid: %w", err)
-		}
-		d.console.add(queryID, consoleQuery{pid: pid})
-		defer d.console.remove(queryID)
-	}
-
 	results := make([]driver.Result, 0, 4)
 	start := time.Now()
 	err = conn.Raw(func(driverConn any) error {
@@ -110,10 +97,15 @@ func (d *PostgresDriver) ExecSQL(ctx context.Context, db, query, queryID string,
 		if !ok {
 			return fmt.Errorf("exec sql: raw conn is %T", driverConn)
 		}
-		if _, err := sc.Conn().PgConn().Exec(ctx, "SET search_path TO "+sqlgen.QuoteIdentPg(schema)).ReadAll(); err != nil {
+		pgConn := sc.Conn().PgConn()
+		if _, err := pgConn.Exec(ctx, "SET search_path TO "+sqlgen.QuoteIdentPg(schema)).ReadAll(); err != nil {
 			return fmt.Errorf("exec sql: set search_path: %w", err)
 		}
-		mr := sc.Conn().PgConn().Exec(ctx, query)
+		mr := pgConn.Exec(ctx, query)
+		if queryID != "" {
+			d.session.console.add(queryID, pgConn)
+			defer d.session.console.remove(queryID, pgConn)
+		}
 		set := 0
 		for mr.NextResult() {
 			rr := mr.ResultReader()
@@ -191,19 +183,16 @@ func consoleValue(v []byte) any {
 	return string(v)
 }
 
-// CancelQuery cancels the backend running the query registered under
-// queryID. An unknown queryID is not an error (already finished); a
-// backend that vanished before the cancel lands (57P01) is the same
-// not-an-error case.
+// CancelQuery sends a cancel request to the running query's backend. pgx
+// uses a separate socket and the backend's secret, so this works without
+// a pool connection. The console discards its dedicated connection after
+// execution, so a late cancel can only target that original backend.
 func (d *PostgresDriver) CancelQuery(ctx context.Context, queryID string) error {
-	q, ok := d.console.lookup(queryID)
-	if !ok {
+	conn := d.session.console.lookup(queryID)
+	if conn == nil {
 		return nil
 	}
-	if _, err := d.db.ExecContext(ctx, "SELECT pg_cancel_backend($1)", q.pid); err != nil {
-		if strings.Contains(err.Error(), "57P01") {
-			return nil
-		}
+	if err := conn.CancelRequest(ctx); err != nil {
 		return fmt.Errorf("cancel query: %w", err)
 	}
 	return nil

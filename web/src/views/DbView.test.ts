@@ -6,13 +6,14 @@ import i18n from '../i18n'
 import { useCatalogStore } from '../stores/catalog'
 import DbView from './DbView.vue'
 import TableTransfer from '../components/TableTransfer.vue'
+import DatabaseActions from '../components/DatabaseActions.vue'
 vi.mock('../api/client', () => ({ api: vi.fn() }))
 const push = vi.hoisted(() => vi.fn())
 vi.mock('vue-router', () => ({ useRoute: () => ({ params: {db:'app db'}, query:{schema:'Odd Schema'} }), useRouter: () => ({ push,replace:vi.fn() }) }))
 it('offers the current selection to cross-database table transfer', async () => {
  const pinia=createPinia();setActivePinia(pinia)
  vi.mocked(api).mockResolvedValue({ tables:[{name:'items',rows:3,sizeBytes:100,engine:'InnoDB',comment:'',isView:false}] })
- const wrapper=mount(DbView,{global:{plugins:[pinia,i18n],stubs:{DatabaseActions:true,TableTransfer:true}}})
+ const wrapper=mount(DbView,{global:{plugins:[pinia,i18n],stubs:{TableTransfer:true}}})
  await flushPromises()
  expect(wrapper.text()).toContain('items')
  await wrapper.get('input[aria-label=items]').setValue(true)
@@ -23,7 +24,7 @@ it('offers the current selection to cross-database table transfer', async () => 
 it('selects all visible base tables and confirms a bulk truncate',async()=>{
  const pinia=createPinia();setActivePinia(pinia)
  vi.mocked(api).mockResolvedValue({tables:[{name:'items',rows:3,sizeBytes:100,isView:false},{name:'other',rows:2,sizeBytes:30,isView:false},{name:'view',rows:0,sizeBytes:0,isView:true}]})
- const wrapper=mount(DbView,{global:{plugins:[pinia,i18n],stubs:{DatabaseActions:true,TableTransfer:true}}});await flushPromises()
+ const wrapper=mount(DbView,{global:{plugins:[pinia,i18n],stubs:{TableTransfer:true}}});await flushPromises()
  await wrapper.get('[data-select-all]').setValue(true)
  expect(wrapper.findComponent(TableTransfer).props('tables')).toEqual(['items','other'])
  expect(api).not.toHaveBeenCalledWith('POST',expect.anything(),expect.anything())
@@ -33,18 +34,14 @@ it('selects all visible base tables and confirms a bulk truncate',async()=>{
  wrapper.unmount()
 })
 
-it('shows database operations on demand and offers bulk operations only after selection', async () => {
+it('keeps database administration off the catalog and offers bulk operations only after selection', async () => {
  const pinia = createPinia()
  vi.mocked(api).mockResolvedValue({tables:[{name:'items',rows:3,sizeBytes:100,isView:false}]})
  const wrapper = mount(DbView, {attachTo:document.body, global:{plugins:[pinia,i18n], stubs:{TableTransfer:true}}})
  await flushPromises()
  const { UiPopconfirm } = await import('../ui')
  expect(wrapper.findAllComponents(UiPopconfirm)).toHaveLength(0)
- expect(wrapper.find('.database-actions').isVisible()).toBe(false)
- const toggle = wrapper.get('[data-database-actions]')
- await toggle.trigger('click')
- expect(toggle.attributes('aria-expanded')).toBe('true')
- expect(wrapper.get('.database-actions').isVisible()).toBe(true)
+ expect(wrapper.findComponent(DatabaseActions).exists()).toBe(false)
  await wrapper.get('input[aria-label=items]').setValue(true)
  expect(wrapper.findAllComponents(UiPopconfirm)).toHaveLength(2)
  await wrapper.get('input[aria-label=items]').setValue(false)
@@ -55,7 +52,7 @@ it('shows database operations on demand and offers bulk operations only after se
 it('distinguishes an empty database from a search with no matches and can clear the filter', async () => {
  const pinia = createPinia()
  vi.mocked(api).mockResolvedValueOnce({tables:[]})
- const wrapper = mount(DbView, {global:{plugins:[pinia,i18n],stubs:{DatabaseActions:true,TableTransfer:true}}})
+ const wrapper = mount(DbView, {global:{plugins:[pinia,i18n],stubs:{TableTransfer:true}}})
  await flushPromises()
  expect(wrapper.find('[data-empty-database]').exists()).toBe(true)
  vi.mocked(api).mockResolvedValueOnce({tables:[{name:'items',rows:1,sizeBytes:8,isView:false}]})
@@ -73,7 +70,7 @@ it('opens the row insert route for a base table in the current schema', async ()
  setActivePinia(pinia)
  useCatalogStore().$patch({schema:'Odd Schema', schemaAware:true})
  vi.mocked(api).mockResolvedValue({tables:[{name:'table / 1',rows:3,sizeBytes:100,isView:false},{name:'view',rows:0,sizeBytes:0,isView:true}]})
- const wrapper = mount(DbView,{global:{plugins:[pinia,i18n],stubs:{DatabaseActions:true,TableTransfer:true}}})
+ const wrapper = mount(DbView,{global:{plugins:[pinia,i18n],stubs:{TableTransfer:true}}})
  await flushPromises()
  const insert = wrapper.findAll('[data-insert-row]')
  expect(insert).toHaveLength(1)

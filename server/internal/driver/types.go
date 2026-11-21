@@ -206,7 +206,7 @@ type ExecOpts struct {
 // table (the dump is a single delimited file); for sql an empty Tables
 // list means the whole database (non-view tables). DropIfExists and
 // IfNotExists only apply to the sql format; Gzip wraps the output in a
-// gzip stream. MySQL honors the selected database; PostgreSQL stays login-bound.
+// gzip stream. The dump reads from the selected database.
 type ExportRequest struct {
 	// CSVEncoding escaped uses \N for NULL and prefixes literal leading backslashes.
 	// Omitted retains legacy raw MySQL output and escaped PostgreSQL output.
@@ -332,8 +332,7 @@ type Driver interface {
 	// WITH), so a row-returning statement outside that list comes back
 	// without rows. The first failing statement aborts the rest: the
 	// Results accumulated so far are returned together with the error.
-	// A dedicated connection per call: db other than the login database
-	// is selected via USE on that connection.
+	// Each call uses a dedicated connection to the selected database.
 	ExecSQL(ctx context.Context, db, query string, queryID string, opts ExecOpts) ([]Result, error)
 	// CancelQuery cancels the running query registered under queryID.
 	// An unknown queryID (the query already finished, or never ran) is
@@ -357,8 +356,7 @@ type Driver interface {
 	// current row and statement is ever buffered.
 	Export(ctx context.Context, db string, req ExportRequest, w io.Writer) error
 	// ImportSQL executes an SQL script read from r against database db
-	// on a dedicated connection (db other than the login database is
-	// selected via USE, mirroring ExecSQL). A streaming SQL scanner keeps
+	// on a dedicated connection to the selected database. A streaming SQL scanner keeps
 	// one statement in memory at a time. MySQL DELIMITER blocks and
 	// PostgreSQL dollar-quoted bodies remain intact and are executed in
 	// order through ExecContext;

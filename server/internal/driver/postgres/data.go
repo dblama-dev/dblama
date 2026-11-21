@@ -20,7 +20,7 @@ import (
 // The browsing queries qualify the current schema (SetSchema swaps it)
 // with the sqlgen Pg builders: double-quoted identifiers and $1..$N
 // placeholders, parameters never case-folded. The db argument of every
-// method below is the login database — validated non-empty to keep the
+// method below is the bound database — validated non-empty to keep the
 // driver contract uniform, it selects nothing on PostgreSQL.
 
 // dataColumnsQuery reads the browsing metadata of one table's columns in

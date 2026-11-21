@@ -28,7 +28,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api/client'
 import type { DatabaseInfo, TableInfo } from '../api/types'
-import { databaseTools, objectDestinations, serverDestinations } from '../lib/workspaceNavigation'
+import { databaseTools, databaseDestinations, serverDestinations } from '../lib/workspaceNavigation'
 import { useCatalogStore } from '../stores/catalog'
 import { useSessionStore } from '../stores/session'
 import UiIcon from './UiIcon.vue'
@@ -58,7 +58,7 @@ const results = computed<Match[]>(() => {
     for (const [action, icon] of Object.entries(databaseTools)) {
       add(t('navigationWorkflows.' + action), icon, catalog.path(base.value + '/' + action), group)
     }
-    for (const item of objectDestinations(group, caps)) add(t(item.label), item.icon, catalog.path(item.path), group)
+    for (const item of databaseDestinations(group, caps)) add(t(item.label), item.icon, catalog.path(item.path), group)
   }
   const server = t('sideNavigation.server')
   add(t('server.title'), 'server', '/server', server)

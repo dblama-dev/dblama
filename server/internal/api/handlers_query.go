@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -36,6 +37,8 @@ type queryResponse struct {
 	Results []driver.Result `json:"results"`
 }
 
+type queryKey struct{ session, query string }
+
 // handleQuery runs a raw SQL batch on one database and returns every
 // statement's result. The queryID binds the run to the client-side cancel
 // button via POST /api/query/{queryID}/cancel.
@@ -64,7 +67,22 @@ func (s *apiServer) handleQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess, _ := session.FromContext(r.Context())
-	results, err := sess.Driver.ExecSQL(r.Context(), pathParam(r, "db"), req.SQL, req.QueryID,
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	key := queryKey{session: sess.ID, query: req.QueryID}
+	if _, running := s.queries.LoadOrStore(key, cancel); running {
+		WriteErr(w, http.StatusConflict, ErrBadRequest("queryID is already running"))
+		return
+	}
+	defer s.queries.Delete(key)
+	db := pathParam(r, "db")
+	d, release, err := databaseDriver(ctx, sess.Driver, db)
+	if err != nil {
+		writeDriverErr(w, err)
+		return
+	}
+	defer release()
+	results, err := d.ExecSQL(ctx, db, req.SQL, req.QueryID,
 		driver.ExecOpts{MaxRows: req.MaxRows, TimeoutSec: req.TimeoutSec})
 	if err != nil {
 		writeDriverErr(w, err)
@@ -82,7 +100,12 @@ func (s *apiServer) handleQuery(w http.ResponseWriter, r *http.Request) {
 // from the client's point of view.
 func (s *apiServer) handleCancel(w http.ResponseWriter, r *http.Request) {
 	sess, _ := session.FromContext(r.Context())
-	_ = sess.Driver.CancelQuery(r.Context(), pathParam(r, "queryID"))
+	id := pathParam(r, "queryID")
+	cancel, running := s.queries.Load(queryKey{session: sess.ID, query: id})
+	_ = sess.Driver.CancelQuery(r.Context(), id)
+	if running {
+		cancel.(context.CancelFunc)()
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -130,7 +153,13 @@ func (s *apiServer) handleExplain(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess, _ := session.FromContext(r.Context())
-	results, err := sess.Driver.ExecSQL(r.Context(), req.DB, "EXPLAIN "+stmts[0], newQueryID(),
+	d, release, err := databaseDriver(r.Context(), sess.Driver, req.DB)
+	if err != nil {
+		writeDriverErr(w, err)
+		return
+	}
+	defer release()
+	results, err := d.ExecSQL(r.Context(), req.DB, "EXPLAIN "+stmts[0], newQueryID(),
 		driver.ExecOpts{TimeoutSec: explainTimeoutSec})
 	if err != nil {
 		writeDriverErr(w, err)

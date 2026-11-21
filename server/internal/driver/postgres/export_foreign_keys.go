@@ -15,7 +15,7 @@ import (
 // parents transitively. Rows and constraints may form cycles; table creation
 // itself deliberately has no foreign keys, so it needs no topological order.
 func (d *PostgresDriver) prepareTableExport(ctx context.Context, tables []string) ([]string, map[string]driver.TableDef, error) {
-	infos, err := d.ListTables(ctx, d.loginDB)
+	infos, err := d.ListTables(ctx, d.database)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -36,7 +36,7 @@ func (d *PostgresDriver) prepareTableExport(ctx context.Context, tables []string
 		if !ok || isView {
 			return nil, nil, fmt.Errorf("SQL export requires a base table; %q is missing or a view", name)
 		}
-		def, err := d.TableDef(ctx, d.loginDB, name)
+		def, err := d.TableDef(ctx, d.database, name)
 		if err != nil {
 			return nil, nil, err
 		}

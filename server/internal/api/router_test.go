@@ -1915,45 +1915,6 @@ func TestExportHandler_MidstreamErrorAbortsDownload(t *testing.T) {
 	}
 }
 
-// TestExportHandler_PostgresRequiresLoginDatabase checks that PostgreSQL
-// rejects missing/mismatched login databases before sending export headers.
-func TestExportHandler_PostgresRequiresLoginDatabase(t *testing.T) {
-	tests := []struct {
-		name    string
-		loginDB string
-	}{
-		{"login without a database", ""},
-		{"db differs from the login database", "otherdb"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			fake := &stubDriver{info: driver.DriverInfo{Name: "PostgreSQL", Flavor: "postgres"}, exportOutput: "DUMP-DATA"}
-			h := newTestRouter(t, config.Config{LoginRateLimit: testRate}, stubConnectOK(nil, fake))
-			srv := httptest.NewServer(h)
-			t.Cleanup(srv.Close)
-			cookie := loginSessionDB(t, srv, tc.loginDB)
-
-			resp := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/databases/appdb/export",
-				`{"format":"sql","tables":[]}`, cookie)
-			if resp.StatusCode != http.StatusBadRequest {
-				t.Fatalf("POST export status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
-			}
-			b, _ := io.ReadAll(resp.Body)
-			if code := errCode(t, b); code != "bad_request" {
-				t.Errorf("error code = %q, want %q", code, "bad_request")
-			}
-			// Rejected before the headers: the error is the JSON envelope,
-			// not an attachment.
-			if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
-				t.Errorf("error Content-Type = %q, want application/json", ct)
-			}
-			if len(fake.exportCalls) != 0 {
-				t.Errorf("Export called %d times, want 0", len(fake.exportCalls))
-			}
-		})
-	}
-}
-
 // multipartImport sends a POST /api/databases/appdb/import with the given
 // form fields (sent before the file part) and the named file.
 func multipartImport(t *testing.T, srv *httptest.Server, cookie string, fields map[string]string, fileName, fileContent []byte) *http.Response {

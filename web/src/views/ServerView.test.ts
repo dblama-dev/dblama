@@ -58,7 +58,13 @@ describe('ServerView', () => {
     useSessionStore().sessionInfo = { ...sessionInfo, caps: { ...sessionInfo.caps, users: true } }
     const wrapper = mount(ServerView, { global: { plugins: [i18n] } })
     await flushPromises()
-    expect(wrapper.get('a[href="/server/users"]').text()).toContain('Пользователи')
+    const management = wrapper.get('nav[aria-labelledby]')
+    expect(wrapper.get('#' + management.attributes('aria-labelledby')).text()).toBe('Управление сервером')
+    expect(management.get('a[href="/server/users"]').text()).toContain('Пользователи')
+    expect(management.find('a[href="/server/processes"]').exists()).toBe(false)
+    useSessionStore().sessionInfo!.caps.monitor = true
+    await flushPromises()
+    expect(management.get('a[href="/server/processes"]').text()).toContain('Мониторинг')
     await wrapper.get('input[type=search]').setValue('MYD')
     expect(wrapper.find('a[href="/db/mydb"]').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('information_schema')
@@ -79,6 +85,7 @@ describe('ServerView', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('/api/databases', expect.objectContaining({ method: 'GET' }))
     const text = wrapper.text()
+    expect(text).not.toContain('Управление сервером')
     expect(text).toContain('mydb')
     expect(text).toContain('1.5 MB')
     expect(text).toContain('utf8mb4_0900_ai_ci')

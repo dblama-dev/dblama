@@ -26,7 +26,7 @@
             <ui-input v-model:value="form.password" :input-props="{ id:'login-password' }" type="password" show-password-on="click" autocomplete="current-password" :placeholder="t('login.password')" />
           </div>
           <div class="login-field"><label for="login-db">{{ t('login.database') }}</label>
-            <ui-input v-model:value="form.database" :input-props="{ id:'login-db', autocapitalize:'none', spellcheck:false }" :placeholder="form.driver === 'postgres' ? t('workspace.databaseName') : t('login.databaseOptional')" />
+            <ui-input v-model:value="form.database" :input-props="{ id:'login-db', autocapitalize:'none', spellcheck:false }" :placeholder="t('login.databaseOptional')" />
           </div>
           <ui-button attr-type="submit" type="primary" block :loading="submitting" :disabled="!canSubmit">
             {{ t('login.submit') }}<UiIcon name="arrow-right" />

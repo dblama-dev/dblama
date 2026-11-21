@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test'
-import { dbPath, expect, login, runSQL, test } from './fixtures'
+import { dbPath, expect, runSQL, test } from './fixtures'
 
 /** Remove only this test's generated databases, including after an interrupted rename. */
 async function cleanupDatabases(page: Page, prefix: string, names: string[]): Promise<void> {
@@ -18,20 +18,10 @@ async function cleanupDatabases(page: Page, prefix: string, names: string[]): Pr
   }
 }
 
-test('database create, rename with data, and exact-name drop confirmation', async ({ page, db, engine, prefix }) => {
+test('database create, rename with data, and exact-name drop confirmation', async ({ page, prefix }) => {
   const original = `${prefix}admin`
   const renamed = `${prefix}renamed`
   const table = `${prefix}records`
-  let connectedDatabase = db
-  // PostgreSQL sessions bind to one database; reconnect explicitly for data access.
-  async function reconnect(database: string): Promise<void> {
-    if (engine !== 'postgres' || connectedDatabase === database) return
-    await page.getByRole('button', { name: 'Sign out', exact: true }).click()
-    await expect(page).toHaveURL(/\/login$/)
-    await login(page, undefined, database)
-    await expect(page).toHaveURL(/\/server$/)
-    connectedDatabase = database
-  }
   try {
     await page.goto('/server')
     const server = page.locator('.server-view')
@@ -48,59 +38,49 @@ test('database create, rename with data, and exact-name drop confirmation', asyn
     await expect(server.getByRole('cell', { name: original, exact: true })).toBeVisible()
     await server.getByRole('cell', { name: original, exact: true }).click()
     await expect(page.locator('.db-view').getByRole('heading', { name: original, exact: true })).toBeVisible()
-    await reconnect(original)
-    await page.goto(dbPath(original))
     await runSQL(page, `CREATE TABLE ${table} (id INTEGER PRIMARY KEY, label VARCHAR(80)); INSERT INTO ${table} (id, label) VALUES (7, 'preserved after rename');`)
 
-    await reconnect(db)
-    await page.goto(dbPath(original))
+    await page.goto(dbPath(original, 'operations'))
+    const operations = page.locator('.database-operations-view')
+    await operations.getByRole('button', { name: 'Rename database', exact: true }).click()
+    await expect(operations.getByRole('button', { name: 'Rename', exact: true })).toBeDisabled()
+    await operations.getByLabel('Database name', { exact: true }).fill(renamed)
+    await operations.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(operations.getByRole('heading', { name: original, exact: true })).toBeVisible()
+    await operations.getByRole('button', { name: 'Rename database', exact: true }).click()
+    await operations.getByLabel('Database name', { exact: true }).fill(renamed)
+    await operations.getByRole('button', { name: 'Rename', exact: true }).click()
     const database = page.locator('.db-view')
-    const operations = database.getByRole('button', { name:'Database actions', exact:true })
-    await operations.click()
-    await database.getByRole('button', { name: 'Rename database', exact: true }).click()
-    await expect(database.getByRole('button', { name: 'Rename', exact: true })).toBeDisabled()
-    await database.getByLabel('Database name', { exact: true }).fill(renamed)
-    await database.getByRole('button', { name: 'Cancel', exact: true }).click()
-    await expect(database.getByRole('heading', { name: original, exact: true })).toBeVisible()
-    await database.getByRole('button', { name: 'Rename database', exact: true }).click()
-    await database.getByLabel('Database name', { exact: true }).fill(renamed)
-    await database.getByRole('button', { name: 'Rename', exact: true }).click()
     await expect(database.getByRole('heading', { name: renamed, exact: true })).toBeVisible()
-    await reconnect(renamed)
-    await page.goto(dbPath(renamed))
     await expect(database.getByRole('button', { name: table, exact: true })).toBeVisible()
     await runSQL(page, `SELECT id, label FROM ${table};`)
     await expect(page.locator('.resultgrid tbody tr')).toHaveCount(1)
     await expect(page.locator('.resultgrid').getByRole('cell', { name: '7', exact: true })).toBeVisible()
     await expect(page.locator('.resultgrid').getByRole('cell', { name: 'preserved after rename', exact: true })).toBeVisible()
 
-    await reconnect(db)
     await page.goto('/server')
     await expect(server.getByRole('cell', { name: original, exact: true })).toHaveCount(0)
     await expect(server.getByRole('cell', { name: renamed, exact: true })).toBeVisible()
-    await server.getByRole('cell', { name: renamed, exact: true }).click()
-    await operations.click()
-    await database.getByRole('button', { name: 'Drop database', exact: true }).click()
-    const confirmName = database.getByLabel(`Type the database name to confirm deletion: ${renamed}`, { exact: true })
-    const confirmDrop = database.getByRole('button', { name: 'Confirm drop', exact: true })
+    await page.goto(dbPath(renamed, 'operations'))
+    await operations.getByRole('button', { name: 'Drop database', exact: true }).click()
+    const confirmName = operations.getByLabel(`Type the database name to confirm deletion: ${renamed}`, { exact: true })
+    const confirmDrop = operations.getByRole('button', { name: 'Confirm drop', exact: true })
     await expect(confirmDrop).toBeDisabled()
     await confirmName.fill(`${renamed}_wrong`)
     await expect(confirmDrop).toBeDisabled()
     await confirmName.fill(renamed)
     await expect(confirmDrop).toBeEnabled()
-    await database.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await operations.getByRole('button', { name: 'Cancel', exact: true }).click()
     await page.goto('/server')
     await expect(server.getByRole('cell', { name: renamed, exact: true })).toBeVisible()
-    await server.getByRole('cell', { name: renamed, exact: true }).click()
-    await operations.click()
-    await database.getByRole('button', { name: 'Drop database', exact: true }).click()
+    await page.goto(dbPath(renamed, 'operations'))
+    await operations.getByRole('button', { name: 'Drop database', exact: true }).click()
     await confirmName.fill(renamed)
     await confirmDrop.click()
     await expect(page).toHaveURL(/\/server$/)
     await expect(server.getByRole('button', { name: 'Create database', exact: true })).toBeVisible()
     await expect(server.getByRole('cell', { name: renamed, exact: true })).toHaveCount(0)
   } finally {
-    await reconnect(db)
     await cleanupDatabases(page, prefix, [original, renamed])
   }
 })

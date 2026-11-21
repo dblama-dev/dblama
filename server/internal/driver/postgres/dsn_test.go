@@ -68,6 +68,18 @@ func TestDSNRedactable(t *testing.T) {
 	}
 }
 
+func TestDSNRequestsUTF8ClientEncoding(t *testing.T) {
+	cfg := driver.ConnConfig{Host: "db.example.com", Port: "5432", User: "postgres", Database: "app"}
+
+	connCfg, err := pgx.ParseConfig(DSN(cfg, ""))
+	if err != nil {
+		t.Fatalf("ParseConfig error: %v", err)
+	}
+	if got := connCfg.RuntimeParams["client_encoding"]; got != "UTF8" {
+		t.Errorf("startup client_encoding = %q, want UTF8 for simple protocol queries", got)
+	}
+}
+
 func TestConnectMalformedConfigDoesNotLeakPassword(t *testing.T) {
 	const password = "secret-DSN-token"
 	_, err := Connect(context.Background(), driver.ConnConfig{Host: "localhost", Port: "not-a-port", User: "postgres", Password: password, Database: "app"})

@@ -5,6 +5,17 @@ export type Engine = 'mysql' | 'mariadb' | 'postgres'
 const engine = (process.env.E2E_ENGINE ?? 'mysql') as Engine
 const database = process.env.E2E_DB_NAME ?? 'dbmanager_e2e'
 
+export function loginRequest(dbName: string, password = process.env.E2E_DB_PASSWORD ?? 'e2e-password') {
+  return {
+    driver: engine,
+    host: process.env.E2E_DB_HOST ?? '127.0.0.1',
+    port: process.env.E2E_DB_PORT!,
+    user: process.env.E2E_DB_USER ?? (engine === 'postgres' ? 'postgres' : 'root'),
+    password,
+    database: dbName,
+  }
+}
+
 export function dbPath(db: string, suffix = ''): string {
   return `/db/${encodeURIComponent(db)}${suffix ? '/' + suffix.replace(/^\//, '') : ''}`
 }
@@ -24,17 +35,18 @@ export async function selectOption(page: Page, control: Locator, text: string): 
   await page.keyboard.press('Escape')
   await expect(page.locator('.ui-select__list:visible')).toHaveCount(0)
 }
-export async function login(page: Page, password = process.env.E2E_DB_PASSWORD ?? 'e2e-password', dbName = database): Promise<void> {
+export async function login(page: Page, password?: string, dbName = database): Promise<void> {
+  const connection = loginRequest(dbName, password)
   await page.goto('/login')
   const form = page.locator('.login-view')
   await selectOption(page, form.locator('.ui-select'), { mysql: 'MySQL', mariadb: 'MariaDB', postgres: 'PostgreSQL' }[engine])
   const inputs = form.locator('input.ui-input__control')
   // UiSelect's search input is not an UiInput; these are the five text connection fields.
-  await inputs.nth(0).fill(process.env.E2E_DB_HOST ?? '127.0.0.1')
-  await inputs.nth(1).fill(process.env.E2E_DB_PORT!)
-  await inputs.nth(2).fill(process.env.E2E_DB_USER ?? (engine === 'postgres' ? 'postgres' : 'root'))
-  await inputs.nth(3).fill(password)
-  await inputs.nth(4).fill(dbName)
+  await inputs.nth(0).fill(connection.host)
+  await inputs.nth(1).fill(connection.port)
+  await inputs.nth(2).fill(connection.user)
+  await inputs.nth(3).fill(connection.password)
+  await inputs.nth(4).fill(connection.database)
   await form.getByRole('button', { name: 'Connect', exact: true }).click()
 }
 export async function runSQL(page: Page, sql: string): Promise<void> {
@@ -53,13 +65,14 @@ export async function runSQL(page: Page, sql: string): Promise<void> {
   await expect(page.locator('.console__error')).toHaveCount(0)
 }
 
-export const test = base.extend<{ db: string; engine: Engine; prefix: string }>({
+export const test = base.extend<{ db: string; engine: Engine; prefix: string; loginDatabase: string }>({
   db: async ({}, use) => { await use(database) },
   engine: async ({}, use) => { await use(engine) },
   prefix: async ({}, use) => { await use(`e2e_${randomUUID().replaceAll('-', '').slice(0, 12)}`) },
-  page: async ({ page }, use) => {
+  loginDatabase: [database, { option: true }],
+  page: async ({ page, loginDatabase }, use) => {
     await page.addInitScript(() => localStorage.setItem('dbm-locale', 'en'))
-    await login(page)
+    await login(page, undefined, loginDatabase)
     await expect(page).toHaveURL(/\/server$/)
     const errors: string[] = []
     page.on('pageerror', error => errors.push(error.message))

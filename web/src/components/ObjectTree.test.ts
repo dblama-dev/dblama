@@ -59,7 +59,7 @@ async function mountTree(): Promise<ReturnType<typeof mount>> {
 
 describe('ObjectTree', () => {
   beforeEach(() => {
-    route.params = {}
+    route.params = { db: 'mydb' }
     setActivePinia(createPinia())
     pushSpy.mockReset()
     mockApi()
@@ -90,10 +90,40 @@ describe('ObjectTree', () => {
     vi.clearAllMocks()
   })
 
-  it('preselects the session database and renders tables grouped into tables and views', async () => {
+  it.each(['mydb', null])('leaves the sidebar unselected on the server with login database %s', async database => {
+    route.params = {}
+    const info = useSessionStore().sessionInfo!
+    info.database = database
+    info.caps.schemas = true
+    info.caps.sequences = true
+    info.caps.users = true
+    info.caps.monitor = true
+    useCatalogStore().schemaAware = true
+    useCatalogStore().schema = 'public'
+    const wrapper = mount(AppSidebar, { global: { plugins: [i18n], stubs: { RouterLink: RouterLinkStub } } })
+    await flushPromises()
+    expect(wrapper.findComponent(UiSelect).props('value')).toBeNull()
+    expect(wrapper.find('[data-testid="schema-select"]').exists()).toBe(false)
+    expect(wrapper.find('details.advanced-navigation').exists()).toBe(false)
+    expect(wrapper.findComponent(UiTree).exists()).toBe(false)
+    expect(mockedApi.mock.calls).toEqual([['GET', '/api/databases']])
+  })
+
+  it('clears the selection on return to the server, including after catalog refresh', async () => {
+    const wrapper = await mountTree()
+    expect(wrapper.findComponent(UiSelect).props('value')).toBe('mydb')
+    mockedApi.mockClear()
+    route.params = {}
+    useCatalogStore().databaseRevision++
+    await flushPromises()
+    expect(wrapper.findComponent(UiSelect).props('value')).toBeNull()
+    expect(wrapper.findComponent(UiTree).exists()).toBe(false)
+    expect(mockedApi.mock.calls).toEqual([['GET', '/api/databases']])
+  })
+
+  it('renders the explicitly opened database with tables grouped into tables and views', async () => {
     const wrapper = await mountTree()
 
-    // Session database mydb is preselected and its tables are loaded.
     expect(mockedApi).toHaveBeenCalledWith('GET', '/api/databases/mydb/tables')
     const text = wrapper.text()
     expect(text).toContain('users')
@@ -129,6 +159,34 @@ describe('ObjectTree', () => {
     expect(wrapper.findComponent(UiSelect).props('value')).toBe('otherdb')
     expect(wrapper.text()).toContain('other_records')
     expect(wrapper.text()).not.toContain('users')
+  })
+
+  it('hides the previous database tables while the selected PostgreSQL catalog is loading', async () => {
+    const info = useSessionStore().sessionInfo!
+    info.driver.flavor = 'postgres'
+    info.caps.schemas = true
+    const catalog = useCatalogStore()
+    catalog.schemaAware = true
+    catalog.schema = 'public'
+    let finish!: (value: { tables: TableInfo[] }) => void
+    mockedApi.mockImplementation(async (_method, url) => {
+      if (url === '/api/databases') return databasesPayload
+      if (url.endsWith('/schemas')) return { schemas: ['public'] }
+      if (url === '/api/databases/mydb/tables?schema=public') return { tables }
+      if (url === '/api/databases/otherdb/tables?schema=public') return new Promise(resolve => { finish = resolve })
+      throw new Error(`unexpected url: ${url}`)
+    })
+    const wrapper = await mountTree()
+    expect(wrapper.text()).toContain('orders')
+
+    route.params.db = 'otherdb'
+    await flushPromises()
+    expect(wrapper.findComponent(UiTree).props('disabled')).toBe(true)
+    expect(wrapper.text()).not.toContain('orders')
+
+    finish({ tables: [{ ...tables[0]!, name: 'other_records' }] })
+    await flushPromises()
+    expect(wrapper.text()).toContain('other_records')
   })
 
   it('keeps a newly renamed route database when an older database-list refresh finishes', async () => {
@@ -169,8 +227,14 @@ describe('ObjectTree', () => {
     session.sessionInfo!.caps.users = true
     session.sessionInfo!.caps.monitor = true
     route.params.db = 'otherdb'
+    useCatalogStore().schemaAware = true
     useCatalogStore().schema = 'Odd Schema'
-    mockedApi.mockImplementation(async (_method, path) => path === '/api/schemas' ? { schemas: ['Odd Schema'] } : path === '/api/databases' ? databasesPayload : { tables })
+    mockedApi.mockImplementation(async (_method, path) => {
+      if (path === '/api/databases/otherdb/schemas') return { schemas: ['Odd Schema'] }
+      if (path === '/api/databases') return databasesPayload
+      if (path.includes('/tables')) return { tables }
+      throw new Error(`Unexpected URL: ${path}`)
+    })
     const wrapper = mount(AppSidebar, { global: { plugins: [i18n], stubs: { RouterLink: RouterLinkStub } } })
     await flushPromises()
     expect(wrapper.findComponent(UiSelect).props('filterable')).toBe(true)
@@ -183,8 +247,8 @@ describe('ObjectTree', () => {
     const more = wrapper.get('details.advanced-navigation')
     expect(more.attributes('open')).toBeUndefined()
     const secondary = wrapper.findAllComponents(RouterLinkStub).filter(link => more.element.contains(link.element)).map(link => link.props('to'))
-    expect(secondary).toContain('/server/users')
-    expect(secondary).toContain('/server/processes')
+    expect(secondary).toContain('/db/otherdb/operations?schema=Odd%20Schema')
+    expect(secondary.every(to => String(to).startsWith('/db/otherdb/'))).toBe(true)
     expect(secondary).toContain('/db/otherdb/objects/views?schema=Odd%20Schema')
     expect(secondary).not.toContain('/db/otherdb/objects/events?schema=Odd%20Schema')
   })
@@ -220,20 +284,24 @@ describe('ObjectTree', () => {
     expect(select).toBeTruthy()
     select.vm.$emit('update:value', 'otherdb')
     await flushPromises()
-
+    expect(pushSpy).toHaveBeenCalledWith('/db/otherdb')
+    route.params.db = 'otherdb'
+    await flushPromises()
     expect(mockedApi).toHaveBeenCalledWith('GET', '/api/databases/otherdb/tables')
     expect(catalog.tables).toEqual(tables)
-    expect(pushSpy).toHaveBeenCalledWith('/db/otherdb')
   })
   it('selects PostgreSQL schemas and exposes sequences, preserving schema in navigation', async () => {
     const session = useSessionStore()
+    session.sessionInfo!.database = null
     session.sessionInfo!.caps.schemas = true
     session.sessionInfo!.caps.sequences = true
     session.sessionInfo!.driver.flavor = 'postgres'
+    useCatalogStore().schemaAware = true
+    useCatalogStore().schema = 'public'
     mockedApi.mockImplementation(async (_method, url) => {
       if (url === '/api/databases') return databasesPayload
-      if (url === '/api/schemas') return { schemas: ['public', 'Odd Schema'] }
-      if (url.startsWith('/api/sequences')) return { sequences: [{ name: 'order_seq', lastValue: 0, increment: 1 }] }
+      if (url === '/api/databases/mydb/schemas') return { schemas: ['public', 'Odd Schema'] }
+      if (url.startsWith('/api/databases/mydb/sequences')) return { sequences: [{ name: 'order_seq', lastValue: 0, increment: 1 }] }
       if (url.includes('/tables')) return { tables }
       return undefined
     })
@@ -243,7 +311,7 @@ describe('ObjectTree', () => {
     wrapper.findAllComponents(UiSelect).find(select => select.attributes('data-testid') === 'schema-select')!.vm.$emit('update:value', 'Odd Schema')
     await flushPromises()
     expect(mockedApi).toHaveBeenCalledWith('GET', '/api/databases/mydb/tables?schema=Odd%20Schema')
-    expect(mockedApi).toHaveBeenCalledWith('GET', '/api/sequences?schema=Odd%20Schema')
+    expect(mockedApi).toHaveBeenCalledWith('GET', '/api/databases/mydb/sequences?schema=Odd%20Schema')
     wrapper.findComponent(UiTree).vm.$emit('update:selected-keys', ['table:users'])
     await flushPromises()
     expect(pushSpy).toHaveBeenCalledWith('/db/mydb/table/users?schema=Odd%20Schema')
@@ -251,9 +319,41 @@ describe('ObjectTree', () => {
     // Browser history changes catalog scope through the route guard.
     useCatalogStore().schema = 'public'
     await flushPromises()
-    expect(mockedApi).toHaveBeenLastCalledWith('GET', '/api/sequences?schema=public')
+    expect(mockedApi).toHaveBeenLastCalledWith('GET', '/api/databases/mydb/sequences?schema=public')
     expect(wrapper.find('[data-testid="tree-add-sequence"]').exists()).toBe(true)
     wrapper.unmount()
+  })
+
+  it('loads the new database schemas and sequences when switching away from a database-specific schema', async () => {
+    const session = useSessionStore()
+    session.sessionInfo!.caps.schemas = true
+    session.sessionInfo!.caps.sequences = true
+    session.sessionInfo!.driver.flavor = 'postgres'
+    const catalog = useCatalogStore()
+    catalog.schemaAware = true
+    catalog.schema = 'Odd Schema'
+    mockedApi.mockImplementation(async (_method, url) => {
+      if (url === '/api/databases') return databasesPayload
+      if (url === '/api/databases/mydb/schemas') return { schemas: ['Odd Schema'] }
+      if (url === '/api/databases/otherdb/schemas') return { schemas: ['public'] }
+      if (url === '/api/databases/mydb/sequences?schema=Odd%20Schema') return { sequences: [{ name: 'old_seq', lastValue: 0, increment: 1 }] }
+      if (url === '/api/databases/otherdb/sequences?schema=public') return { sequences: [{ name: 'new_seq', lastValue: 1, increment: 1 }] }
+      if (url.includes('/tables')) return { tables }
+      throw new Error(`Unexpected URL: ${url}`)
+    })
+    const wrapper = await mountTree()
+    expect(wrapper.text()).toContain('old_seq')
+    wrapper.findComponent(UiSelect).vm.$emit('update:value', 'otherdb')
+    await flushPromises()
+    expect(pushSpy).toHaveBeenCalledWith('/db/otherdb')
+
+    route.params.db = 'otherdb'
+    catalog.schema = 'public'
+    await flushPromises()
+    const schema = wrapper.findAllComponents(UiSelect).find(select => select.attributes('data-testid') === 'schema-select')
+    expect(schema?.props('options')).toEqual([{ label: 'public', value: 'public' }])
+    expect(wrapper.text()).toContain('new_seq')
+    expect(wrapper.text()).not.toContain('old_seq')
   })
 
 
@@ -275,7 +375,14 @@ it('keeps database selection and catalog unchanged when navigation is cancelled'
 })
 it('keeps schema unchanged when navigation is cancelled',async()=>{
  useSessionStore().sessionInfo!.caps.schemas=true
- mockedApi.mockImplementation(async (_method,url)=>url==='/api/databases'?databasesPayload:url==='/api/schemas'?{schemas:['public','other']}:{tables})
+ useCatalogStore().schemaAware=true
+ useCatalogStore().schema='public'
+ mockedApi.mockImplementation(async (_method, url) => {
+  if (url === '/api/databases') return databasesPayload
+  if (url === '/api/databases/mydb/schemas') return { schemas: ['public', 'other'] }
+  if (url.includes('/tables')) return { tables }
+  throw new Error(`Unexpected URL: ${url}`)
+ })
  const wrapper=await mountTree();mockedApi.mockClear()
  pushSpy.mockResolvedValueOnce({type:4})
  wrapper.findAllComponents(UiSelect).find(select=>select.attributes('data-testid')==='schema-select')!.vm.$emit('update:value','other');await flushPromises()

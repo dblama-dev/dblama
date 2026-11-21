@@ -2,6 +2,12 @@ package driver
 
 import "context"
 
+// DatabaseConnector is implemented by drivers that need a physical connection
+// to the requested database. The caller releases it when the request finishes.
+type DatabaseConnector interface {
+	ForDatabase(ctx context.Context, name string) (Driver, func(), error)
+}
+
 // DatabaseManager is optional so established Driver implementations remain valid.
 type DatabaseManager interface {
 	CreateDatabase(context.Context, string, string) error

@@ -50,19 +50,9 @@ func (ew *exportStreamWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// handleExport honors the route database. PostgreSQL connections remain bound
-// to their login database; MySQL catalog/data queries qualify the selected one.
+// handleExport streams from the database addressed by the route.
 func (s *apiServer) handleExport(w http.ResponseWriter, r *http.Request) {
 	sess, _ := session.FromContext(r.Context())
-	if sess.Driver.Info().Flavor == "postgres" && sess.Database == "" {
-		WriteErr(w, http.StatusBadRequest, ErrBadRequest("export requires logging in with a database"))
-		return
-	}
-	if urlDB := pathParam(r, "db"); sess.Driver.Info().Flavor == "postgres" && urlDB != sess.Database {
-		WriteErr(w, http.StatusBadRequest, ErrBadRequest(
-			"export dumps the login database "+sess.Database+", not "+urlDB))
-		return
-	}
 
 	var req driver.ExportRequest
 	if !decodeJSONBody(w, r, &req) {

@@ -10,7 +10,7 @@ import { useCatalogStore } from '../../stores/catalog'
 import type { ColumnDef, ForeignKey, Index, TableDef, TableOptions } from '../../api/types'
 import IndexEditor from './IndexEditor.vue'
 import UiIcon from '../../components/UiIcon.vue'
-import { useMetadataStore } from '../../stores/metadata'
+import { useDatabaseMetadata } from '../../stores/metadata'
 import ForeignKeyEditor from './ForeignKeyEditor.vue'
 import OptionsEditor from './OptionsEditor.vue'
 
@@ -93,8 +93,7 @@ const NUMERIC_TYPES = new Set([
 
 const ENUM_TYPES = new Set(['enum', 'set'])
 
-const metadata = useMetadataStore()
-void metadata.load()
+const metadata = useDatabaseMetadata(() => props.db)
 const defaultOptions = computed(() => [
   { value: 'none', label: t('structure.noDefault') },
   { value: 'literal', label: t('structure.literalDefault') },

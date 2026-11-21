@@ -6,14 +6,18 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 	"sync"
 
-	_ "github.com/jackc/pgx/v5/stdlib" // registers the database/sql driver "pgx"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/hitslab/db-manager/server/internal/driver"
+	"github.com/hitslab/db-manager/server/internal/sqlgen"
 )
 
 // maxOpenConns caps the connection pool per driver instance (spec §4.1).
@@ -22,6 +26,8 @@ const maxOpenConns = 4
 // defaultSchema is the schema a fresh driver instance reads and writes
 // until the API layer selects another one through SchemaAware.SetSchema.
 const defaultSchema = "public"
+
+var errSessionClosed = errors.New("postgres session is closed")
 
 // listDatabasesQuery returns every connectable database except the
 // templates, with its total on-disk size and its collation.
@@ -46,11 +52,11 @@ type PostgresDriver struct {
 	info driver.DriverInfo
 	caps driver.Caps
 
-	// loginDB is the database the pool's DSN is bound to (the same
-	// one-database-per-pool model as the MySQL driver); the console and
-	// import paths (task 5) use it when a dedicated connection must
-	// target another database.
-	loginDB string
+	// database is the actual database this driver's pool is bound to.
+	// loginDB is the session database protected from DROP and RENAME.
+	database string
+	loginDB  string
+	session  *databaseSession
 
 	// schema is the current schema every catalog and data query qualifies
 	// inside its SQL text (spec §13.5 — a shared pool must not SET
@@ -65,9 +71,6 @@ type PostgresDriver struct {
 	writeMu      sync.Mutex
 	lastInsertID int64
 
-	// console tracks running console queries for CancelQuery.
-	console consoleRegistry
-
 	// serialPK caches per table ("schema.table") the single-column
 	// server-generated primary key column ("" when there is none) — the
 	// RETURNING target of InsertRow, detected once per table (Ruling 2).
@@ -77,7 +80,20 @@ type PostgresDriver struct {
 	serialPK map[string]string
 }
 
+// databaseSession holds the original connection settings and the running
+// console queries shared between the root driver and request scopes.
+type databaseSession struct {
+	config  *pgx.ConnConfig
+	root    *sql.DB
+	console consoleRegistry
+	slots   chan struct{} // one slot per active alternate database pool
+	done    chan struct{} // closed during session teardown to wake waiters
+	mu      sync.Mutex
+	scopes  map[*sql.DB]struct{} // nil after the session closes
+}
+
 var _ driver.Driver = (*PostgresDriver)(nil)
+var _ driver.DatabaseConnector = (*PostgresDriver)(nil)
 
 // Connect opens a pooled connection to a PostgreSQL server, verifies it
 // with a ping, and reads the server version. Connection errors never
@@ -86,31 +102,130 @@ func Connect(ctx context.Context, cfg driver.ConnConfig) (driver.Driver, error) 
 	if cfg.Port == "" {
 		cfg.Port = "5432"
 	}
-	db, err := openDatabase(cfg)
+	if strings.ContainsRune(cfg.Database, 0) {
+		return nil, fmt.Errorf("database name contains NUL")
+	}
+	parsed, err := parseConnectionConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("open postgres connection to %s:%s: %w", cfg.Host, cfg.Port, err)
 	}
-	db.SetMaxOpenConns(maxOpenConns)
 
-	if err := db.PingContext(ctx); err != nil {
-		_ = db.Close() // best-effort; the ping error is the real failure
+	db, err := openDatabase(ctx, parsed)
+	if cfg.Database == "" && canUseMaintenanceDatabase(err) {
+		parsed = parsed.Copy()
+		parsed.Database = "postgres"
+		db, err = openDatabase(ctx, parsed)
+	}
+	if err != nil {
 		return nil, fmt.Errorf("connect to %s:%s as %s: %w", cfg.Host, cfg.Port, cfg.User, err)
 	}
 
-	var versionRaw string
-	if err := db.QueryRowContext(ctx, "SELECT version()").Scan(&versionRaw); err != nil {
+	var versionRaw, database string
+	if err := db.QueryRowContext(ctx, "SELECT pg_catalog.version(), pg_catalog.current_database()").Scan(&versionRaw, &database); err != nil {
 		_ = db.Close() // best-effort; the query error is the real failure
-		return nil, fmt.Errorf("read server version on %s:%s: %w", cfg.Host, cfg.Port, err)
+		return nil, fmt.Errorf("read server information on %s:%s: %w", cfg.Host, cfg.Port, err)
 	}
 
 	return &PostgresDriver{
 		db:       db,
 		info:     driver.DriverInfo{Name: "PostgreSQL", Flavor: "postgres", Version: parseVersion(versionRaw), User: cfg.User, Host: cfg.Host, Port: cfg.Port},
 		caps:     postgresCaps(),
-		loginDB:  cfg.Database,
+		database: database,
+		loginDB:  database,
+		session: &databaseSession{
+			config: parsed,
+			root:   db,
+			slots:  make(chan struct{}, maxOpenConns),
+			done:   make(chan struct{}),
+			scopes: make(map[*sql.DB]struct{}),
+		},
 		schema:   defaultSchema,
 		serialPK: make(map[string]string),
 	}, nil
+}
+
+func openDatabase(ctx context.Context, cfg *pgx.ConnConfig) (*sql.DB, error) {
+	db := stdlib.OpenDB(*cfg)
+	db.SetMaxOpenConns(maxOpenConns)
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
+func canUseMaintenanceDatabase(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	switch pgErr.Code {
+	case "3D000", "42501", "55000": // missing, CONNECT denied, or connections disabled
+		return true
+	}
+	return false
+}
+
+// ForDatabase binds a driver to the named database for one request. The
+// caller releases its pool after the request, including unsuccessful operations.
+func (d *PostgresDriver) ForDatabase(ctx context.Context, name string) (driver.Driver, func(), error) {
+	if name == "" {
+		return nil, nil, fmt.Errorf("database name: %w", sqlgen.ErrEmptyIdentifier)
+	}
+	if strings.ContainsRune(name, 0) {
+		return nil, nil, fmt.Errorf("database name contains NUL")
+	}
+	s := d.session
+	if name == d.database {
+		select {
+		case <-s.done:
+			return nil, nil, errSessionClosed
+		default:
+			return d, func() {}, nil
+		}
+	}
+	select {
+	case <-ctx.Done():
+		return nil, nil, ctx.Err()
+	case <-s.done:
+		return nil, nil, errSessionClosed
+	case s.slots <- struct{}{}:
+	}
+	s.mu.Lock()
+	if s.scopes == nil {
+		s.mu.Unlock()
+		<-s.slots
+		return nil, nil, errSessionClosed
+	}
+
+	cfg := s.config.Copy()
+	cfg.Database = name
+	db := stdlib.OpenDB(*cfg)
+	db.SetMaxOpenConns(maxOpenConns)
+	s.scopes[db] = struct{}{}
+	s.mu.Unlock()
+
+	bound := &PostgresDriver{
+		db:       db,
+		info:     d.info,
+		caps:     d.caps,
+		database: name,
+		loginDB:  d.loginDB,
+		session:  s,
+		schema:   d.CurrentSchema(),
+		serialPK: make(map[string]string),
+	}
+	release := func() { _ = bound.Close() }
+	var current string
+	if err := db.QueryRowContext(ctx, "SELECT pg_catalog.current_database()").Scan(&current); err != nil {
+		release()
+		return nil, nil, fmt.Errorf("connect to database %q: %w", name, err)
+	}
+	if current != name {
+		release()
+		return nil, nil, fmt.Errorf("requested database %q but server selected %q", name, current)
+	}
+	return bound, release, nil
 }
 
 // Info describes the connected server.
@@ -143,9 +258,35 @@ func (d *PostgresDriver) ListDatabases(ctx context.Context) ([]driver.DatabaseIn
 	return dbs, nil
 }
 
-// Close closes the underlying connection pool. It is safe to call more
-// than once: *sql.DB.Close is idempotent.
-func (d *PostgresDriver) Close() error { return d.db.Close() }
+// Close releases this driver's pool. Closing the session's root driver
+// also closes any outstanding request pools and prevents new scopes.
+func (d *PostgresDriver) Close() error {
+	s := d.session
+	if d.db != s.root {
+		err := d.db.Close()
+		s.mu.Lock()
+		_, tracked := s.scopes[d.db]
+		delete(s.scopes, d.db)
+		s.mu.Unlock()
+		if tracked {
+			<-s.slots
+		}
+		return err
+	}
+	s.mu.Lock()
+	scopes := s.scopes
+	if scopes != nil {
+		s.scopes = nil
+		close(s.done)
+	}
+	s.mu.Unlock()
+
+	err := d.db.Close()
+	for db := range scopes {
+		err = errors.Join(err, db.Close())
+	}
+	return err
+}
 
 // parseVersion extracts "17.2" from the full version() banner. A banner
 // without the expected shape falls back to the trimmed raw string rather
@@ -178,10 +319,10 @@ func postgresCaps() driver.Caps {
 	}
 }
 
-// PostgreSQL pools cannot switch databases.
+// PostgreSQL pools are bound to a single database.
 func (d *PostgresDriver) checkDatabase(db string) error {
-	if db != "" && db != d.loginDB {
-		return fmt.Errorf("database %s is not the login database %s; reconnect to select another database", db, d.loginDB)
+	if db != "" && db != d.database {
+		return fmt.Errorf("database %q does not match the connection database %q", db, d.database)
 	}
 	return nil
 }

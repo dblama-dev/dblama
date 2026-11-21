@@ -1,11 +1,10 @@
 package postgres
 
 import (
-	"database/sql"
 	"fmt"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/stdlib"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/hitslab/db-manager/server/internal/driver"
 )
@@ -24,6 +23,7 @@ import (
 // multi-statement batches through one Exec call (task 5); it is additive
 // for single queries — they execute the same, minus the extended
 // protocol's describe round-trip.
+// pgx requires client_encoding=UTF8 for simple protocol queries.
 func DSN(cfg driver.ConnConfig, pass string) string {
 	return strings.Join([]string{
 		"host=" + quoteDSNValue(cfg.Host),
@@ -33,6 +33,7 @@ func DSN(cfg driver.ConnConfig, pass string) string {
 		"dbname=" + quoteDSNValue(cfg.Database),
 		"sslmode=disable",
 		"default_query_exec_mode=simple_protocol",
+		"client_encoding=UTF8",
 	}, " ")
 }
 
@@ -44,12 +45,12 @@ func quoteDSNValue(v string) string {
 	return "'" + escaped + "'"
 }
 
-// openDatabase parses credentials before opening the pool and deliberately
+// parseConnectionConfig parses credentials before opening a pool and deliberately
 // omits the parser's error text: pgx includes the original DSN in that error.
-func openDatabase(cfg driver.ConnConfig) (*sql.DB, error) {
+func parseConnectionConfig(cfg driver.ConnConfig) (*pgx.ConnConfig, error) {
 	parsed, err := pgx.ParseConfig(DSN(cfg, cfg.Password))
 	if err != nil {
 		return nil, fmt.Errorf("invalid postgres connection configuration")
 	}
-	return stdlib.OpenDB(*parsed), nil
+	return parsed, nil
 }

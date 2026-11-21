@@ -26,8 +26,8 @@ func (d *PostgresDriver) ImportSQL(ctx context.Context, db string, r io.Reader, 
 	if db == "" {
 		return fmt.Errorf("import sql: %w", sqlgen.ErrEmptyIdentifier)
 	}
-	if db != d.loginDB {
-		return fmt.Errorf("import sql: database %s is not the login database %s", db, d.loginDB)
+	if db != d.database {
+		return fmt.Errorf("import sql: database %q does not match the connection database %q", db, d.database)
 	}
 	input, err := sqlgen.OpenSQLImport(r, int64(maxDecompressedInputMB)<<20, true)
 	if err != nil {
@@ -90,8 +90,8 @@ func (d *PostgresDriver) ImportCSV(ctx context.Context, db, table string, r io.R
 	if db == "" || table == "" {
 		return fmt.Errorf("import csv: %w", sqlgen.ErrEmptyIdentifier)
 	}
-	if db != d.loginDB {
-		return fmt.Errorf("import csv: database %s is not the login database %s", db, d.loginDB)
+	if db != d.database {
+		return fmt.Errorf("import csv: database %q does not match the connection database %q", db, d.database)
 	}
 	if opts.Enclosure != "" && opts.Enclosure != `"` {
 		return fmt.Errorf("import csv: unsupported enclosure %q", opts.Enclosure)

@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -20,6 +21,7 @@ type apiServer struct {
 	sessions *session.Store
 	drivers  *driver.Registry
 	limiter  *ratelimit.Limiter
+	queries  sync.Map // queryKey -> context.CancelFunc, including requests waiting for a connection
 }
 
 // NewRouter wires the /api routes with their middleware. Middleware order:
@@ -57,33 +59,24 @@ func NewRouter(cfg config.Config, sessions *session.Store, drivers *driver.Regis
 			authed.Get("/databases", s.handleDatabases)
 			s.registerDatabaseRoutes(authed)
 			s.registerAdminRoutes(authed)
-			s.registerObjectRoutes(authed)
-			s.registerForeignKeyRoutes(authed)
-
-			// Console: raw SQL execution, cancel and EXPLAIN. Every
-			// route is a POST and already covered by the group's
-			// RequireCSRFHeader.
-			authed.Post("/databases/{db}/query", s.handleQuery)
 			authed.Post("/query/{queryID}/cancel", s.handleCancel)
 			authed.Post("/query", s.handleExplain)
+			authed.Post("/databases/{db}/query", s.handleQuery)
 
-			// Dump export and data import.
-			authed.Post("/databases/{db}/export", s.handleExport)
-			authed.Post("/databases/{db}/import", s.handleImport)
+			// Keep the original schema and sequence endpoints on the login connection.
+			s.registerSchemaRoutes(authed, "")
 
-			// Schema and sequence capabilities (PostgreSQL); drivers
-			// without them answer driver_not_supported.
-			authed.Get("/schemas", s.handleSchemasList)
-			authed.Get("/sequences", s.handleSequencesList)
-			authed.Post("/sequences", s.handleSequenceCreate)
-			authed.Route("/sequences/{name}", func(seq chi.Router) {
-				seq.Delete("/", s.handleSequenceDrop)
-				seq.Patch("/", s.handleSequenceUpdate)
-			})
+			scoped := authed.With(requestDatabase)
+			s.registerObjectRoutes(scoped)
+			s.registerForeignKeyRoutes(scoped)
+			s.registerSchemaRoutes(scoped, "/databases/{db}")
+			scoped.Get("/databases/{db}/metadata", s.handleMetadata)
+			scoped.Post("/databases/{db}/export", s.handleExport)
+			scoped.Post("/databases/{db}/import", s.handleImport)
 
 			// Tables and rows of one database. Every non-GET route is
 			// already covered by the group's RequireCSRFHeader.
-			authed.Route("/databases/{db}/tables", func(tables chi.Router) {
+			scoped.Route("/databases/{db}/tables", func(tables chi.Router) {
 				tables.Get("/", s.handleTablesList)
 				tables.Post("/", s.handleBulkTables)
 				tables.Route("/{table}", func(t chi.Router) {

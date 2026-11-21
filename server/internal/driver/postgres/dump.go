@@ -40,7 +40,7 @@ func (d *PostgresDriver) ShowCreateTable(ctx context.Context, db, table string) 
 	return strings.Join(stmts, ";\n"), nil
 }
 
-// Export streams a dump of database db (the pool's login database; the
+// Export streams a dump of database db (the pool's bound database; the
 // handler validates the requested db equals it) to w in req.Format.
 // IncludeViews adds dependency-ordered portable view definitions to SQL dumps.
 // A single-column primary key pages by keyset; any other shape pages by
@@ -61,8 +61,8 @@ func (d *PostgresDriver) Export(ctx context.Context, db string, req driver.Expor
 	if db == "" {
 		return fmt.Errorf("export: no database to dump")
 	}
-	if db != d.loginDB {
-		return fmt.Errorf("export: database %s is not the login database %s", db, d.loginDB)
+	if db != d.database {
+		return fmt.Errorf("export: database %q does not match the connection database %q", db, d.database)
 	}
 	var sep rune
 	isSQL := req.Format == dump.FormatSQL
@@ -214,7 +214,7 @@ func (d *PostgresDriver) Export(ctx context.Context, db string, req driver.Expor
 func (d *PostgresDriver) exportSQL(ctx context.Context, tables []string, definitions map[string]driver.TableDef, req driver.ExportRequest, out io.Writer) error {
 	schema := d.schemaFor(ctx)
 	header := "-- db-manager dump\n" +
-		"-- Database: " + sqlgen.QuoteIdentPg(d.loginDB) + "\n" +
+		"-- Database: " + sqlgen.QuoteIdentPg(d.database) + "\n" +
 		"-- Schema: " + sqlgen.QuoteIdentPg(schema) + "\n\n"
 	if err := writeExport(out, header); err != nil {
 		return err
@@ -282,7 +282,7 @@ func addIfNotExists(create string) (string, error) {
 // exportTableSQLRows streams one table's rows as INSERT statements of at
 // most exportBatchSize tuples, qualified with the current schema.
 func (d *PostgresDriver) exportTableSQLRows(ctx context.Context, table string, out io.Writer) error {
-	pk, err := d.PrimaryKey(ctx, d.loginDB, table)
+	pk, err := d.PrimaryKey(ctx, d.database, table)
 	if err != nil {
 		return fmt.Errorf("export: %w", err)
 	}
@@ -349,7 +349,7 @@ func (d *PostgresDriver) exportDelimited(ctx context.Context, table string, sep 
 		names[i] = c.Name
 	}
 
-	pk, err := d.PrimaryKey(ctx, d.loginDB, table)
+	pk, err := d.PrimaryKey(ctx, d.database, table)
 	if err != nil {
 		return fmt.Errorf("export: %w", err)
 	}
@@ -388,7 +388,7 @@ func (d *PostgresDriver) exportPages(ctx context.Context, table string, orderBy 
 
 	if len(orderBy) == 1 {
 		for {
-			page, err := d.SelectRows(ctx, d.loginDB, table, q)
+			page, err := d.SelectRows(ctx, d.database, table, q)
 			if err != nil {
 				return err
 			}
@@ -416,7 +416,7 @@ func (d *PostgresDriver) exportPages(ctx context.Context, table string, orderBy 
 
 	for offset := 0; ; offset += exportBatchSize {
 		q.Offset = offset
-		page, err := d.SelectRows(ctx, d.loginDB, table, q)
+		page, err := d.SelectRows(ctx, d.database, table, q)
 		if err != nil {
 			return err
 		}

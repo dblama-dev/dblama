@@ -7,7 +7,7 @@ import (
 	"github.com/hitslab/db-manager/server/internal/driver"
 )
 
-// ListSchemas returns the user-visible schemas of the login database
+// ListSchemas returns the user-visible schemas of the bound database
 // (system schemas excluded).
 func (d *PostgresDriver) ListSchemas(ctx context.Context) ([]string, error) {
 	rows, err := d.db.QueryContext(ctx,

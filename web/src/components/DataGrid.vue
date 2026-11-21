@@ -163,7 +163,7 @@ import {
   UiSelect,
 } from '../ui'
 
-import { useMetadataStore } from '../stores/metadata'
+import { useDatabaseMetadata } from '../stores/metadata'
 import BlobValue from './BlobValue.vue'
 import UiIcon from './UiIcon.vue'
 import GridRowActions from './GridRowActions.vue'
@@ -185,6 +185,7 @@ interface FilterDraft {
 
 const props = withDefaults(
   defineProps<{
+    db: string
     columns: ColumnMeta[]
     statement?: Page['statement']
     rows: unknown[][]
@@ -218,8 +219,7 @@ const emit = defineEmits<{
 }>()
 
 const { t, locale } = useI18n()
-const metadata = useMetadataStore()
-void metadata.load()
+const metadata = useDatabaseMetadata(() => props.db)
 
 const hasPk = computed(() => props.pkColumns.length > 0)
 

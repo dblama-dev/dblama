@@ -43,6 +43,7 @@ export default {
     failed: 'Connection failed',
   },
   server: {
+    management: 'Server management',
     filterDatabases: 'Find a database',
     title: 'Server overview',
     refresh: 'Refresh',
@@ -68,7 +69,7 @@ export default {
     dropSequence: 'Drop sequence',
     dropSequenceConfirm: 'Drop sequence {name}?',
 
-    selectDb: 'Database',
+    selectDb: 'Select a database',
     search: 'Search',
     tables: 'Tables',
     views: 'Views',
@@ -211,7 +212,6 @@ export default {
     tables: 'Tables',
     tablesHint: 'Nothing selected — the whole database is exported',
     oneTableHint: 'Pick exactly one table for CSV/TSV',
-    dbMismatch: 'Export is only available for the connection database',
     submit: 'Export',
     success: 'Export finished',
   },

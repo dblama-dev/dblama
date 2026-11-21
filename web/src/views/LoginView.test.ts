@@ -91,6 +91,18 @@ describe('LoginView', () => {
     expect(portInput.attributes('placeholder')).toBe('3306')
   })
 
+  it('offers an optional PostgreSQL database field and can connect with it empty', async () => {
+    const store = useSessionStore()
+    store.login = vi.fn().mockResolvedValue(undefined)
+    const wrapper = mountView(pinia)
+    await flushPromises()
+    const view = wrapper.findComponent(LoginView)
+    expect(view.get('#login-db').attributes('placeholder')).toBe('необязательно')
+    await view.get('#login-password').setValue('secret')
+    await view.get('form').trigger('submit')
+    expect(store.login).toHaveBeenCalledWith(expect.objectContaining({ driver: 'postgres', database: undefined }))
+  })
+
   it('submits the form through sessionStore.login and navigates to /server', async () => {
     const store = useSessionStore()
     store.login = vi.fn().mockResolvedValue(undefined)

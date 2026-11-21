@@ -5,7 +5,7 @@
       <ui-select size="small" filterable data-testid="database-select"
         :input-props="{ id: databaseID, 'aria-label': t('sideNavigation.database') }"
         :value="db" :options="dbOptions" :loading="dbsLoading" :placeholder="t('tree.selectDb')" @update:value="selectDb" />
-      <template v-if="session.sessionInfo?.caps.schemas">
+      <template v-if="db && catalog.schemaAware">
         <label :for="schemaID">{{ t('sideNavigation.schema') }}</label>
         <ui-select data-testid="schema-select" filterable size="small"
           :input-props="{ id: schemaID, 'aria-label': t('sideNavigation.schema') }"
@@ -13,7 +13,7 @@
           :placeholder="t('tree.schemas')" @update:value="selectSchema" />
       </template>
     </div>
-    <ui-alert v-if="schemaError" type="error">{{ schemaError }}</ui-alert>
+    <ui-alert v-if="db && schemaError" type="error">{{ schemaError }}</ui-alert>
     <ui-modal v-model:show="sequenceDialog" :title="t(sequenceEditName ? 'tree.editSequence' : 'tree.newSequence')" style="width: min(380px, calc(100vw - 24px))">
       <div class="sequence-form"><label>{{ t('tree.sequenceName') }}
       <ui-input v-model:value="sequenceName" :disabled="sequenceEditName !== null" :placeholder="t('tree.sequenceName')" data-testid="sequence-name" /></label>
@@ -24,11 +24,11 @@
         data-testid="sequence-create" @click="addSequence">{{ t(sequenceEditName ? 'row.save' : 'tree.newSequence') }}</ui-button>
       </div>
     </ui-modal>
-    <div class="object-tree__navigation">
-      <router-link v-if="db" class="section-link" :to="catalog.path(`/db/${encodeURIComponent(db)}`)">
+    <div v-if="db" class="object-tree__navigation">
+      <router-link class="section-link" :to="catalog.path(`/db/${encodeURIComponent(db)}`)">
         <UiIcon name="overview" :size="16" />{{ t('sideNavigation.overview') }}
       </router-link>
-      <nav v-if="db" class="object-tree__tools" :aria-label="t('sideNavigation.tools')">
+      <nav class="object-tree__tools" :aria-label="t('sideNavigation.tools')">
         <router-link v-for="(symbol, action) in databaseTools" :key="action" class="section-link"
           :to="catalog.path(`/db/${encodeURIComponent(db)}/${action}`)">
           <UiIcon :name="symbol" :size="16" />{{ t(`navigationWorkflows.${action}`) }}
@@ -57,9 +57,9 @@
         <template #prefix><UiIcon name="search" :size="14" /></template>
       </ui-input>
     </div>
-    <ui-alert v-if="dbsError" type="error" :title="t('tree.selectDb')">{{ dbsError }}</ui-alert>
-    <ui-alert v-else-if="catalog.error" type="error" :title="t('tree.loadFailed')">{{ catalog.error }}</ui-alert>
-    <div class="object-tree__list"><ui-tree
+    <ui-alert v-if="dbsError" type="error" :title="t('server.loadFailed')">{{ dbsError }}</ui-alert>
+    <ui-alert v-else-if="db && catalog.error" type="error" :title="t('tree.loadFailed')">{{ catalog.error }}</ui-alert>
+    <div v-if="db" class="object-tree__list"><ui-tree
       v-if="!dbsError && !catalog.error"
       :data="treeData"
       :selected-keys="selectedKeys"
@@ -72,7 +72,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, ref, useId, watch } from 'vue'
+import { computed, h, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { UiAlert, UiButton, UiInput, UiSelect, UiTree, UiModal, UiInputNumber, UiPopconfirm, type TreeOption } from '../ui'
@@ -92,11 +92,10 @@ const route = useRoute()
 const catalog = useCatalogStore()
 const session = useSessionStore()
 
-const db = ref<string | null>(null)
+const db = computed(() => typeof route.params.db === 'string' ? route.params.db : null)
 const databaseID = useId()
 const schemaID = useId()
 const searchID = useId()
-const routeDatabase = computed(() => typeof route.params.db === 'string' ? route.params.db : null)
 const dbs = ref<string[]>([])
 const dbsLoading = ref(false)
 const dbsError = ref('')
@@ -109,12 +108,16 @@ const sequenceEditName = ref<string | null>(null)
 const sequenceRestart = ref<number | null>(null)
 const sequenceIncrement = ref<number | null>(1)
 const sequenceBusy = ref(false)
+const sequenceScope = computed(() => ({
+  database: db.value,
+  schema: catalog.schema ?? 'public',
+  connection: session.sessionInfo,
+}))
 let schemaLoadID = 0
-async function loadSequences(): Promise<void> {
+async function loadSequences(database: string, schema: string): Promise<void> {
   const id = ++schemaLoadID
   if (!session.sessionInfo?.caps.sequences) return
-  const schema = catalog.schema ?? 'public'
-  const next = await fetchSequences(schema)
+  const next = await fetchSequences(database, schema)
   if (id === schemaLoadID) sequences.value = next
 }
 async function selectSchema(schema: string): Promise<void> {
@@ -122,28 +125,39 @@ async function selectSchema(schema: string): Promise<void> {
   const database=db.value
   // Navigate before changing shared scope so dirty editors may cancel.
   const failure=await router.push(withSchema(`/db/${encodeURIComponent(database)}`,schema,true))
-  if(failure)return
+  if(failure || db.value !== database)return
   schemaError.value = ''
   if(catalog.schema!==schema)await catalog.selectSchema(database,schema)
 }
 async function addSequence(): Promise<void> {
+  const context = sequenceScope.value
+  const { database, schema } = context
+  if (!database || sequenceBusy.value) return
   sequenceBusy.value = true
   schemaError.value = ''
   try {
     if (sequenceEditName.value) {
-      await alterSequence(sequenceEditName.value, {increment: sequenceIncrement.value ?? 1, ...(sequenceRestart.value === null ? {} : {restartWith: sequenceRestart.value})}, catalog.schema ?? 'public')
-    } else await createSequence(sequenceName.value, sequenceIncrement.value ?? 1, catalog.schema ?? 'public')
+      await alterSequence(database, sequenceEditName.value, {increment: sequenceIncrement.value ?? 1, ...(sequenceRestart.value === null ? {} : {restartWith: sequenceRestart.value})}, schema)
+    } else await createSequence(database, sequenceName.value, sequenceIncrement.value ?? 1, schema)
+    if (context !== sequenceScope.value) return
     sequenceDialog.value = false
     sequenceName.value = ''
-    await loadSequences()
-  } catch (err) { schemaError.value = String(err) }
+    await loadSequences(database, schema)
+  } catch (err) {
+    if (context === sequenceScope.value) schemaError.value = String(err)
+  }
   finally { sequenceBusy.value = false }
 }
 async function removeSequence(name: string): Promise<void> {
+  const context = sequenceScope.value
+  const { database, schema } = context
+  if (!database) return
   try {
-    await dropSequence(name, catalog.schema ?? 'public')
-    await loadSequences()
-  } catch (err) { schemaError.value = String(err) }
+    await dropSequence(database, name, schema)
+    if (context === sequenceScope.value) await loadSequences(database, schema)
+  } catch (err) {
+    if (context === sequenceScope.value) schemaError.value = String(err)
+  }
 }
 
 const search = ref('')
@@ -170,64 +184,61 @@ const dbOptions = computed(() => dbs.value.map((name) => ({ label: name, value: 
 
 function loadTables(database: string, refresh = false): Promise<void> {
   // Only the table header shares this initial request. Other sidebar mounts refresh the catalog.
-  if (!refresh && route.name === 'db-table' && routeDatabase.value === database && route.params.t !== '_new') {
+  if (!refresh && route.name === 'db-table' && route.params.t !== '_new') {
     return catalog.ensureTables(database)
   }
   return catalog.fetchTables(database)
 }
 
-/** Keep the sidebar and shared catalog on the open route's database.
- * Outside a database route, retain the selection or use the login database. */
-async function loadDatabases(refreshTables = false): Promise<void> {
-  catalog.schemaAware = session.sessionInfo?.caps.schemas ?? false
-  if (catalog.schemaAware) {
-    catalog.schema ??= 'public'
-    try {
-      schemas.value = await fetchSchemas()
-      await loadSequences()
-    } catch (err) { schemaError.value = String(err) }
-  } else { catalog.schema = null }
+watch(() => catalog.databaseRevision, async (_revision, _previous, onCleanup) => {
+  let current = true
+  onCleanup(() => { current = false })
   dbsLoading.value = true
   dbsError.value = ''
   try {
     const payload = await api<{ databases: { name: string }[] }>('GET', '/api/databases')
-    dbs.value = (payload.databases ?? []).map((d) => d.name)
+    if (current) dbs.value = (payload.databases ?? []).map((d) => d.name)
   } catch (e) {
-    dbsError.value = e instanceof Error ? e.message : String(e)
+    if (current) dbsError.value = e instanceof Error ? e.message : String(e)
   } finally {
-    dbsLoading.value = false
+    if (current) dbsLoading.value = false
   }
-  const initial = db.value ?? session.sessionInfo?.database
-  // A rename may update the route before this list response catches up.
-  db.value = routeDatabase.value ?? (initial && dbs.value.includes(initial) ? initial : (dbs.value[0] ?? null))
-  expandedKeys.value = defaultExpandedKeys(db.value)
-  if (db.value !== null) await loadTables(db.value, refreshTables)
-}
-onMounted(loadDatabases)
-watch(() => catalog.databaseRevision, () => loadDatabases(true))
+}, { immediate: true })
 
-watch(routeDatabase, async next => {
-  if (!next || next === db.value) return
-  db.value = next
-  expandedKeys.value = defaultExpandedKeys(next)
-  await loadTables(next)
-})
-
-watch(() => catalog.schema, async () => {
-  if (!db.value || !catalog.schemaAware) return
+watch([sequenceScope, () => catalog.databaseRevision, () => catalog.schemaAware], async (
+  [context, revision, schemaAware], [previousContext, previousRevision], onCleanup,
+) => {
+  const { database, schema, connection } = context
+  let current = true
+  onCleanup(() => { current = false; schemaLoadID++ })
+  const databaseChanged = database !== previousContext?.database || connection !== previousContext?.connection
+  if (databaseChanged) {
+    expandedKeys.value = defaultExpandedKeys(database)
+    search.value = ''
+    schemas.value = []
+  }
+  if (context !== previousContext) sequenceDialog.value = false
   schemaError.value = ''
   sequences.value = []
-  await loadTables(db.value)
-  try { await loadSequences() } catch (err) { schemaError.value = String(err) }
-})
+  if (!database) return
+  const refresh = previousRevision !== undefined && revision !== previousRevision
+  void loadTables(database, refresh)
+  if (!schemaAware) return
+  try {
+    if (databaseChanged || refresh || !schemas.value.length) {
+      const names = await fetchSchemas(database)
+      if (!current) return
+      schemas.value = names
+    }
+    await loadSequences(database, schema)
+  } catch (err) {
+    if (current) schemaError.value = String(err)
+  }
+}, { immediate: true })
 
-async function selectDb(next: string): Promise<void> {
-  const failure=await router.push(catalog.path(`/db/${encodeURIComponent(next)}`))
-  if(failure)return
-  if(db.value===next)return
-  db.value=next
-  expandedKeys.value=defaultExpandedKeys(next)
-  await loadTables(next)
+function selectDb(next: string): void {
+  const path = `/db/${encodeURIComponent(next)}`
+  void router.push(next === db.value ? catalog.path(path) : path)
 }
 
 /** Keep the current database's table and view groups expanded on first load. */
@@ -240,10 +251,12 @@ function onExpand(keys: string[]): void {
 }
 
 const treeData = computed<TreeOption[]>(() => {
-  if (db.value === null) return []
+  const database = db.value
+  if (database === null) return []
+  const tables = catalog.tablesFor(database)
   const needle = search.value.trim().toLowerCase()
   const matches = (name: string): boolean => name.toLowerCase().includes(needle)
-  const leaves = (views: boolean): TreeOption[] => catalog.tables
+  const leaves = (views: boolean): TreeOption[] => tables
     .filter(table => table.isView === views && matches(table.name))
     .map(({name}) => ({
       key: 'table:' + name, label: name, isLeaf: true,

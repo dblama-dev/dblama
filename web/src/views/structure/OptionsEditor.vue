@@ -17,7 +17,6 @@ const emit = defineEmits<{ 'update:options': [value: TableOptions] }>()
 const { t } = useI18n()
 const catalog = useCatalogStore()
 const metadata = useMetadataStore()
-void metadata.load()
 
 // Local writable mirror so the inputs can bind directly; every change
 // is re-emitted to the parent.

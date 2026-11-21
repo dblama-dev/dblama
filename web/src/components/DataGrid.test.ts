@@ -53,6 +53,7 @@ function mountGrid(props: Record<string, unknown> = {}, attachTo?: HTMLElement) 
   return mount(DataGrid, {
     attachTo,
     props: {
+      db: 'mydb',
       columns,
       rows,
       totalRows: 2,

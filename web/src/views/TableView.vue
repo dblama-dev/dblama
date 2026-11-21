@@ -44,6 +44,7 @@
     </div>
     <DataGrid
       v-else-if="view === 'data'"
+      :db="db"
       :columns="page?.columns ?? []"
       :rows="page?.rows ?? []"
       :total-rows="page?.totalRows ?? 0"

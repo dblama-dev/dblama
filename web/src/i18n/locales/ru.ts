@@ -43,6 +43,7 @@ export default {
     failed: 'Не удалось подключиться',
   },
   server: {
+    management: 'Управление сервером',
     filterDatabases: 'Найти базу данных',
     title: 'Обзор сервера',
     refresh: 'Обновить',
@@ -68,7 +69,7 @@ export default {
     dropSequence: 'Удалить последовательность',
     dropSequenceConfirm: 'Удалить последовательность {name}?',
 
-    selectDb: 'База данных',
+    selectDb: 'Выберите базу данных',
     search: 'Поиск',
     tables: 'Таблицы',
     views: 'Представления',
@@ -211,7 +212,6 @@ export default {
     tables: 'Таблицы',
     tablesHint: 'Ничего не выбрано — экспортируется вся база',
     oneTableHint: 'Для CSV/TSV выберите ровно одну таблицу',
-    dbMismatch: 'Экспорт доступен только для текущей базы подключения',
     submit: 'Экспортировать',
     success: 'Экспорт завершён',
   },

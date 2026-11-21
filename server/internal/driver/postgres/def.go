@@ -78,7 +78,7 @@ JOIN pg_attribute ref ON ref.attrelid = con.confrelid AND ref.attnum = rk.attnum
 WHERE con.contype = 'f' AND n.nspname = $1`
 
 // TableDef reads the full structure of one table of the current schema
-// (SetSchema selects it; the pool is bound to the login database, so db
+// (SetSchema selects it; the pool is bound to one database, so db
 // is validated non-empty and selects nothing — as in ListTables): its
 // columns in ordinal order, its indexes, its foreign keys and its table
 // options. A missing table yields an error containing "not found".

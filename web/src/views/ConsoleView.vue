@@ -145,7 +145,8 @@ const c = useConsole({db:()=>db.value,serverKey,schema:()=>catalog.schemaAware ?
 const editor = ref<InstanceType<typeof SqlEditor>|null>(null)
 const completionSchema = ref<Record<string,string[]>>({})
 const completionTable = ref<string|null>(null), completionLoading = ref(false)
-const tableOptions = computed(()=>catalog.tables.map(table=>({label:table.name,value:table.name})))
+const tables = computed(() => catalog.tablesFor(db.value))
+const tableOptions = computed(()=>tables.value.map(table=>({label:table.name,value:table.name})))
 let completionRequest = 0
 async function loadColumns(table:string|null) {
   completionTable.value = table
@@ -165,8 +166,8 @@ watch(()=>[db.value,catalog.schema],async()=>{
   if (contextTable && loadDraft(c.draftKey.value) === null && !c.sql.value) c.sql.value=starterQuery(contextTable,flavor.value,catalog.schema)
   await catalog.fetchTables(db.value)
   if(request!==completionRequest)return
-  completionSchema.value=Object.fromEntries(catalog.tables.map(table=>[table.name,[]]))
-  await loadColumns(contextTable ?? catalog.tables[0]?.name ?? null)
+  completionSchema.value=Object.fromEntries(tables.value.map(table=>[table.name,[]]))
+  await loadColumns(contextTable ?? tables.value[0]?.name ?? null)
 },{immediate:true})
 watch(()=>route.query.table, table=>{if(typeof table==='string')void loadColumns(table)})
 onBeforeUnmount(()=>{completionRequest++})

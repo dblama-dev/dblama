@@ -5,6 +5,7 @@ import { UiNotificationProvider } from '../ui'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
 import { useCatalogStore } from '../stores/catalog'
+import { useSessionStore } from '../stores/session'
 import i18n from '../i18n'
 import TableView from './TableView.vue'
 import DataGrid from '../components/DataGrid.vue'
@@ -14,7 +15,11 @@ import * as download from '../lib/download'
 vi.mock('../api/client', () => ({ api: vi.fn(), ApiError: class extends Error {} }))
 let route = reactive({ params: { db: 'app', t: 'items' }, query: {} as Record<string, string> })
 const push = vi.fn()
-vi.mock('vue-router', () => ({ useRoute: () => route, useRouter: () => ({ push, replace: vi.fn() }) }))
+vi.mock('vue-router', async (importOriginal) => ({
+  ...await importOriginal<typeof import('vue-router')>(),
+  useRoute: () => route,
+  useRouter: () => ({ push, replace: vi.fn() }),
+}))
 beforeEach(() => { route = reactive({ params: { db: 'app', t: 'items' }, query: {} }); vi.mocked(api).mockReset(); push.mockReset() })
 it('scopes rows, keys and writes to the schema and reloads when it changes', async () => {
   const pinia = createPinia(); setActivePinia(pinia)
@@ -36,6 +41,35 @@ it('scopes rows, keys and writes to the schema and reloads when it changes', asy
   catalog.schema = 'second'
   await flushPromises()
   expect(api).toHaveBeenCalledWith('GET', '/api/databases/app/tables/items/pk?schema=second')
+  wrapper.unmount()
+})
+
+it.each(['data', 'structure'])('refreshes table %s metadata when the database and schema change', async view => {
+  const pinia = createPinia()
+  useSessionStore(pinia).sessionInfo = {
+    driver: { name: 'PostgreSQL', flavor: 'postgres', version: '17', host: 'localhost', user: 'u' },
+    caps: {} as never,
+    database: null,
+  }
+  const catalog = useCatalogStore(pinia)
+  catalog.schemaAware = true
+  catalog.schema = 'public'
+  route.query = { view }
+  vi.mocked(api).mockImplementation(async (_method, path) => {
+    if (path.includes('/metadata')) return { columnTypes: [], operators: [], collations: [] }
+    if (/\/tables(?:\?|$)/.test(path)) return { tables: [] }
+    if (path.includes('/rows')) return { columns: [], rows: [], totalRows: 0 }
+    return { columns: [], indexes: [], foreignKeys: [], options: {} }
+  })
+  const wrapper = mount(defineComponent({ setup: () => () => h(UiNotificationProvider, null, { default: () => h(TableView) }) }), {
+    global: { plugins: [pinia, i18n], stubs: { RowModal: true } },
+  })
+  await flushPromises()
+  expect(api).toHaveBeenCalledWith('GET', '/api/databases/app/metadata?schema=public')
+  route.params.db = 'Other DB'
+  catalog.schema = 'Odd Schema'
+  await flushPromises()
+  expect(api).toHaveBeenCalledWith('GET', '/api/databases/Other%20DB/metadata?schema=Odd%20Schema')
   wrapper.unmount()
 })
 
@@ -186,7 +220,6 @@ it('waits for full defaults before opening insert',async()=>{
 it('keeps schema and encoded table context on quick links and gates partitions',async()=>{
  const wrapper=openTable();await flushPromises()
  const catalog=useCatalogStore();catalog.schemaAware=true;catalog.schema='Odd Schema';await flushPromises()
- const {useSessionStore}=await import('../stores/session')
  useSessionStore().sessionInfo={caps:{partitions:false}} as never
  const exportButton=()=>wrapper.findAll('button').find(button=>button.text()==='Экспорт' || button.text()==='navigationWorkflows.export')!
  await exportButton().trigger('click');expect(push).toHaveBeenCalledWith('/db/app/export?table=items&schema=Odd+Schema')

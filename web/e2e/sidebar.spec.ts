@@ -1,15 +1,39 @@
 import { dbPath, expect, runSQL, test } from './fixtures'
+import type { SessionInfo } from '../src/api/types'
+
+test('current server appears above the database picker and opens its overview', async ({ page, db }) => {
+  const { driver }: SessionInfo = await (await page.request.get('/api/session')).json()
+  const sidebar = page.locator('.app-sidebar')
+  const connection = sidebar.getByRole('link', { name: /^Server overview/ })
+  await expect(connection).toBeVisible()
+  await expect(connection).toContainText(driver.host)
+  await expect(connection).toContainText(':' + driver.port)
+  await expect(connection).toContainText(driver.name + ' ' + driver.version)
+  const card = await connection.boundingBox()
+  const picker = await sidebar.getByTestId('database-select').boundingBox()
+  expect(card!.y + card!.height).toBeLessThanOrEqual(picker!.y)
+
+  await page.goto(dbPath(db))
+  await connection.click()
+  await expect(page).toHaveURL(/\/server$/)
+})
 
 test('sidebar database search, scoped tools, resizing and mobile navigation', async ({ page, db, engine }) => {
   const scope = engine === 'postgres' ? '?schema=public' : ''
-  await page.goto(dbPath(db))
   const sidebar = page.locator('.app-sidebar')
   const picker = sidebar.getByTestId('database-select')
+  await expect(picker.locator('input')).toHaveValue('')
+  await expect(picker.locator('input')).toHaveAttribute('placeholder', 'Select a database')
+  await expect(sidebar.getByRole('tree')).toHaveCount(0)
+  const management = page.getByRole('navigation', { name: 'Server management' })
+  await expect(management.getByRole('link', { name: 'Server monitoring' })).toBeVisible()
+  await expect(management.getByRole('link', { name: 'Users and privileges' })).toHaveCount(engine === 'postgres' ? 0 : 1)
   await picker.click()
   await picker.locator('input').fill('no-matching-database-123')
   await expect(page.locator('.ui-select__option:visible')).toHaveCount(0)
   await picker.locator('input').fill(db)
   await page.locator('.ui-select__option:visible').getByText(db, { exact: true }).click()
+  await expect(picker.locator('input')).toHaveValue(db)
   const tools = sidebar.getByRole('navigation', { name: 'Database tools' })
   const sql = tools.getByRole('link', { name: 'SQL query', exact: true })
   await expect(sql).toHaveAttribute('href', dbPath(db, 'console') + scope)
@@ -17,6 +41,8 @@ test('sidebar database search, scoped tools, resizing and mobile navigation', as
   const more = sidebar.locator('details.advanced-navigation')
   await expect(more.getByRole('link')).toHaveCount(0)
   await more.locator('summary').click()
+  await expect(more.locator('a[href^="/server"]')).toHaveCount(0)
+  await expect(more.getByRole('link', { name: 'Database actions' })).toHaveAttribute('href', dbPath(db, 'operations') + scope)
   await expect(more.getByRole('link', { name: 'Relationships' })).toHaveAttribute('href', dbPath(db, 'relationships') + scope)
 
   const handle = page.getByRole('separator', { name: 'Sidebar width' })

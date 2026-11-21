@@ -27,6 +27,10 @@ export const useCatalogStore = defineStore('catalog', {
     path(path: string): string {
       return withSchema(path, this.schema, this.schemaAware)
     },
+    tablesFor(db: string): TableInfo[] {
+      const path = this.path(`/api/databases/${encodeURIComponent(db)}/tables`)
+      return this.tablesPath === path ? this.tables : []
+    },
     /** Initial readers of the same database and schema share the current catalog. */
     async ensureTables(db: string): Promise<void> {
       const path = this.path(`/api/databases/${encodeURIComponent(db)}/tables`)

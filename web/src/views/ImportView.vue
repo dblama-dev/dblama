@@ -246,7 +246,7 @@ let columnsID = 0
 const db = computed(() => String(route.params.db ?? ''))
 
 const tableOptions = computed<SelectOption[]>(() =>
-  catalog.tables
+  catalog.tablesFor(db.value)
     .filter((item) => !item.isView)
     .map((item) => ({ label: item.name, value: item.name })),
 )
@@ -297,7 +297,7 @@ watch([db, () => catalog.schema, () => route.query?.table], async (_value, _old,
   stop(); table.value = null
   const requested = route.query?.table
   await catalog.fetchTables(db.value)
-  if (!stale && typeof requested === 'string' && catalog.tables.some(item => item.name === requested && !item.isView)) table.value = requested
+  if (!stale && typeof requested === 'string' && tableOptions.value.some(item => item.value === requested)) table.value = requested
 }, { immediate: true })
 watch([db, () => catalog.schema, table], async () => {
   const id = ++columnsID; columns.value = []; columnsError.value = ''

@@ -31,12 +31,14 @@ import { UiAlert, UiButton, UiInput, UiSelect } from '../ui'
 import UiIcon from './UiIcon.vue'
 import { api } from '../api/client'
 import { useSessionStore } from '../stores/session'
+import { useCatalogStore } from '../stores/catalog'
 import { createDatabase, dropDatabase, renameDatabase, validDatabaseName, type DatabaseMetadata } from '../lib/databaseOps'
 
 const props = defineProps<{ db?: string }>()
 const emit = defineEmits<{ changed: []; renamed: [name: string]; dropped: [name: string] }>()
 const { t } = useI18n()
 const session = useSessionStore()
+const catalog = useCatalogStore()
 const postgres = computed(() => session.sessionInfo?.driver?.flavor === 'postgres')
 const fieldID = `database-name-${useId()}`
 const mode = ref<'create' | 'rename' | 'drop' | null>(null)
@@ -65,6 +67,7 @@ async function submit(): Promise<void> {
     if (mode.value === 'create') await createDatabase(name.value, collation.value ?? '')
     else if (mode.value === 'rename' && props.db) { await renameDatabase(props.db, name.value); emit('renamed', name.value) }
     else if (mode.value === 'drop' && props.db) { await dropDatabase(props.db); emit('dropped', props.db) }
+    catalog.databaseRevision++
     mode.value = null; emit('changed')
   } catch (e) { error.value = e instanceof Error ? e.message : String(e) }
   finally { busy.value = false }

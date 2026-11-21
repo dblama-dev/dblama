@@ -3,9 +3,20 @@ package api
 import (
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/hitslab/db-manager/server/internal/driver"
 	"github.com/hitslab/db-manager/server/internal/session"
 )
+
+func (s *apiServer) registerSchemaRoutes(r chi.Router, prefix string) {
+	r.Get(prefix+"/schemas", s.handleSchemasList)
+	r.Get(prefix+"/sequences", s.handleSequencesList)
+	r.Post(prefix+"/sequences", s.handleSequenceCreate)
+	r.Route(prefix+"/sequences/{name}", func(seq chi.Router) {
+		seq.Delete("/", s.handleSequenceDrop)
+		seq.Patch("/", s.handleSequenceUpdate)
+	})
+}
 
 // requestSchema binds schema to the request, including console and transfer
 // routes. No mutable session-wide selection is changed.
@@ -34,7 +45,7 @@ func sequenceAware(w http.ResponseWriter, r *http.Request) (driver.SequenceManag
 	return sm, true
 }
 
-// handleSchemasList lists the schemas of the login database.
+// handleSchemasList lists the schemas of the request's database.
 func (s *apiServer) handleSchemasList(w http.ResponseWriter, r *http.Request) {
 	sess, _ := session.FromContext(r.Context())
 	sa, ok := sess.Driver.(driver.SchemaAware)

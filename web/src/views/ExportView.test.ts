@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import { defineComponent, h, nextTick } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { UiAlert, UiButton, UiCheckbox, UiNotificationProvider, UiSelect } from '../ui'
+import { UiButton, UiCheckbox, UiNotificationProvider, UiSelect } from '../ui'
 
 import type { TableInfo } from '../api/types'
 import i18n from '../i18n'
@@ -53,8 +53,9 @@ function exportRes(status = 200, filename = 'dump.sql'): Response {
 function mockFetch(exportResponse: Response): ReturnType<typeof vi.fn> {
   return vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
     const url = String(input)
-    if (url.endsWith('/tables')) return jsonRes(200, { tables })
-    if (url.endsWith('/export')) return exportResponse
+    const path = url.split('?')[0]
+    if (path?.endsWith('/tables')) return jsonRes(200, { tables })
+    if (path?.endsWith('/export')) return exportResponse
     throw new Error(`unexpected url: ${url}`)
   })
 }
@@ -219,15 +220,23 @@ describe('ExportView', () => {
     expect(body).toEqual({ format: 'sql', mode: 'all', tables: [], includeViews: true, dropIfExists: true, ifNotExists: false, gzip: true })
   })
 
-  it('warns and disables submit when the selected db differs from the login db', async () => {
-    routeState.db = 'otherdb'
-    useSessionStore().sessionInfo!.driver.flavor = 'postgres'
+  it.each([null, 'mydb'])('exports from the selected PostgreSQL database with login database %s', async loginDatabase => {
+    routeState.db = 'Other DB'
+    const info = useSessionStore().sessionInfo!
+    info.driver.flavor = 'postgres'
+    info.database = loginDatabase
+    const catalog = useCatalogStore()
+    catalog.schemaAware = true
+    catalog.schema = 'Other Schema'
     const wrapper = mountView(pinia)
     await flushPromises()
 
-    const view = wrapper.findComponent(ExportView)
-    expect(view.findComponent(UiAlert).text()).toContain('текущей базы подключения')
-    expect(view.findComponent(UiButton).attributes('disabled')).toBeDefined()
+    const submit = wrapper.get('[data-testid="export-submit"]')
+    expect(submit.attributes('disabled')).toBeUndefined()
+    await submit.trigger('click')
+    await flushPromises()
+    expect(fetchMock).toHaveBeenCalledWith('/api/databases/Other%20DB/export?schema=Other%20Schema', expect.objectContaining({ method: 'POST' }))
+    expect(URL.createObjectURL).toHaveBeenCalled()
   })
 
   it('preselects a route table and permits another MySQL database', async () => {
@@ -237,6 +246,25 @@ describe('ExportView', () => {
     expect(view.find('[data-testid="export-submit"]').attributes('disabled')).toBeUndefined()
     await view.find('[data-testid="export-submit"]').trigger('click'); await flushPromises()
     expect(JSON.parse(String(fetchMock.mock.calls[1][1].body)).tables).toEqual(['orders'])
+  })
+
+  it('does not list tables from the previous database if the selected database cannot list them', async () => {
+    useSessionStore().sessionInfo!.driver.flavor = 'postgres'
+    const catalog = useCatalogStore()
+    catalog.schemaAware = true
+    catalog.schema = 'public'
+    await catalog.fetchTables('mydb')
+    routeState.db = 'restricted'
+    routeState.table = 'orders'
+    fetchMock.mockResolvedValueOnce(jsonRes(403, { error: { code: 'forbidden', message: 'permission denied' } }))
+    const wrapper = mountView(pinia)
+    await flushPromises()
+    const view = wrapper.findComponent(ExportView)
+    expect(view.text()).not.toContain('orders')
+    await view.find('[data-testid="export-submit"]').trigger('click')
+    await flushPromises()
+    const request = fetchMock.mock.calls.find(([url]) => url === '/api/databases/restricted/export?schema=public')
+    expect(JSON.parse(String(request?.[1].body)).tables).toEqual([])
   })
 
   it('reports a server error envelope as a notification', async () => {

@@ -12,7 +12,7 @@ import (
 )
 
 func (d *PostgresDriver) prepareViewExport(ctx context.Context, selected []string) ([]string, []dump.View, error) {
-	infos, err := d.ListTables(ctx, d.loginDB)
+	infos, err := d.ListTables(ctx, d.database)
 	if err != nil {
 		return nil, nil, err
 	}

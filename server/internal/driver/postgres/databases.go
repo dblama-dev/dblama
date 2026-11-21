@@ -8,7 +8,6 @@ import (
 	"github.com/hitslab/db-manager/server/internal/driver"
 	"github.com/hitslab/db-manager/server/internal/sqlgen"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/stdlib"
 )
 
 var _ driver.DatabaseManager = (*PostgresDriver)(nil)
@@ -24,27 +23,17 @@ func validDatabase(name string) error {
 	return nil
 }
 
-// adminConnection obtains credentials from the pool's existing pgx config and
-// creates a separate short-lived connection to a database other than target.
-// No credentials are persisted on the driver or returned in errors.
+// adminConnection creates a short-lived maintenance connection with the
+// session's original connection settings and credentials.
 func (d *PostgresDriver) adminConnection(ctx context.Context, target string) (*pgx.Conn, error) {
-	conn, err := d.db.Conn(ctx)
-	if err != nil {
-		return nil, err
+	s := d.session
+	s.mu.Lock()
+	if s.scopes == nil {
+		s.mu.Unlock()
+		return nil, errSessionClosed
 	}
-	var cfg *pgx.ConnConfig
-	err = conn.Raw(func(raw any) error {
-		c, ok := raw.(*stdlib.Conn)
-		if !ok {
-			return fmt.Errorf("unexpected PostgreSQL connection")
-		}
-		cfg = c.Conn().Config().Copy()
-		return nil
-	})
-	_ = conn.Close()
-	if err != nil {
-		return nil, err
-	}
+	cfg := s.config.Copy()
+	s.mu.Unlock()
 	cfg.Database = "postgres"
 	if target == "postgres" {
 		cfg.Database = "template1"

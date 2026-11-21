@@ -7,24 +7,12 @@
     <div class="db-page-head db-view__heading">
       <h2 class="db-section-title">{{ t('tree.tables') }}</h2>
       <div class="db-toolbar">
-        <ui-button class="catalog-desktop-action" size="small" tag="a" :aria-label="t('relationships.title')" :title="t('relationships.title')" :href="catalog.path('/db/' + encodeURIComponent(db) + '/relationships')"
+        <ui-button size="small" tag="a" :aria-label="t('relationships.title')" :title="t('relationships.title')" :href="catalog.path('/db/' + encodeURIComponent(db) + '/relationships')"
           @click.exact.prevent="router.push(catalog.path('/db/' + encodeURIComponent(db) + '/relationships'))">
           <UiIcon name="network" /><span>{{ t('relationships.title') }}</span>
         </ui-button>
-        <ui-button class="catalog-desktop-action" data-database-actions size="small" :aria-label="t('databaseOps.databaseActions')" :title="t('databaseOps.databaseActions')" :aria-expanded="showDatabaseActions" aria-controls="database-operations"
-          @click="showDatabaseActions = !showDatabaseActions">
-          <UiIcon name="settings" /><span>{{ t('databaseOps.databaseActions') }}</span>
-        </ui-button>
-        <ui-dropdown :options="databaseMenu" @select="runDatabaseAction">
-          <ui-button size="small" class="catalog-mobile-action" :aria-label="t('workspace.moreDatabaseActions')">
-            <UiIcon name="more" />{{ t('workspace.more') }}
-          </ui-button>
-        </ui-dropdown>
         <ui-button size="small" type="primary" @click="newTable"><UiIcon name="plus" />{{ t('tree.newTable') }}</ui-button>
       </div>
-    </div>
-    <div v-show="showDatabaseActions" id="database-operations" class="db-panel db-view__operations">
-      <DatabaseActions :db="db" @changed="changed" @renamed="renamed" @dropped="dropped" />
     </div>
     <section class="db-panel catalog-grid" :aria-label="t('workspace.catalog')">
       <div class="db-view__controls db-toolbar">
@@ -110,7 +98,6 @@ import { UiAlert, UiButton, UiDropdown, UiPopconfirm } from '../ui'
 import UiIcon from '../components/UiIcon.vue'
 import CatalogHeader from '../components/CatalogHeader.vue'
 import { useSessionStore } from '../stores/session'
-import DatabaseActions from '../components/DatabaseActions.vue'
 import TableTransfer from '../components/TableTransfer.vue'
 import { useCatalogStore } from '../stores/catalog'
 import {api} from '../api/client'
@@ -122,7 +109,6 @@ const driver = computed(() => session.sessionInfo?.driver)
 const route = useRoute(), router = useRouter(), catalog = useCatalogStore()
 const db = computed(() => String(route.params.db ?? ''))
 const selected = ref<string[]>([]), filter=ref(''),sort=ref('name'),busy=ref(false),error=ref('')
-const showDatabaseActions = ref(false)
 const tables = computed(() => catalog.tablesPath === catalog.path('/api/databases/' + encodeURIComponent(db.value) + '/tables') ? catalog.tables : [])
 const formatter = computed(() => new Intl.NumberFormat(locale.value))
 const hasDescription = computed(() => tables.value.some(table => table.comment))
@@ -141,14 +127,6 @@ const visibleTables = computed(() => {
   return tables.value.filter(table => [table.name, table.comment].some(text => text?.toLocaleLowerCase().includes(query)))
     .sort((a,b) => (sort.value === 'name' ? 0 : Number(b[sort.value as 'rows'|'sizeBytes']) - Number(a[sort.value as 'rows'|'sizeBytes'])) || a.name.localeCompare(b.name))
 })
-const databaseMenu = computed(() => [
-  { key: 'relationships', label: t('relationships.title') },
-  { key: 'operations', label: t('databaseOps.databaseActions') },
-])
-function runDatabaseAction(key: string) {
-  if (key === 'operations') showDatabaseActions.value = !showDatabaseActions.value
-  if (key === 'relationships') void router.push(catalog.path('/db/' + encodeURIComponent(db.value) + '/relationships'))
-}
 const rowActions = computed(() => [
   { key: 'structure', label: t('table.structure') },
   { key: 'console', label: t('navigationWorkflows.console') },
@@ -173,9 +151,6 @@ async function bulk(action:'truncate'|'drop'):Promise<void>{
  catch(err){error.value=err instanceof Error?err.message:String(err);await catalog.invalidate(db.value)}finally{busy.value=false}
 }
 async function load(): Promise<void> { selected.value=[]; await catalog.fetchTables(db.value) }
-async function changed(): Promise<void> { catalog.databaseRevision++; await load() }
-function renamed(name:string): void { void router.replace(catalog.path(`/db/${encodeURIComponent(name)}`)) }
-function dropped(): void { void router.replace('/server') }
 function openTable(name: string, view = 'data', action?: 'insert'): void {
   const query = new URLSearchParams({ view })
   if (action) query.set('action', action)
@@ -185,7 +160,6 @@ function newTable(): void { openTable('_new','structure') }
 watch([db, () => catalog.schema], () => {
   filter.value = ''
   error.value = ''
-  showDatabaseActions.value = false
   void load()
 }, { immediate: true })
 </script>
@@ -204,7 +178,7 @@ watch([db, () => catalog.schema], () => {
 .db-view__table :deep(.number-cell) { text-align: right; white-space: nowrap; }
 td.number-cell { font: 12px var(--db-mono); color: var(--db-muted); }
 .tools-cell { width: 74px; }
-.catalog-mobile-action, .catalog-mobile-meta { display: none; }
+.catalog-mobile-meta { display: none; }
 .sr-actions { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .db-view__quick, .db-view__bulk { display: flex; align-items: center; gap: 5px; }
 .db-view__selection:has(> *) {
@@ -219,15 +193,11 @@ td.number-cell { font: 12px var(--db-mono); color: var(--db-muted); }
 .db-view__quick { justify-content: end; }
 .db-view__empty { text-align: center; padding: 22px; }
 .db-view__empty button { margin-inline-start: 8px; }
-.db-view__operations { padding: 13px; }
 @media(max-width:719px) {
   .db-view__controls { padding: 8px; gap: 4px; }
   .db-view__bulk { column-gap: 16px; }
   .catalog-sort select { max-width: 95px; }
-  .db-view__heading { flex-wrap: nowrap; }
-  .db-view__heading .db-toolbar { gap: 5px; justify-content: flex-end; }
-  .catalog-desktop-action { display: none; }
-  .catalog-mobile-action { display: inline-flex; }
+  .db-view__heading .db-toolbar { gap: 5px; }
   .catalog-description, .db-view__table :deep(.number-cell) { display:none; }
   .catalog-name-cell { width: 100%; }
   .table-name { align-items: start; }

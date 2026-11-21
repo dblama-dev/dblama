@@ -10,9 +10,12 @@ export const databaseTools = { console: 'terminal', search: 'search', import: 'u
 
 export const objectIcons = { views: 'eye', triggers: 'activity', routines: 'code', events: 'history', partitions: 'schema' } as const
 
-export function objectDestinations(db: string, caps?: Caps): Destination[] {
+export function databaseDestinations(db: string, caps?: Caps): Destination[] {
   const base = '/db/' + encodeURIComponent(db)
-  const result = [{label: 'relationships.title', icon: 'network', path: base + '/relationships'}]
+  const result = [
+    {label: 'databaseOps.databaseActions', icon: 'settings', path: base + '/operations'},
+    {label: 'relationships.title', icon: 'network', path: base + '/relationships'},
+  ]
   for (const kind of Object.keys(objectIcons) as (keyof typeof objectIcons)[]) {
     if (caps?.[kind]) result.push({label: 'objects.' + kind, icon: objectIcons[kind], path: base + '/objects/' + kind})
   }

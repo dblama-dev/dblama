@@ -17,7 +17,7 @@
         <fieldset :disabled="busy || catalog.loading">
           <legend>{{ t('searchWorkflows.tables') }}</legend>
           <div class="search-view__tables">
-            <label v-for="table in catalog.tables" :key="table.name">
+            <label v-for="table in tables" :key="table.name">
               <input
                 v-model="selected"
                 type="checkbox"
@@ -27,7 +27,7 @@
               {{ table.name }}
             </label>
           </div>
-          <p v-if="!catalog.loading && !catalog.tables.length" class="tool-note">
+          <p v-if="!catalog.loading && !tables.length" class="tool-note">
             {{ t('searchWorkflows.noCatalog') }}
           </p>
         </fieldset>
@@ -112,6 +112,7 @@ import { searchDatabase, type SearchError, type SearchProgress, type SearchResul
 const route = useRoute(), router = useRouter(), catalog = useCatalogStore()
 const { t } = useI18n()
 const db = computed(() => String(route.params.db ?? ''))
+const tables = computed(() => catalog.tablesFor(db.value))
 const selected = ref<string[]>([]), text = ref(''), error = ref(''), busy = ref(false)
 const status = ref<'idle'|'running'|'complete'|'cancelled'>('idle')
 const results = ref<SearchResult[]>([]), errors = ref<SearchError[]>([])
@@ -142,14 +143,14 @@ watch([db, () => catalog.schema, () => catalog.schemaAware, () => route.query.ta
   pendingContext = { path: catalog.path(`/api/databases/${encodeURIComponent(db.value)}/tables`), table, selection: selected.value }
   void catalog.fetchTables(db.value)
 }, { immediate: true })
-watch(() => [catalog.loading, catalog.tablesPath, catalog.tables, catalog.error], () => {
+watch(() => [catalog.loading, catalog.tablesPath, tables.value, catalog.error], () => {
   const context = pendingContext
   if (!context || catalog.loading || catalog.error || catalog.tablesPath !== context.path) return
   pendingContext = undefined
   // Another loader may supersede our request in the same scope. Initialize
   // from its successful catalog once, without resetting manual selections.
   if (selected.value !== context.selection) return
-  if (context.table && catalog.tables.some(item => item.name === context.table)) selected.value = [context.table]
+  if (context.table && tables.value.some(item => item.name === context.table)) selected.value = [context.table]
 })
 onBeforeUnmount(() => { pendingContext = undefined; stop(); run++ })
 </script>

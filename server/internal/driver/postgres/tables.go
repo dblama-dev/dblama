@@ -73,7 +73,7 @@ func (d *PostgresDriver) CurrentSchema() string {
 var _ driver.SchemaAware = (*PostgresDriver)(nil)
 
 // ListTables returns the tables and views of the current schema of the
-// connected database, ordered by name. The pool is bound to the login
+// connected database, ordered by name. The pool is bound to one
 // database, so db selects nothing on PostgreSQL — it is validated
 // non-empty to keep the driver contract uniform, and the schema
 // (SetSchema) picks the object set.

@@ -51,6 +51,7 @@ const routeLabels: Record<string, string> = {
   server: 'server.title', 'server-users': 'admin.users', 'server-processes': 'admin.monitor',
   'db-console': 'navigationWorkflows.console', 'db-search': 'navigationWorkflows.search',
   'db-export': 'navigationWorkflows.export', 'db-import': 'navigationWorkflows.import',
+  'db-operations': 'databaseOps.databaseActions',
   'db-relationships': 'relationships.title', 'db-partitions': 'navigationWorkflows.partitions',
 }
 const crumbs = computed<Crumb[]>(() => {

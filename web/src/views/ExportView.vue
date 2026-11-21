@@ -1,9 +1,6 @@
 <template>
   <section class="export-view db-page tool-workspace">
     <ToolHeading icon="download" :title="t('export.title')" />
-    <ui-alert v-if="dbMismatch" type="warning" data-testid="export-db-mismatch">
-      {{ t('export.dbMismatch') }}
-    </ui-alert>
     <div class="tool-card export-view__form">
       <div class="tool-card__body tool-stack">
         <div class="tool-fields">
@@ -76,17 +73,15 @@ import UiIcon from '../components/UiIcon.vue'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
-import { UiAlert, UiButton, UiCheckbox, UiSelect, useNotification, type SelectOption } from '../ui'
+import { UiButton, UiCheckbox, UiSelect, useNotification, type SelectOption } from '../ui'
 
 import type { ExportRequest } from '../api/types'
 import { downloadExport } from '../lib/download'
 import { useCatalogStore } from '../stores/catalog'
-import { useSessionStore } from '../stores/session'
 
 const { t } = useI18n()
 const route = useRoute()
 const catalog = useCatalogStore()
-const session = useSessionStore()
 const notification = useNotification()
 
 const format = ref('sql')
@@ -100,14 +95,13 @@ const exporting = ref(false)
 const db = computed(() => String(route.params.db ?? ''))
 const includeViews = ref(true)
 const isSql = computed(() => format.value === 'sql')
-const dbMismatch = computed(() => session.sessionInfo?.driver.flavor === 'postgres' && session.sessionInfo?.database !== db.value)
 // Delimited formats dump one single-file table; sql may take the whole
 // database (empty selection).
 const submitDisabled = computed(
-  () => dbMismatch.value || exporting.value || (!isSql.value && selected.value.length !== 1),
+  () => exporting.value || (!isSql.value && selected.value.length !== 1),
 )
 
-const tableOptions = computed(() => catalog.tables.filter((table) => !table.isView || (isSql.value && mode.value !== 'data' && includeViews.value)))
+const tableOptions = computed(() => catalog.tablesFor(db.value).filter((table) => !table.isView || (isSql.value && mode.value !== 'data' && includeViews.value)))
 
 watch([format, mode, includeViews, tableOptions], () => {
   const valid = new Set(tableOptions.value.map(table => table.name))
