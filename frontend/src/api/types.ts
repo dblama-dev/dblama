@@ -25,6 +25,7 @@ export interface Caps {
   partitions: boolean
   sequences: boolean
   schemas: boolean
+  roles?: boolean
   users: boolean
   monitor: boolean
   moveCopy: boolean

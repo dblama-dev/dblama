@@ -59,6 +59,8 @@ func NewRouter(cfg config.Config, sessions *session.Store, drivers *driver.Regis
 			authed.Get("/databases", s.handleDatabases)
 			s.registerDatabaseRoutes(authed)
 			s.registerAdminRoutes(authed)
+			authed.Get("/roles", s.rolesList)
+			authed.Post("/roles", s.rolesChange)
 			authed.Post("/query/{queryID}/cancel", s.handleCancel)
 			authed.Post("/query", s.handleExplain)
 			authed.Post("/databases/{db}/query", s.handleQuery)
@@ -67,6 +69,8 @@ func NewRouter(cfg config.Config, sessions *session.Store, drivers *driver.Regis
 			s.registerSchemaRoutes(authed, "")
 
 			scoped := authed.With(requestDatabase)
+			scoped.Get("/databases/{db}/role-privileges", s.rolePrivileges)
+			scoped.Post("/databases/{db}/role-privileges", s.rolePrivilegeChange)
 			s.registerObjectRoutes(scoped)
 			s.registerForeignKeyRoutes(scoped)
 			s.registerSchemaRoutes(scoped, "/databases/{db}")

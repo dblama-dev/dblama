@@ -2,6 +2,8 @@
 
 dblama is a self-hosted web interface for MySQL, MariaDB and PostgreSQL. A single Go executable serves the Vue interface. Sign in with your database credentials to browse tables, edit rows and schemas, run SQL, and import or export data.
 
+For PostgreSQL connections, open **Server → Roles and privileges** to manage login roles, passwords, and group membership. Select a database, schema, or table to inspect its grants and change direct privileges using your current connection.
+
 ![The books table in dblama showing eight books with their authors, genres, prices, and stock levels](docs/screenshots/table-browser.png)
 
 ## Quick start

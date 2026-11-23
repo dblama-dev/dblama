@@ -20,7 +20,7 @@ const requestBodyLimit = 1 << 20
 // client problem and map to bad_request; everything else is a driver
 // failure on an authenticated connection and maps to driver_error.
 func classifyDriverErr(err error) (int, string) {
-	if errors.Is(err, sqlgen.ErrEmptyIdentifier) || errors.Is(err, driver.ErrDatabasePatternsDisabled) {
+	if errors.Is(err, sqlgen.ErrEmptyIdentifier) || errors.Is(err, driver.ErrDatabasePatternsDisabled) || errors.Is(err, driver.ErrRoleInput) {
 		return http.StatusBadRequest, "bad_request"
 	}
 	return http.StatusInternalServerError, "driver_error"

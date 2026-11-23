@@ -1,3 +1,4 @@
+import { roleMessages } from './roles'
 import { searchWorkflowMessages } from './searchWorkflows'
 import { sqlWorkflowMessages } from './sqlWorkflows'
 import { rowWorkflowMessages } from './rowWorkflows'
@@ -24,7 +25,7 @@ const i18n = createI18n({
   legacy: false,
   locale: stored === 'en' ? 'en' : 'ru',
   fallbackLocale: 'en',
-  messages: { ru: { ...ru, ...adminMessages.ru, ...objectMessages.ru, ...databaseMessages.ru, ...foreignKeyMessages.ru, ...sqlWorkflowMessages.ru, ...rowWorkflowMessages.ru, ...navigationWorkflowMessages.ru, ...transferWorkflowMessages.ru, ...searchWorkflowMessages.ru }, en: { ...en, ...adminMessages.en, ...objectMessages.en, ...databaseMessages.en, ...foreignKeyMessages.en, ...sqlWorkflowMessages.en, ...rowWorkflowMessages.en, ...navigationWorkflowMessages.en, ...transferWorkflowMessages.en, ...searchWorkflowMessages.en } },
+  messages: { ru: { roles: roleMessages.ru, ...ru, ...adminMessages.ru, ...objectMessages.ru, ...databaseMessages.ru, ...foreignKeyMessages.ru, ...sqlWorkflowMessages.ru, ...rowWorkflowMessages.ru, ...navigationWorkflowMessages.ru, ...transferWorkflowMessages.ru, ...searchWorkflowMessages.ru }, en: { roles: roleMessages.en, ...en, ...adminMessages.en, ...objectMessages.en, ...databaseMessages.en, ...foreignKeyMessages.en, ...sqlWorkflowMessages.en, ...rowWorkflowMessages.en, ...navigationWorkflowMessages.en, ...transferWorkflowMessages.en, ...searchWorkflowMessages.en } },
 })
 
 watch(

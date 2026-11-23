@@ -41,6 +41,7 @@ type Caps struct {
 	Partitions        bool `json:"partitions"`
 	Sequences         bool `json:"sequences"`
 	Schemas           bool `json:"schemas"`
+	Roles             bool `json:"roles,omitempty"`
 	Users             bool `json:"users"`
 	Monitor           bool `json:"monitor"`
 	MoveCopy          bool `json:"moveCopy"`

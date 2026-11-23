@@ -298,11 +298,7 @@ func parseVersion(banner string) string {
 	return strings.TrimSpace(banner)
 }
 
-// postgresCaps fills the caps for the connected server: views, triggers,
-// routines and procedures, monitoring, comments, upsert (ON CONFLICT),
-// sequences and schemas are supported. Events and users are MySQL-only
-// concepts; partitions, move/copy database and descending indexes stay
-// off in v0.1 (phase 4 plan).
+// postgresCaps advertises the operations implemented by this driver.
 func postgresCaps() driver.Caps {
 	return driver.Caps{
 		Views:      true,
@@ -310,6 +306,7 @@ func postgresCaps() driver.Caps {
 		Routines:   true,
 		Procedures: true,
 		Monitor:    true,
+		Roles:      true,
 		Comments:   true,
 		Upsert:     true,
 		Sequences:  true,

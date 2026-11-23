@@ -41,7 +41,7 @@ const catalog = useCatalogStore()
 const driver = computed(() => store.sessionInfo?.driver)
 interface Crumb { label: string; to?: string; identifier?: boolean }
 const routeLabels: Record<string, string> = {
-  server: 'server.title', 'server-users': 'admin.users', 'server-processes': 'admin.monitor',
+  server: 'server.title', 'server-roles': 'roles.title', 'server-users': 'admin.users', 'server-processes': 'admin.monitor',
   'db-console': 'navigationWorkflows.console', 'db-search': 'navigationWorkflows.search',
   'db-export': 'navigationWorkflows.export', 'db-import': 'navigationWorkflows.import',
   'db-operations': 'databaseOps.databaseActions',

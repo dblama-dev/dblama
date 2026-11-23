@@ -24,6 +24,7 @@ export function databaseDestinations(db: string, caps?: Caps): Destination[] {
 
 export function serverDestinations(caps?: Caps): Destination[] {
   const result: Destination[] = []
+  if (caps?.roles) result.push({label: 'roles.title', icon: 'user', path: '/server/roles'})
   if (caps?.users) result.push({label: 'admin.users', icon: 'user', path: '/server/users'})
   if (caps?.monitor) result.push({label: 'admin.monitor', icon: 'activity', path: '/server/processes'})
   return result
