@@ -45,6 +45,7 @@ dblama reads these settings at startup. Unset or empty variables use the default
 | --- | --- | --- |
 | `LISTEN` | `:8080` | HTTP listen address. The default binds to all interfaces. Use `127.0.0.1:8080` for local access only. |
 | `SESSION_TTL` | `30m` | How long a session can stay idle. Accepts Go durations such as `15m` or `2h`. |
+| `SESSION_COOKIE_SECURE` | `false` | Set to `true` for HTTPS deployments to restrict session cookies to secure connections. Over HTTP, database credentials and session cookies travel unencrypted. |
 | `LOGIN_RATE_LIMIT` | `10/min` | Maximum failed logins per client IP. Use a positive count per minute (`10/min`) or second (`2/s`). |
 | `TRUSTED_SERVERS` | Empty | Comma-separated database targets, for example `db.internal:5432,mysql.internal:3306`. An empty value allows any reachable database server. |
 

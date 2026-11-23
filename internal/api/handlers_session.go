@@ -78,7 +78,7 @@ func (s *apiServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Name:     SessionCookieName,
 		Value:    sess.ID,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   s.cfg.SessionCookieSecure,
 		SameSite: http.SameSiteStrictMode,
 		Path:     "/",
 	})

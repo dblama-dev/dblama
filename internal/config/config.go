@@ -16,10 +16,11 @@ type Rate struct {
 
 // Config holds all server settings.
 type Config struct {
-	Listen         string
-	SessionTTL     time.Duration
-	LoginRateLimit Rate
-	TrustedServers []string
+	Listen              string
+	SessionTTL          time.Duration
+	SessionCookieSecure bool
+	LoginRateLimit      Rate
+	TrustedServers      []string
 }
 
 // Load reads configuration via getenv, applying defaults for unset variables
@@ -40,6 +41,13 @@ func Load(getenv func(string) string) (Config, error) {
 			return Config{}, fmt.Errorf("invalid SESSION_TTL %q: %w", v, err)
 		}
 		cfg.SessionTTL = d
+	}
+	if v := getenv("SESSION_COOKIE_SECURE"); v != "" {
+		secure, err := strconv.ParseBool(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid SESSION_COOKIE_SECURE %q: %w", v, err)
+		}
+		cfg.SessionCookieSecure = secure
 	}
 	if v := getenv("LOGIN_RATE_LIMIT"); v != "" {
 		r, err := parseRate(v)

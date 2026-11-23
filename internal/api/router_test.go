@@ -491,6 +491,16 @@ func loginBody(host, port, database string) string {
 	return string(b)
 }
 
+func TestLoginHandler_SecureCookieEnabled(t *testing.T) {
+	cfg := config.Config{LoginRateLimit: testRate, SessionCookieSecure: true}
+	srv := httptest.NewServer(newTestRouter(t, cfg, stubConnectOK(nil, &stubDriver{})))
+	t.Cleanup(srv.Close)
+	resp := apiRequest(t, srv.Client(), http.MethodPost, srv.URL+"/api/session", loginBody("dbhost", "", "appdb"), "")
+	if !sessionCookie(t, resp).Secure {
+		t.Error("expected Secure on the session cookie")
+	}
+}
+
 func TestLoginHandler_Success(t *testing.T) {
 	var gotCfg []driver.ConnConfig
 	fake := &stubDriver{
@@ -512,8 +522,8 @@ func TestLoginHandler_Success(t *testing.T) {
 	if cookie.Value == "" {
 		t.Fatal("session cookie value is empty")
 	}
-	if !cookie.HttpOnly || !cookie.Secure || cookie.Path != "/" {
-		t.Errorf("cookie attributes = HttpOnly:%v Secure:%v Path:%q, want all true/true,\"/\"",
+	if !cookie.HttpOnly || cookie.Secure || cookie.Path != "/" {
+		t.Errorf("cookie attributes = HttpOnly:%v Secure:%v Path:%q, want true/false,\"/\"",
 			cookie.HttpOnly, cookie.Secure, cookie.Path)
 	}
 	if cookie.SameSite != http.SameSiteStrictMode {
